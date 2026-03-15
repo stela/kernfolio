@@ -204,7 +204,7 @@ For any candidate allocation, compute **effective number of independent bets**: 
 | Database Access | Spring Data JPA + Hibernate | (bundled) | PostgreSQL dialect |
 | HTTP Client | Spring WebClient (WebFlux) | (bundled) | For calling Python service |
 | Resilience | Resilience4j | latest | Circuit breaker for Python service calls |
-| Migrations | Flyway | latest | SQL-based migrations |
+| Migrations | Liquibase | latest | YAML-based changelogs |
 | Build | Gradle (Kotlin DSL) | 8.x | |
 | Testing | JUnit 5, MockK, Testcontainers | latest | |
 
@@ -249,7 +249,7 @@ For any candidate allocation, compute **effective number of independent bets**: 
 ### 5.1 Core Tables
 
 ```sql
--- Flyway migration: V1__initial_schema.sql
+-- Liquibase changeset: 001-initial-schema
 
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
@@ -1011,7 +1011,7 @@ portfolio.yourdomain.com {
 
 **Goal**: A working portfolio optimizer with Black-Litterman and Markowitz.
 
-1. Project scaffolding: Gradle Kotlin DSL, Spring Boot, Docker Compose, Flyway migrations
+1. Project scaffolding: Gradle Kotlin DSL, Spring Boot, Docker Compose, Liquibase migrations
 2. Database schema (V1 migration)
 3. User entity + Spring Security (session-based login, admin/user roles)
 4. Admin panel: create users (invite-only)

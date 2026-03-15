@@ -6,9 +6,17 @@ plugins {
     id("io.spring.dependency-management")
 }
 
-java {
-    toolchain {
-        languageVersion = JavaLanguageVersion.of(21)
+// Override BOM versions ahead of next Spring Boot release (fix for CVE-2026-29062)
+// See: https://github.com/spring-projects/spring-boot/issues/49383
+extra["jackson.version"] = "3.1.0"
+extra["spring-framework.version"] = "7.0.6"
+
+configurations.all {
+    resolutionStrategy.eachDependency {
+        if (requested.group == "com.fasterxml.jackson.core" && requested.name == "jackson-annotations") {
+            useVersion("2.21")
+            because("Jackson 3.1.0 requires jackson-annotations 2.21")
+        }
     }
 }
 
@@ -20,23 +28,17 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("org.springframework.boot:spring-boot-starter-webflux")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
-    implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
+    implementation("tools.jackson.module:jackson-module-kotlin")
     implementation("org.jetbrains.kotlin:kotlin-reflect")
-    implementation("org.flywaydb:flyway-core")
-    implementation("org.flywaydb:flyway-database-postgresql")
+    implementation("org.liquibase:liquibase-core")
     runtimeOnly("org.postgresql:postgresql")
 
     developmentOnly("org.springframework.boot:spring-boot-devtools")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.security:spring-security-test")
-    testImplementation("io.mockk:mockk:1.13.16")
-}
-
-kotlin {
-    compilerOptions {
-        freeCompilerArgs.addAll("-Xjsr305=strict")
-    }
+    testImplementation("io.mockk:mockk:1.14.9")
+    testRuntimeOnly("com.h2database:h2")
 }
 
 tasks.withType<Test> {
