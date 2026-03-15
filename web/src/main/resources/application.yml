@@ -1,0 +1,25 @@
+spring:
+  application:
+    name: kernfolio
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/kernfolio
+    username: ${DB_USER:kernfolio}
+    password: ${DB_PASSWORD:kernfolio}
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+
+  flyway:
+    locations: classpath:db/migration
+
+  thymeleaf:
+    cache: false
+
+optimizer:
+  base-url: ${OPTIMIZER_BASE_URL:http://localhost:8000}
+
+server:
+  port: 8080

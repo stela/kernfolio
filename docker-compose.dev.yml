@@ -1,0 +1,19 @@
+services:
+  yfinance-twin:
+    build: ./digital-twins/yfinance-fake
+    ports:
+      - "8081:8081"
+
+  frankfurter-twin:
+    build: ./digital-twins/frankfurter-fake
+    ports:
+      - "8082:8082"
+
+  web:
+    environment:
+      YFINANCE_BASE_URL: http://yfinance-twin:8081
+      FRANKFURTER_BASE_URL: http://frankfurter-twin:8082
+      SPRING_PROFILES_ACTIVE: dev
+    depends_on:
+      - yfinance-twin
+      - frankfurter-twin
