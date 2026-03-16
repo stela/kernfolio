@@ -42,6 +42,7 @@ A self-hosted web application that helps individual investors optimize their sto
 - **Python is stateless**: Fed all data in each REST request from Kotlin. No DB access from Python. Pure function: `(data) → (result)`
 - **Server-rendered UI**: Thymeleaf + HTMX + Alpine.js. No SPA, no npm, no build toolchain
 - **Security-first**: No inline scripts/styles. Self-hosted JS libraries. HTTP-only session cookies. Strict CSP headers
+- **Client-side portfolio values**: Absolute portfolio values (shares held, cost basis, total value) never leave the browser. Backend stores only tickers, percentage weights, views, and confidences. Discrete allocation is computed in the browser
 - **Multi-tenant**: PostgreSQL with row-level security. 10–50 concurrent users
 - **Phased rollout**: Feature flags control which optimization algorithms and UI features are available
 
@@ -99,12 +100,13 @@ A self-hosted web application that helps individual investors optimize their sto
 2. For chart data, separate `fetch()` calls hit `/api/**` JSON endpoints
 3. Both HTML and JSON endpoints authenticated via same Spring Security session cookie
 4. When optimization is requested:
-   a. Spring Boot loads portfolio positions + cached price history from PostgreSQL
-   b. Spring Boot assembles full payload (prices matrix, views, confidences, constraints)
+   a. Spring Boot loads portfolio positions (percentage weights, views, confidences) + cached price history from PostgreSQL
+   b. Spring Boot assembles payload (prices matrix, percentage weights, views, confidences, constraints) — no absolute portfolio values
    c. Spring Boot POSTs JSON payload to `http://optimizer:8000/optimize`
-   d. Python computes optimization, returns JSON result
-   e. Spring Boot stores result in `optimization_runs` table
-   f. Spring Boot renders result page via Thymeleaf (or returns JSON for chart endpoints)
+   d. Python computes optimization, returns JSON result (optimal weights + metrics, no discrete allocation)
+   e. Spring Boot stores result in `optimization_runs` table (weights and metrics only)
+   f. Spring Boot renders result page via Thymeleaf (weights, metrics, charts)
+   g. Browser JS computes discrete allocation (integer share counts, trade list) using locally-held total portfolio value and current prices fetched from a public API endpoint
 5. Market data refresh runs as a scheduled job (daily at 22:00 UTC)
 
 ### 2.3 Why Hybrid (Not Pure Java, Not Pure Python)
@@ -131,7 +133,7 @@ A self-hosted web application that helps individual investors optimize their sto
 5. Apply half-Kelly sizing: `f = 0.5 × Σ_posterior⁻¹ × μ_posterior`
 6. Project onto constraints (position bounds, sector limits, long-only)
 
-**User inputs per position**: Ticker, current shares, 5-year intrinsic value estimate (in local currency), confidence level (0–100%)
+**User inputs per position**: Ticker, current weight (%), 5-year intrinsic value estimate (in local currency), confidence level (0–100%). Share counts are entered in the browser but stay in localStorage — only percentage weights reach the backend.
 
 **System inputs**: Covariance matrix (from cached price history with Ledoit-Wolf shrinkage), market-cap weights (from yfinance), risk-free rate (from ECB data or hardcoded)
 
@@ -177,13 +179,13 @@ A self-hosted web application that helps individual investors optimize their sto
 
 **Input**: Daily close prices in EUR (converted from local currency), minimum 2 years, ideally 3–5 years.
 
-### 3.7 Discrete Allocation
+### 3.7 Discrete Allocation (Browser-Side)
 
-After computing continuous optimal weights, convert to integer share counts given the portfolio's total value.
+After the backend computes continuous optimal weights, the browser converts them to integer share counts using the user's locally-held total portfolio value and current prices.
 
-**Python**: `pypfopt.DiscreteAllocation(weights, latest_prices, total_portfolio_value=195000)`
+**Runs in browser JavaScript** (not Python). See §8.5 for the algorithm.
 
-Returns: `{ticker: num_shares}` and leftover cash.
+**Privacy**: The backend never sees `total_portfolio_value` or discrete share counts. These values exist only in the user's browser.
 
 ### 3.8 Correlation Analysis
 
@@ -246,7 +248,11 @@ For any candidate allocation, compute **effective number of independent bets**: 
 
 ## 5. Database Schema
 
-### 5.1 Core Tables
+### 5.1 Documentation Convention
+
+All tables and columns use PostgreSQL's `COMMENT ON` feature for persistent, queryable documentation. During implementation, the inline `--` comments in the SQL below are translated to `COMMENT ON TABLE` / `COMMENT ON COLUMN` statements in the Liquibase changesets. This keeps field semantics discoverable via `\d+` in psql or any SQL client, independent of application code.
+
+### 5.2 Core Tables
 
 ```sql
 -- Liquibase changeset: 001-initial-schema
@@ -289,17 +295,19 @@ CREATE TABLE portfolios (
 );
 
 -- Positions within a portfolio
+-- Absolute values (share counts, total value) stay in the browser.
+-- Backend stores only percentage weights and cost basis as a portfolio fraction.
 CREATE TABLE positions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     portfolio_id UUID NOT NULL REFERENCES portfolios(id) ON DELETE CASCADE,
     ticker VARCHAR(20) NOT NULL,         -- yfinance format: "4256.T", "3690.HK", "GOOG"
     name VARCHAR(100),                    -- Human-readable: "CYND Co., Ltd."
     currency CHAR(3) NOT NULL,            -- Original trading currency: "JPY", "HKD", "USD"
-    shares NUMERIC(12,4) NOT NULL,        -- Number of shares held
-    cost_basis_local NUMERIC(14,4),       -- Total cost in local currency
+    weight_pct NUMERIC(7,6) NOT NULL,     -- Current allocation as decimal (0.084000 = 8.4%)
+    cost_basis_pct NUMERIC(7,6),          -- Cost basis as fraction of portfolio value; enables % gain/loss without absolute amounts
     -- User's intrinsic value inputs:
     intrinsic_value_local NUMERIC(14,4),  -- 5-year IV per share in local currency
-    confidence_pct NUMERIC(5,4),          -- 0.0 to 1.0 (0% to 100%)
+    confidence_pct NUMERIC(5,4),          -- 0.0 to 1.0 (0% to 100%); maps to BL view uncertainty via Idzorek
     sector VARCHAR(50),                   -- For sector constraints
     notes TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -385,7 +393,7 @@ CREATE POLICY optimization_runs_user_isolation ON optimization_runs
     ));
 ```
 
-### 5.2 JSONB Structure for `optimization_runs.parameters`
+### 5.3 JSONB Structure for `optimization_runs.parameters`
 
 ```json
 {
@@ -404,17 +412,11 @@ CREATE POLICY optimization_runs_user_isolation ON optimization_runs
 }
 ```
 
-### 5.3 JSONB Structure for `optimization_runs.results`
+### 5.4 JSONB Structure for `optimization_runs.results`
 
 ```json
 {
   "optimized_weights": { "GOOG": 0.097, "AMZN": 0.091, "BRK.B": 0.091, ... },
-  "discrete_allocation": { "GOOG": 56, "AMZN": 82, "BRK.B": 32, ... },
-  "leftover_cash_eur": 1247.50,
-  "trades": [
-    { "ticker": "GOOG", "action": "BUY", "shares": 31, "estimated_eur": 8150 },
-    { "ticker": "CSU.TO", "action": "SELL", "shares": 5, "estimated_eur": 8050 }
-  ],
   "metrics": {
     "expected_annual_return": 0.108,
     "annual_volatility": 0.165,
@@ -428,6 +430,9 @@ CREATE POLICY optimization_runs_user_isolation ON optimization_runs
     { "name": "Insurance", "tickers": ["BRK.B","FFH"], "avg_correlation": 0.45, "effective_n": 1.38 }
   ]
 }
+```
+
+**Note**: Discrete allocation (`discrete_shares`, `leftover_cash`, `trades`) is NOT stored server-side. It is computed ephemerally in the browser using the user's locally-held total portfolio value and current prices. Past runs display weights and metrics only; discrete allocation is always recomputed from current prices.
 ```
 
 ---
@@ -483,12 +488,6 @@ CREATE POLICY optimization_runs_user_isolation ON optimization_runs
     "AMZN": "Technology",
     "BRK.B": "Financials"
   },
-  "total_portfolio_value": 195000,
-  "latest_prices": {
-    "GOOG": 302.0,
-    "AMZN": 200.0,
-    "BRK.B": 490.0
-  },
   "covariance_method": "ledoit_wolf"
 }
 ```
@@ -498,8 +497,6 @@ CREATE POLICY optimization_runs_user_isolation ON optimization_runs
 ```json
 {
   "weights": { "GOOG": 0.097, "AMZN": 0.091, ... },
-  "discrete_shares": { "GOOG": 56, "AMZN": 82, ... },
-  "leftover_cash": 1247.50,
   "metrics": {
     "expected_annual_return": 0.108,
     "annual_volatility": 0.165,
@@ -540,6 +537,7 @@ Returns `{"status": "ok", "version": "1.0.0"}`.
 - `prices` is a dictionary of ticker → list of daily close prices (EUR-converted), plus a `dates` key. All lists must be the same length.
 - For tickers where a position has no view (no intrinsic value estimate), omit from `views` and `confidences`. BL will use equilibrium returns for those positions.
 - The `efficient_frontier` field returns ~50 points along the frontier for Chart.js plotting.
+- **No absolute portfolio values**: The Python service never receives `total_portfolio_value`, `latest_prices` (for discrete allocation), or share counts. Discrete allocation is handled entirely in the browser (see §8.5).
 
 ---
 
@@ -577,7 +575,7 @@ src/main/kotlin/com/portfoliooptimizer/
 │   └── InstrumentRepository.kt
 ├── service/
 │   ├── PortfolioService.kt        -- CRUD + business logic
-│   ├── OptimizerService.kt        -- Assembles payload, calls Python, stores result
+│   ├── OptimizerService.kt        -- Assembles percentage-based payload, calls Python, stores weights+metrics
 │   ├── MarketDataService.kt       -- yfinance fetching + caching (scheduled)
 │   ├── FxRateService.kt           -- Frankfurter API + caching
 │   ├── CurrencyConversionService.kt -- Converts prices to EUR
@@ -592,10 +590,11 @@ src/main/kotlin/com/portfoliooptimizer/
 │   ├── AuthController.kt          -- Login, register (with invite code), logout
 │   └── api/
 │       ├── ChartDataController.kt -- /api/portfolios/{id}/chart-data (JSON for Chart.js)
+│       ├── PriceController.kt     -- /api/prices/latest?tickers=X,Y,Z (public cached prices for browser discrete allocation)
 │       └── HealthController.kt    -- /api/health
 ├── dto/
-│   ├── OptimizerRequest.kt        -- Maps to Python service request
-│   ├── OptimizerResponse.kt       -- Maps from Python service response
+│   ├── OptimizerRequest.kt        -- Maps to Python service request (percentages only, no absolute values)
+│   ├── OptimizerResponse.kt       -- Maps from Python service response (weights + metrics, no discrete allocation)
 │   └── ChartData.kt               -- JSON DTOs for Chart.js
 ├── marketdata/
 │   ├── YFinanceFetcher.kt         -- Calls yfinance via ProcessBuilder or thin Python helper
@@ -705,7 +704,93 @@ fun allocationChartData(
 2. **Current vs. optimized bar chart**: Grouped bars per ticker showing weight delta
 3. **Efficient frontier scatter plot**: Risk (x) vs. Return (y), with current portfolio and optimized portfolio marked as distinct points
 4. **Correlation heatmap**: Matrix of pairwise correlations (Chart.js matrix plugin or custom Canvas rendering)
-5. **Trade list table**: Not a chart — Thymeleaf-rendered HTML table with color-coded BUY/SELL rows
+5. **Trade list table**: Not a chart — **browser-generated** HTML table with color-coded BUY/SELL rows (computed from discrete allocation in JS, not server-rendered)
+
+### 8.5 Browser-Side Discrete Allocation
+
+Discrete allocation converts continuous optimal weights into integer share counts. This runs entirely in the browser to keep absolute portfolio values private.
+
+**Self-hosted JS file**: `/static/js/discrete-allocation.js`
+
+**Algorithm** (greedy largest-remainder):
+
+```javascript
+/**
+ * Converts percentage weights to integer share counts.
+ * @param {Object} weights - {ticker: weight} from optimization result
+ * @param {Object} latestPrices - {ticker: price_eur} from /api/prices/latest
+ * @param {number} totalValue - user's total portfolio value (from localStorage)
+ * @returns {{shares: Object, leftoverCash: number}}
+ */
+function discreteAllocation(weights, latestPrices, totalValue) {
+    const tickers = Object.keys(weights);
+    const idealShares = {};
+    const floorShares = {};
+
+    // Step 1: Compute ideal (fractional) shares and floor
+    for (const t of tickers) {
+        idealShares[t] = (weights[t] * totalValue) / latestPrices[t];
+        floorShares[t] = Math.floor(idealShares[t]);
+    }
+
+    // Step 2: Compute remaining cash after flooring
+    let spent = 0;
+    for (const t of tickers) spent += floorShares[t] * latestPrices[t];
+    let remaining = totalValue - spent;
+
+    // Step 3: Greedy allocation of remaining cash
+    const remainders = tickers
+        .map(t => ({ ticker: t, remainder: idealShares[t] - floorShares[t] }))
+        .sort((a, b) => b.remainder - a.remainder);
+
+    for (const { ticker } of remainders) {
+        if (remaining >= latestPrices[ticker]) {
+            floorShares[ticker] += 1;
+            remaining -= latestPrices[ticker];
+        }
+    }
+
+    return { shares: floorShares, leftoverCash: remaining };
+}
+```
+
+**Data flow on the results page**:
+
+1. Server renders weights, metrics, and charts via Thymeleaf
+2. Browser JS reads `totalValue` and `currentHoldings` from `localStorage`
+3. Browser fetches current EUR prices from `GET /api/prices/latest?tickers=GOOG,AMZN,...` (public data)
+4. Browser calls `discreteAllocation(optimizedWeights, latestPrices, totalValue)`
+5. Browser computes trade list: `targetShares[t] - currentHoldings[t]` for each ticker → BUY/SELL deltas
+6. Browser renders the discrete allocation table and trade list into the DOM
+
+### 8.6 Client-Side Portfolio Entry
+
+Users enter portfolio positions in the browser. Absolute values (shares held, total value) stay in `localStorage`; only percentages are sent to the backend. Cost basis is sent as a percentage of portfolio value (not an absolute amount), enabling gain/loss display without revealing position sizes.
+
+**Entry flow**:
+
+1. User enters positions: ticker, shares held, cost basis (optional)
+2. Browser fetches current EUR prices from `GET /api/prices/latest?tickers=...`
+3. Browser computes `weight_pct = (shares × price_eur) / totalValue` and `cost_basis_pct = (costBasis_eur) / totalValue` for each position
+4. Browser sends to backend: `{ ticker, weight_pct, cost_basis_pct, intrinsic_value_local, confidence_pct, sector }`
+5. Browser stores in `localStorage`: `{ ticker, shares, costBasis, currency }` per position, plus `totalValue`
+
+**localStorage schema**:
+
+```javascript
+// Stored under key: "kernfolio_portfolio_{portfolioId}"
+{
+    "totalValue": 195000,
+    "baseCurrency": "EUR",
+    "holdings": {
+        "GOOG": { "shares": 25, "costBasis": 6200, "currency": "USD" },
+        "AMZN": { "shares": 40, "costBasis": 7500, "currency": "USD" },
+        "CSU.TO": { "shares": 6, "costBasis": 18000, "currency": "CAD" }
+    }
+}
+```
+
+**UX note**: When editing positions, the browser pre-fills share counts from `localStorage`. If `localStorage` is cleared (new device, cleared cache), the user re-enters share counts — the backend still has the percentage weights, so optimization history is not lost.
 
 ---
 
@@ -996,12 +1081,15 @@ portfolio.yourdomain.com {
 - [ ] **Python service not exposed externally** — only reachable via Docker internal network
 - [ ] **Input validation** on all user inputs (Kotlin: Jakarta Bean Validation; Python: Pydantic)
 - [ ] **Rate limiting** on login attempts (Spring Security's `AuthenticationFailureHandler` with exponential backoff or lockout)
+- [ ] **Client-side portfolio values**: Absolute portfolio values (share counts, cost basis, total portfolio value) are stored exclusively in the browser's `localStorage`. The backend never receives or stores these values. Only percentage weights are transmitted and persisted server-side
+- [ ] **Public price endpoint**: `GET /api/prices/latest` returns cached market prices (public data). Authenticated but not wealth-revealing. Used by browser for discrete allocation
 
 ### 13.2 Recommended
 
 - [ ] Security headers: X-Content-Type-Options, X-Frame-Options, Referrer-Policy, Permissions-Policy
 - [ ] Dependency vulnerability scanning (Gradle: OWASP Dependency-Check; Python: pip-audit)
 - [ ] Audit log for admin actions (user creation, feature flag changes)
+- [ ] Note: `localStorage` is not encrypted — if the user's device is compromised, portfolio values are visible. This is an acceptable tradeoff for a self-hosted app with strict CSP (no XSS vector to exfiltrate localStorage)
 
 ---
 
@@ -1016,11 +1104,12 @@ portfolio.yourdomain.com {
 3. User entity + Spring Security (session-based login, admin/user roles)
 4. Admin panel: create users (invite-only)
 5. Python FastAPI service: `/health`, `/optimize` (BL + MVO only)
-6. Portfolio CRUD: create portfolio, add/edit/remove positions
-7. Market data: yfinance price fetching + caching, Frankfurter FX rates
-8. Optimization flow: assemble data → call Python → store results → display
-9. Results page: allocation table, trade list, allocation pie chart
-10. Feature flags table + service (basic)
+6. Portfolio CRUD: create portfolio, add/edit/remove positions (browser sends percentage weights only)
+7. Market data: yfinance price fetching + caching, Frankfurter FX rates, public price endpoint for browser
+8. Optimization flow: assemble percentage-based data → call Python → store weights+metrics → display
+9. Results page: allocation table (server-rendered weights), browser-side discrete allocation + trade list (JS)
+10. Client-side portfolio entry: localStorage for shares/cost basis, weight computation in browser
+11. Feature flags table + service (basic)
 
 ### Phase 2: Enhanced Analytics
 
@@ -1132,46 +1221,46 @@ Where S is sample covariance, F is structured target (constant correlation or si
 
 ## Appendix B: Example Portfolio Data
 
-The primary test case is a €194,817 portfolio with 36 positions across 7 currencies:
+The primary test case is a portfolio with 36 positions across 7 currencies. The backend stores only percentage weights (the "Current %" column below). Absolute EUR values and share counts are held exclusively in the browser's localStorage for testing purposes.
 
-| Ticker | Name | Currency | EUR Value | Current % |
-|---|---|---|---|---|
-| 8PSB | Physical Silver ETC | EUR | 16,367 | 8.4% |
-| EGLN | Physical Gold ETC | EUR | 12,847 | 6.6% |
-| CSU.TO | Constellation Software | CAD | 24,174 | 12.4% |
-| LULU | Lululemon Athletica | USD | 18,211 | 9.3% |
-| JCU (4975.T) | JCU Corporation | JPY | 16,177 | 8.3% |
-| CYND (4256.T) | CYND Co., Ltd. | JPY | 10,965 | 5.6% |
-| AMPX | Amprius Technologies | USD | 7,861 | 4.0% |
-| PRE.L | Pensana | GBP | 8,237 | 4.2% |
-| HY9H | SK Hynix GDR | EUR | 6,916 | 3.6% |
-| GMEXICOB.MX | Grupo Mexico | MXN | 6,853 | 3.5% |
-| GOOG | Alphabet | USD | 6,602 | 3.4% |
-| NVDA | NVIDIA | USD | 6,316 | 3.2% |
-| SKM | SK Telecom ADR | USD | 4,918 | 2.5% |
-| MOH | Molina Healthcare | USD | 4,574 | 2.3% |
-| ODET.PA | Compagnie de l'Odet | EUR | 4,504 | 2.3% |
-| HOOD | Robinhood Markets | USD | 3,857 | 2.0% |
-| CHTR | Charter Communications | USD | 2,867 | 1.5% |
-| FFH.TO | Fairfax Financial | CAD | 2,894 | 1.5% |
-| ANIC.L | Agronomics Ltd | GBP | 2,797 | 1.4% |
-| BE | Bloom Energy | USD | 2,707 | 1.4% |
-| DFND.L | iShares Global Defense | USD | 2,589 | 1.3% |
-| BRK.B | Berkshire Hathaway | USD | 2,575 | 1.3% |
-| H4N.HE | Solar Foods | EUR | 2,048 | 1.1% |
-| FAST.AS | Fastned | EUR | 1,908 | 1.0% |
-| MTH | Meritage Homes | USD | 1,658 | 0.9% |
-| JOBY | Joby Aviation | USD | 1,274 | 0.7% |
-| 9880.HK | UBTECH Robotics | HKD | 1,150 | 0.6% |
-| FLXT | Franklin FTSE Taiwan | EUR | 1,035 | 0.5% |
-| BCH | Banco de Chile ADR | USD | 987 | 0.5% |
-| CEC | Amundi Eastern Europe | EUR | 933 | 0.5% |
-| TUR | Amundi Turkey | EUR | 965 | 0.5% |
-| BOTZ | GX Robotics & AI | EUR | 916 | 0.5% |
-| CIB | Bancolombia ADR | USD | 865 | 0.4% |
-| Cash | (various currencies) | EUR | 5,276 | 2.7% |
+| Ticker | Name | Currency | Current % |
+|---|---|---|---|
+| 8PSB | Physical Silver ETC | EUR | 8.4% |
+| EGLN | Physical Gold ETC | EUR | 6.6% |
+| CSU.TO | Constellation Software | CAD | 12.4% |
+| LULU | Lululemon Athletica | USD | 9.3% |
+| JCU (4975.T) | JCU Corporation | JPY | 8.3% |
+| CYND (4256.T) | CYND Co., Ltd. | JPY | 5.6% |
+| AMPX | Amprius Technologies | USD | 4.0% |
+| PRE.L | Pensana | GBP | 4.2% |
+| HY9H | SK Hynix GDR | EUR | 3.6% |
+| GMEXICOB.MX | Grupo Mexico | MXN | 3.5% |
+| GOOG | Alphabet | USD | 3.4% |
+| NVDA | NVIDIA | USD | 3.2% |
+| SKM | SK Telecom ADR | USD | 2.5% |
+| MOH | Molina Healthcare | USD | 2.3% |
+| ODET.PA | Compagnie de l'Odet | EUR | 2.3% |
+| HOOD | Robinhood Markets | USD | 2.0% |
+| CHTR | Charter Communications | USD | 1.5% |
+| FFH.TO | Fairfax Financial | CAD | 1.5% |
+| ANIC.L | Agronomics Ltd | GBP | 1.4% |
+| BE | Bloom Energy | USD | 1.4% |
+| DFND.L | iShares Global Defense | USD | 1.3% |
+| BRK.B | Berkshire Hathaway | USD | 1.3% |
+| H4N.HE | Solar Foods | EUR | 1.1% |
+| FAST.AS | Fastned | EUR | 1.0% |
+| MTH | Meritage Homes | USD | 0.9% |
+| JOBY | Joby Aviation | USD | 0.7% |
+| 9880.HK | UBTECH Robotics | HKD | 0.6% |
+| FLXT | Franklin FTSE Taiwan | EUR | 0.5% |
+| BCH | Banco de Chile ADR | USD | 0.5% |
+| CEC | Amundi Eastern Europe | EUR | 0.5% |
+| TUR | Amundi Turkey | EUR | 0.5% |
+| BOTZ | GX Robotics & AI | EUR | 0.5% |
+| CIB | Bancolombia ADR | USD | 0.4% |
+| Cash | (various currencies) | EUR | 2.7% |
 
-New candidates to add: TEP.PA (Teleperformance, €51), 3690.HK (Meituan, HKD 77), AMZN (Amazon, $200)
+New candidates to add: TEP.PA (Teleperformance), 3690.HK (Meituan), AMZN (Amazon)
 
 ---
 
