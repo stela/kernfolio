@@ -22,11 +22,12 @@
 11. [Feature Flags](#11-feature-flags)
 12. [Deployment](#12-deployment)
 13. [Security Requirements](#13-security-requirements)
-14. [Phased Implementation Roadmap](#14-phased-implementation-roadmap)
-15. [Testing Strategy](#15-testing-strategy)
-16. [Appendix A: Mathematical Foundations](#appendix-a-mathematical-foundations)
-17. [Appendix B: Example Portfolio Data](#appendix-b-example-portfolio-data)
-18. [Appendix C: yfinance Ticker Mapping](#appendix-c-yfinance-ticker-mapping)
+14. [Phase 1 Implementation Blocks](#14-phase-1-implementation-blocks)
+15. [Future Phases](#15-future-phases)
+16. [Testing Strategy](#16-testing-strategy)
+17. [Appendix A: Mathematical Foundations](#appendix-a-mathematical-foundations)
+18. [Appendix B: Example Portfolio Data](#appendix-b-example-portfolio-data)
+19. [Appendix C: yfinance Ticker Mapping](#appendix-c-yfinance-ticker-mapping)
 
 ---
 
@@ -1325,25 +1326,307 @@ Backup uses Vault-issued short-lived DB credentials:
 
 ---
 
-## 14. Phased Implementation Roadmap
+## 14. Phase 1 Implementation Blocks
 
-### Phase 1: Core (MVP)
+**Goal**: A working portfolio optimizer with Black-Litterman and Markowitz, built leaf-first in independently-testable blocks.
 
-**Goal**: A working portfolio optimizer with Black-Litterman and Markowitz.
+### 14.1 Design Decisions
 
-1. Project scaffolding: Gradle Kotlin DSL, Spring Boot, Docker Compose, Liquibase migrations, Tailwind CSS standalone CLI build
-2. Vault integration: dev-mode Vault in docker-compose, PKI engine for mTLS, database engine for dynamic PostgreSQL credentials, KV for SMTP/static secrets, Spring Cloud Vault + hvac integration
-3. Database schema (V1 migration) with Vault-issued dynamic credentials
-4. User entity + Spring Security (session-based login, admin/user roles)
-5. Admin panel: create users (invite-only, SMTP via Vault KV, stdout fallback for dev)
-6. Python FastAPI service: `/health`, `/optimize` (BL + MVO only), `/fetch-prices`, `/fetch-fx-rates`
-7. Portfolio CRUD: create portfolio, add/edit/remove positions (browser sends percentage weights only)
-8. Market data: yfinance price fetching + caching, Frankfurter FX rates, authenticated price endpoint for browser
-9. Optimization flow: assemble percentage-based data (IV → CAGR view conversion in Spring Boot) → call Python → store weights+metrics → display
-10. Results page: allocation table (server-rendered weights), browser-side discrete allocation + trade list (JS)
-11. Client-side portfolio entry: localStorage for shares/cost basis, weight computation in browser
-12. Feature flags table + service (basic)
-13. Public landing page (`/about`) for pre-registration information
+1. **Vault is Block 8 (last).** Every other block uses plain env-var secrets. Vault is layered in as a cross-cutting concern after all features work. This avoids Vault infrastructure blocking any feature work.
+2. **Digital twins and Python fetch endpoints are separate blocks.** Twins are pure leaves serving fixture data; Python endpoints call real external APIs. Both implement the same API contract. In dev mode, `docker-compose.dev.yml` routes `YFINANCE_BASE_URL` / `FRANKFURTER_BASE_URL` to the twins, bypassing real APIs entirely.
+3. **Test fixtures are Block 0.** The 36-position portfolio JSON, fixture price CSVs, fixture FX rates, and golden-file optimization outputs are created first so every subsequent block has test data.
+
+### 14.2 Dependency Graph
+
+```
+Wave 1 (parallel, no deps):
+  Block 0:  Test Data Fixtures
+  Block 2c: Tailwind CSS + Layout + Vendor JS
+
+Wave 2 (depend on Block 0, parallel):
+  Block 1a: Frankfurter Digital Twin
+  Block 1b: yFinance Digital Twin
+  Block 1c: Python /fetch-prices + /fetch-fx-rates
+  Block 1d: Python /optimize (BL + MVO)
+  Block 2a: Liquibase Schema Migration
+
+Wave 3 (depends on 2a):
+  Block 2b: JPA Entities + Repositories
+
+Wave 4 (depend on 2b, parallel):
+  Block 3a: Spring Security + TenantFilter
+  Block 3b: FeatureFlagService + Seeded Flags
+  Block 3c: Market Data Services
+
+Wave 5 (depend on Wave 4 + 2c, parallel):
+  Block 4a: Auth Pages (login, register, invite)
+  Block 4b: Admin Panel
+  Block 4c: Portfolio CRUD
+
+Wave 6:
+  Block 5a: OptimizerService (orchestration)
+
+Wave 7:
+  Block 5b: Results Page (server-rendered + charts)
+
+Wave 8 (parallel):
+  Block 6a: Browser Discrete Allocation JS
+  Block 6b: Client-Side Portfolio Entry (localStorage)
+  Block 7a: Public Pages (landing, about)
+
+Wave 9:
+  Block 8:  Vault Integration (cross-cutting)
+```
+
+### 14.3 Block Details
+
+Each block specifies: scope, directories touched, dependencies (blocks that must be completed first), and verification method.
+
+---
+
+#### Block 0 — Test Data Fixtures
+
+**Scope**: 36-position portfolio JSON from Appendix B. Fixture price CSVs (3 years of daily closes for all tickers in the portfolio). Fixture FX rate JSON (EUR-based rates for USD, CAD, JPY, GBP, MXN, HKD). Pre-computed optimization golden files. WireMock response stubs for the Python service.
+
+**Directories**:
+- `optimizer/tests/fixtures/` — portfolio JSON, price CSV, expected optimization outputs
+- `web/src/test/resources/fixtures/` — same portfolio JSON, WireMock stubs, price/FX fixtures
+
+**Dependencies**: None (true leaf).
+
+**Verification**: Files parse correctly. JUnit test deserializes fixture JSON. `python -c "import json; json.load(open('tests/fixtures/test-portfolio.json'))"`.
+
+---
+
+#### Block 1a — Frankfurter Digital Twin
+
+**Scope**: Spring Boot app on port 8082 serving fixture FX rates matching the Frankfurter API contract (`GET /v1/{start_date}..{end_date}?from=EUR&to=USD,CAD,...`). Returns deterministic data from Block 0 fixtures. No external API calls.
+
+**Directories**: `digital-twins/frankfurter-fake/src/`
+
+**Dependencies**: Block 0.
+
+**Verification**: `bootRun` + `curl http://localhost:8082/v1/2023-01-01..2023-01-05?from=EUR&to=USD` returns expected JSON. `@SpringBootTest` integration test.
+
+---
+
+#### Block 1b — yFinance Digital Twin
+
+**Scope**: Spring Boot app on port 8081 serving fixture prices matching the Python `/fetch-prices` response contract. Serves instrument metadata. Deterministic, no external calls.
+
+**Directories**: `digital-twins/yfinance-fake/src/`
+
+**Dependencies**: Block 0.
+
+**Verification**: `bootRun` + `curl -X POST http://localhost:8081/fetch-prices -d '{"tickers":["GOOG"],...}'` returns expected JSON. `@SpringBootTest` integration test.
+
+---
+
+#### Block 1c — Python Fetch Endpoints
+
+**Scope**: Two FastAPI endpoints: `POST /fetch-prices` (yfinance wrapper) and `POST /fetch-fx-rates` (Frankfurter HTTP client). Pydantic request/response schemas per §6.2. Add `yfinance` + `httpx` to `pyproject.toml`.
+
+**Directories**: `optimizer/app/` (schemas.py, fetchers.py, main.py), `optimizer/tests/`
+
+**Dependencies**: Block 0. Independent of Blocks 1a/1b.
+
+**Verification**: `pytest tests/test_fetch_prices.py tests/test_fetch_fx_rates.py` with mocked yfinance/httpx.
+
+---
+
+#### Block 1d — Python /optimize (BL + MVO)
+
+**Scope**: `POST /optimize` endpoint implementing Black-Litterman with Idzorek confidence and Mean-Variance (max Sharpe). Pydantic models for `OptimizeRequest` / `OptimizeResponse` per §6.2. Uses `pypfopt.BlackLittermanModel`, `pypfopt.EfficientFrontier`, `pypfopt.risk_models.CovarianceShrinkage` (Ledoit-Wolf).
+
+**Directories**: `optimizer/app/` (optimizer.py, schemas.py, main.py), `optimizer/tests/`
+
+**Dependencies**: Block 0 (golden files for regression tests).
+
+**Verification**: `pytest tests/test_optimize.py` — weights within ±0.5% of golden files. Manual: POST fixture data to `http://localhost:8000/optimize`.
+
+---
+
+#### Block 2a — Liquibase Schema Migration
+
+**Scope**: `001-initial-schema.yaml` changeset: all tables from §5.2 (`users`, `invite_codes`, `portfolios`, `positions`, `optimization_runs`, `feature_flags`, `cached_prices`, `cached_fx_rates`, `instruments`), indexes, `pgcrypto` extension, RLS policies, `COMMENT ON` statements per §5.1.
+
+**Directories**: `web/src/main/resources/db/changelog/`
+
+**Dependencies**: None (pure leaf).
+
+**Verification**: Start PostgreSQL, `bootRun`, Liquibase applies migration. `psql`: `\dt` lists all tables, `\d+ positions` shows columns with comments, RLS enabled on portfolios/positions/optimization_runs.
+
+---
+
+#### Block 2b — JPA Entities + Repositories
+
+**Scope**: 9 JPA entities (`User`, `InviteCode`, `Portfolio`, `Position`, `OptimizationRun`, `FeatureFlag`, `CachedPrice`, `CachedFxRate`, `Instrument`) and 9 Spring Data repositories. Composite keys for `CachedPrice` and `CachedFxRate`. JSONB mapping via `@JdbcTypeCode(SqlTypes.JSON)` (Hibernate 6+ native). UUID array for `FeatureFlag.allowedUserIds`. Add Testcontainers to `build.gradle.kts`.
+
+**Directories**: `web/src/main/kotlin/com/kernfolio/domain/`, `web/src/main/kotlin/com/kernfolio/repository/`, `web/src/test/`, `web/build.gradle.kts`
+
+**Dependencies**: Block 2a.
+
+**Verification**: Testcontainers integration tests (insert/query/delete against real PostgreSQL). `hibernate.ddl-auto=validate` passes (entity mappings match schema).
+
+---
+
+#### Block 2c — Tailwind CSS + Layout + Vendor JS
+
+**Scope**: Tailwind standalone CLI Gradle task (§4.3). `input.css` with `@import "tailwindcss"`. Base Thymeleaf layout template with CSP-compliant structure, CSRF meta tags. Self-hosted vendor JS: HTMX 2.0.4, Alpine.js 3.15.8, Chart.js 4.5.1 under `/static/vendor/`. CSRF-HTMX integration (`htmx-csrf.js` per §10.3).
+
+**Directories**: `web/build.gradle.kts`, `web/tools/`, `web/src/main/resources/static/`, `web/src/main/resources/templates/layout/`
+
+**Dependencies**: None (pure infrastructure).
+
+**Verification**: `gradlew tailwindBuild` produces CSS. `bootRun` renders layout template. No CSP violations in browser dev tools.
+
+---
+
+#### Block 3a — Spring Security + TenantFilter
+
+**Scope**: `SecurityConfig.kt` with route protection per §10.2 (`/`, `/login`, `/register`, `/about`, `/static/**` public; `/admin/**` requires ADMIN; all else authenticated). `CustomUserDetailsService.kt` backed by `UserRepository`. `TenantFilter.kt` — `OncePerRequestFilter` that runs `SET LOCAL app.current_user_id` / `app.current_user_role` for PostgreSQL RLS. `BCryptPasswordEncoder` bean. Session timeout (30 min). CSP headers.
+
+**Directories**: `web/src/main/kotlin/com/kernfolio/config/`, `web/src/main/kotlin/com/kernfolio/security/`
+
+**Dependencies**: Block 2b.
+
+**Verification**: Tests verify public/protected/admin route access rules. TenantFilter test verifies `SET LOCAL` is executed with correct user ID.
+
+---
+
+#### Block 3b — FeatureFlagService + Seeded Flags
+
+**Scope**: `FeatureFlagService.kt` with `isEnabled(flagName, userId)` per §11.2. `@ControllerAdvice` exposing flags to Thymeleaf. `002-seed-feature-flags.yaml` changeset inserting Phase 1 flags from §11.1 (ALGO_BLACK_LITTERMAN=ON, ALGO_MEAN_VARIANCE=ON, SHOW_EFFICIENT_FRONTIER=ON, all others OFF).
+
+**Directories**: `web/src/main/kotlin/com/kernfolio/service/`, `web/src/main/kotlin/com/kernfolio/config/`, `web/src/main/resources/db/changelog/`
+
+**Dependencies**: Block 2b.
+
+**Verification**: MockK unit tests for flag logic (enable/disable, rollout %, per-user allow-list). Integration test verifies seeded flags exist after migration.
+
+---
+
+#### Block 3c — Market Data Services
+
+**Scope**: `MarketDataService.kt` (calls Python `/fetch-prices`, stores in `cached_prices` + `instruments`). `FxRateService.kt` (calls Frankfurter API or Python `/fetch-fx-rates`, stores in `cached_fx_rates`). `CurrencyConversionService.kt` (converts price series to EUR using cached FX rates). `OptimizerClientConfig.kt` (WebClient bean). `SchedulingConfig.kt` (`@EnableScheduling`). `YFinanceFetcher.kt`, `FrankfurterClient.kt`, `TickerMapper.kt`. `PriceController.kt` (`GET /api/prices/latest?tickers=X,Y,Z` — authenticated, for browser discrete allocation).
+
+**Directories**: `web/src/main/kotlin/com/kernfolio/service/`, `web/src/main/kotlin/com/kernfolio/marketdata/`, `web/src/main/kotlin/com/kernfolio/controller/api/`, `web/src/main/kotlin/com/kernfolio/config/`
+
+**Dependencies**: Block 2b. Contract from Block 1c/1a/1b (tests use WireMock).
+
+**Verification**: WireMock-based tests for price fetching, FX rate fetching, EUR conversion, caching, incremental updates. Manual with digital twins: `bootRun` with dev profile, verify `/api/prices/latest?tickers=GOOG` returns cached prices.
+
+---
+
+#### Block 4a — Auth Pages (Login, Register, Invite Flow)
+
+**Scope**: `AuthController.kt` with login page, registration with invite code validation. Thymeleaf templates: `login.html`, `register.html`. `UserService.kt` (user creation with bcrypt). `InviteCodeService.kt` (generation, validation). Admin bootstrap logic (first-run: log invite code to stdout if no SMTP, per §10.4).
+
+**Directories**: `web/src/main/kotlin/com/kernfolio/controller/`, `web/src/main/kotlin/com/kernfolio/service/`, `web/src/main/resources/templates/`
+
+**Dependencies**: Block 3a, Block 2c, Block 2b.
+
+**Verification**: `@WebMvcTest` for login/register pages. CSRF token present. Valid/invalid invite code handling.
+
+---
+
+#### Block 4b — Admin Panel
+
+**Scope**: `AdminController.kt` — user management (list, create invite codes, enable/disable), feature flag management (list, toggle, edit rollout %). Thymeleaf templates: `admin/dashboard.html`, `admin/users.html`, `admin/flags.html`. HTMX for inline flag editing.
+
+**Directories**: `web/src/main/kotlin/com/kernfolio/controller/`, `web/src/main/resources/templates/admin/`
+
+**Dependencies**: Block 3a, Block 3b, Block 4a, Block 2c.
+
+**Verification**: `@WebMvcTest` verifies admin routes require ADMIN role. Flag toggle and invite code creation work.
+
+---
+
+#### Block 4c — Portfolio CRUD
+
+**Scope**: `PortfolioService.kt` (CRUD for portfolios and positions). `DashboardController.kt` (portfolio list). `PortfolioController.kt` (detail view, add/edit/remove positions via HTMX). Templates: `dashboard.html`, `portfolio-form.html`, `portfolio-detail.html`. Backend receives only percentage weights — no absolute values.
+
+**Directories**: `web/src/main/kotlin/com/kernfolio/service/`, `web/src/main/kotlin/com/kernfolio/controller/`, `web/src/main/resources/templates/`
+
+**Dependencies**: Block 3a, Block 2b, Block 2c, Block 3b.
+
+**Verification**: `@WebMvcTest` for portfolio CRUD and HTMX fragment responses. RLS integration test: user A cannot see user B's portfolios.
+
+---
+
+#### Block 5a — OptimizerService (Orchestration)
+
+**Scope**: `OptimizerService.kt` — full optimization flow: (1) load portfolio positions from DB, (2) load cached prices + FX rates, (3) convert intrinsic values to CAGR-based Q vector (`Q_k = (IV_k / P_k)^(1/5) − 1`), (4) assemble `OptimizeRequest` DTO (EUR-converted, percentage weights only), (5) call Python `/optimize` via WebClient, (6) store results in `optimization_runs`. DTOs: `OptimizerRequest.kt`, `OptimizerResponse.kt`. `OptimizationController.kt` with algorithm selection form. Template: `optimize.html`.
+
+**Directories**: `web/src/main/kotlin/com/kernfolio/service/`, `web/src/main/kotlin/com/kernfolio/dto/`, `web/src/main/kotlin/com/kernfolio/controller/`, `web/src/main/resources/templates/`
+
+**Dependencies**: Block 3c, Block 4c, Block 1d (WireMock in tests), Block 2c.
+
+**Verification**: Unit tests for IV→CAGR conversion, payload assembly (correct tickers, EUR prices, views only for positions with intrinsic values). WireMock integration test for full round-trip.
+
+---
+
+#### Block 5b — Results Page (Server-Rendered + Charts)
+
+**Scope**: `results.html` template showing optimized weights, metrics (expected return, volatility, Sharpe). `ChartDataController.kt` JSON endpoints for Chart.js. Chart JS files: `allocation-pie.js`, `allocation-bar.js`, `efficient-frontier.js` under `/static/js/charts/`. `ChartData.kt` DTOs.
+
+**Directories**: `web/src/main/kotlin/com/kernfolio/controller/api/`, `web/src/main/kotlin/com/kernfolio/dto/`, `web/src/main/resources/templates/`, `web/src/main/resources/static/js/charts/`
+
+**Dependencies**: Block 5a, Block 2c.
+
+**Verification**: `@WebMvcTest` for chart endpoints. Manual: run optimization, view results page, charts render. No CSP violations.
+
+---
+
+#### Block 6a — Browser Discrete Allocation JS
+
+**Scope**: `/static/js/discrete-allocation.js` implementing greedy largest-remainder algorithm from §8.5. Reads `totalValue` from localStorage, fetches latest prices from `/api/prices/latest`, computes integer share counts, renders trade list (color-coded BUY/SELL) into the results page DOM.
+
+**Directories**: `web/src/main/resources/static/js/`, modify `results.html`
+
+**Dependencies**: Block 5b, Block 3c (`/api/prices/latest`).
+
+**Verification**: Manual: set localStorage value, view results page, see discrete allocation table and trade list.
+
+---
+
+#### Block 6b — Client-Side Portfolio Entry (localStorage)
+
+**Scope**: `/static/js/portfolio-entry.js` (Alpine.js-powered). Handles client-side portfolio entry flow from §8.6: user enters share counts / cash amounts → JS computes `weight_pct` → sends only percentages to backend → stores shares, cost basis, cash in localStorage. Reconciliation logic to detect stale weights (price drift). localStorage schema per §8.6.
+
+**Directories**: `web/src/main/resources/static/js/`, modify `portfolio-detail.html`
+
+**Dependencies**: Block 4c, Block 3c, Block 2c.
+
+**Verification**: Manual: enter share counts → verify localStorage populated → verify only `weight_pct` sent to backend (network tab) → verify reconciliation warning on price drift.
+
+---
+
+#### Block 7a — Public Pages (Landing, About)
+
+**Scope**: `landing.html` (shown for unauthenticated users at `/`, with login + about links). `about.html` (service description). Modify `DashboardController.kt` to branch: unauthenticated → landing, authenticated → dashboard.
+
+**Directories**: `web/src/main/resources/templates/`, modify `DashboardController.kt`
+
+**Dependencies**: Block 2c. Touches Block 4c's `DashboardController`.
+
+**Verification**: Visit `/` without login → landing. Visit `/about` → info page. No auth required.
+
+---
+
+#### Block 8 — Vault Integration (Cross-Cutting)
+
+**Scope**: HashiCorp Vault in dev mode for local development. Vault database engine for dynamic PostgreSQL credentials. KV v2 for SMTP, session signing key, ADMIN_EMAIL. PKI engine for mTLS certificates between all containers. `spring-cloud-starter-vault-config` in Spring Boot. `hvac` in Python service. Vault Agent sidecar config. Updated `docker-compose.yml` / `docker-compose.dev.yml` per §12.
+
+**Directories**: `vault/config/`, `vault/init/`, `docker-compose.yml`, `docker-compose.dev.yml`, `web/build.gradle.kts`, `web/src/main/resources/application.yml`, `optimizer/pyproject.toml`, `optimizer/app/main.py`
+
+**Dependencies**: All previous blocks.
+
+**Verification**: `docker compose up` — all services start. Vault initializes, web app gets dynamic DB creds, mTLS works between services. `vault kv get secret/kernfolio/smtp` returns test config.
+
+---
+
+## 15. Future Phases
 
 ### Phase 2: Enhanced Analytics
 
@@ -1372,22 +1655,22 @@ Backup uses Vault-issued short-lived DB credentials:
 
 ---
 
-## 15. Testing Strategy
+## 16. Testing Strategy
 
-### 15.1 Spring Boot (Kotlin)
+### 16.1 Spring Boot (Kotlin)
 
 - **Unit tests** (MockK): Services, DTO mapping, feature flag logic
 - **Integration tests** (Testcontainers): Repository tests against real PostgreSQL
 - **Web layer tests** (`@WebMvcTest`): Controller + Thymeleaf rendering, including HTMX fragment responses
 - **End-to-end tests**: Full Spring context with Testcontainers (PostgreSQL) and WireMock (mock Python service)
 
-### 15.2 Python (FastAPI)
+### 16.2 Python (FastAPI)
 
 - **Unit tests** (pytest): Optimization logic with fixed input data and known expected outputs
 - **API tests** (TestClient): FastAPI endpoints with fixture data
 - **Regression tests**: Known portfolio configurations that must produce allocations within ±0.5% of expected
 
-### 15.3 Mocking External Dependencies
+### 16.3 Mocking External Dependencies
 
 | Dependency | Mock Strategy |
 |---|---|
@@ -1396,7 +1679,7 @@ Backup uses Vault-issued short-lived DB credentials:
 | Frankfurter API | Fixture JSON with EUR FX rates |
 | PostgreSQL | Testcontainers (real PostgreSQL in Docker) |
 
-### 15.4 Test Data Fixtures
+### 16.4 Test Data Fixtures
 
 Include a fixture file (`test-portfolio.json`) with the project owner's actual portfolio as a reference test case. The 36-position portfolio with positions across USD, CAD, JPY, GBP, MXN, HKD, and EUR provides excellent multi-currency test coverage. Expected optimization outputs should be pre-computed and stored as golden files.
 
