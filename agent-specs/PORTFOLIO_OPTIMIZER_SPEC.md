@@ -64,50 +64,65 @@ A self-hosted web application that helps individual investors optimize their sto
 ┌──────────────┐     HTTPS      ┌─────────────────────────────────────┐
 │   Browser     │◄──────────────►│  Caddy (reverse proxy + TLS)        │
 │  (HTMX +      │                │  auto Let's Encrypt certificates    │
-│   Alpine.js + │                └──────────┬──────────────────────────┘
-│   Chart.js)   │                           │ :8080
-└──────────────┘                ┌───────────▼──────────────────────────┐
+│   Alpine.js + │                └──────┬──────────────────────────────┘
+│   Chart.js)   │                       │ mTLS :8080
+└──────────────┘                ┌───────▼──────────────────────────────┐
                                 │  Spring Boot (Kotlin)                │
                                 │  ─ Thymeleaf server-rendered HTML    │
                                 │  ─ REST JSON endpoints for charts    │
                                 │  ─ Spring Security (session-based)   │
+                                │  ─ Spring Cloud Vault integration    │
                                 │  ─ Market data caching               │
                                 │  ─ Feature flags                     │
                                 │  ─ Admin panel                       │
-                                └──────┬─────────────┬────────────────┘
-                                       │             │
-                            PostgreSQL │             │ REST (JSON)
-                                       │             │ localhost:8000
-                                ┌──────▼──────┐  ┌──▼──────────────────┐
-                                │ PostgreSQL   │  │ Python FastAPI       │
-                                │ 16           │  │ ─ PyPortfolioOpt     │
-                                │              │  │ ─ Riskfolio-Lib      │
-                                │ Tables:      │  │ ─ cvxpy              │
-                                │ users        │  │ ─ numpy/scipy/pandas │
-                                │ portfolios   │  │                      │
-                                │ positions    │  │ STATELESS            │
-                                │ opt_runs     │  │ No DB access         │
-                                │ prices_cache │  │ All data in request  │
-                                │ fx_rates     │  └──────────────────────┘
-                                │ feature_flags│
-                                │ invite_codes │
-                                └─────────────┘
+                                └──┬──────────┬──────────────┬─────────┘
+                                   │          │              │
+                        mTLS (PG)  │          │ mTLS :8000   │ Vault API
+                                   │          │ REST (JSON)  │ :8200
+                          ┌────────▼───┐  ┌───▼───────────┐  │
+                          │ PostgreSQL  │  │ Python FastAPI │  │
+                          │ 16         │  │ ─ PyPortfolioOpt│  │
+                          │            │  │ ─ Riskfolio-Lib│  │
+                          │ Tables:    │  │ ─ cvxpy        │  │
+                          │ users      │  │ ─ numpy/scipy  │  │
+                          │ portfolios │  │ ─ yfinance     │  │
+                          │ positions  │  │                │  │
+                          │ opt_runs   │  │ STATELESS      │  │
+                          │ prices     │  │ No DB access   │  │
+                          │ fx_rates   │  │ All data in req│  │
+                          │ flags      │  └───────┬────────┘  │
+                          │ invite_codes│          │ Vault API │
+                          └────────────┘          │ :8200     │
+                                          ┌───────▼───────────▼────────┐
+                                          │  HashiCorp Vault            │
+                                          │  ─ PKI: mTLS certs for all │
+                                          │    inter-service links      │
+                                          │  ─ Database: dynamic PG    │
+                                          │    credentials              │
+                                          │  ─ KV v2: SMTP, session    │
+                                          │    keys, static secrets     │
+                                          │                             │
+                                          │  Vault Agent sidecars       │
+                                          │  manage cert rotation       │
+                                          └─────────────────────────────┘
 ```
 
 ### 2.2 Communication Pattern
 
 1. User interacts with Thymeleaf-rendered HTML pages via HTMX
-2. For chart data, separate `fetch()` calls hit `/api/**` JSON endpoints
+2. For chart data, separate `fetch()` calls hit `/api/**` JSON endpoints (session-authenticated, including `/api/prices/latest`)
 3. Both HTML and JSON endpoints authenticated via same Spring Security session cookie
-4. When optimization is requested:
-   a. Spring Boot loads portfolio positions (percentage weights, views, confidences) + cached price history from PostgreSQL
-   b. Spring Boot assembles payload (prices matrix, percentage weights, views, confidences, constraints) — no absolute portfolio values
-   c. Spring Boot POSTs JSON payload to `http://optimizer:8000/optimize`
-   d. Python computes optimization, returns JSON result (optimal weights + metrics, no discrete allocation)
-   e. Spring Boot stores result in `optimization_runs` table (weights and metrics only)
-   f. Spring Boot renders result page via Thymeleaf (weights, metrics, charts)
-   g. Browser JS computes discrete allocation (integer share counts, trade list) using locally-held total portfolio value and current prices fetched from a public API endpoint
-5. Market data refresh runs as a scheduled job (daily at 22:00 UTC)
+4. All inter-service communication uses mTLS with Vault PKI-issued certificates (24h TTL, auto-renewed by Vault Agent)
+5. When optimization is requested:
+   a. Spring Boot loads portfolio positions (percentage weights, views, confidences) + cached price history from PostgreSQL (dynamic Vault DB credentials)
+   b. Spring Boot converts intrinsic value estimates to expected returns via CAGR: `Q_k = (IV_k / P_k)^(1/5) − 1`
+   c. Spring Boot assembles payload (prices matrix, percentage weights, views as Q vector, confidences, constraints) — no absolute portfolio values
+   d. Spring Boot POSTs JSON payload to `https://optimizer:8000/optimize` (mTLS)
+   e. Python computes optimization, returns JSON result (optimal weights + metrics, no discrete allocation)
+   f. Spring Boot stores result in `optimization_runs` table (weights and metrics only)
+   g. Spring Boot renders result page via Thymeleaf (weights, metrics, charts)
+   h. Browser JS computes discrete allocation (integer share counts, trade list) using locally-held total portfolio value and current prices fetched from authenticated `/api/prices/latest`
+6. Market data refresh runs as a scheduled job (daily at 22:00 UTC) — calls Python service endpoints `/fetch-prices` and `/fetch-fx-rates` over mTLS
 
 ### 2.3 Why Hybrid (Not Pure Java, Not Pure Python)
 
