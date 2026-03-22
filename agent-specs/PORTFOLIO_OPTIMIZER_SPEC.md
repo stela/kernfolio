@@ -135,6 +135,8 @@ A self-hosted web application that helps individual investors optimize their sto
 
 **User inputs per position**: Ticker, current weight (%), 5-year intrinsic value estimate (in local currency), confidence level (0–100%). Share counts and cash amounts are entered in the browser but stay in localStorage — only percentage weights reach the backend. Cash positions (per currency) are modeled as positions with `position_type = 'CASH'`.
 
+**View computation (intrinsic value → BL Q vector)**: The user's 5-year intrinsic value estimate is converted to an annualized expected return using CAGR: `Q_k = (IV_k / P_k)^(1/5) − 1`, where `P_k` is the current price in local currency. This conversion runs in Spring Boot when assembling the optimizer payload — the Python service receives `Q` directly (not raw intrinsic values). Positions with no intrinsic value estimate are omitted from `views` and `confidences`, so BL uses equilibrium returns for those.
+
 **System inputs**: Covariance matrix (from cached price history with Ledoit-Wolf shrinkage), market-cap weights (from yfinance), risk-free rate (from ECB data or hardcoded)
 
 **Python library**: `pypfopt.BlackLittermanModel` with `omega="idzorek"` and `view_confidences=[0.0–1.0, ...]`
@@ -230,10 +232,31 @@ For any candidate allocation, compute **effective number of independent bets**: 
 | Server Interaction | HTMX | 2.0.4 | Self-hosted: `/static/vendor/htmx/htmx.min.js` |
 | Client-side UI State | Alpine.js | 3.15.8 | Self-hosted: `/static/vendor/alpinejs/alpine.min.js` |
 | Charts | Chart.js | 4.5.1 | Self-hosted: `/static/vendor/chartjs/chart.umd.min.js` |
-| CSS Framework | Tailwind CSS (CDN-free) | 4.2.2 | Pre-built CSS file, self-hosted |
+| CSS Framework | Tailwind CSS (CDN-free) | 4.2.2 | Built via standalone CLI during Gradle build, output to `/static/css/tailwind.css` |
 | Icons (optional) | Lucide | 0.577.0 | Self-hosted SVG sprites |
 
 **CRITICAL**: All JavaScript/CSS libraries are self-hosted under `src/main/resources/static/vendor/`. No CDN references. No inline `<script>` or `<style>` tags anywhere in the codebase.
+
+**Tailwind CSS build integration**: Tailwind 4's standalone CLI binary (no Node.js required) is invoked by a Gradle task during `processResources`. The binary is committed to the repository under `web/tools/tailwindcss` (platform-specific, gitignored in CI — downloaded on first build if missing). The Gradle task:
+
+```kotlin
+// web/build.gradle.kts
+val tailwindBuild by tasks.registering(Exec::class) {
+    description = "Build Tailwind CSS from source"
+    val inputCss = file("src/main/resources/static/css/input.css")
+    val outputCss = file("src/main/resources/static/css/tailwind.css")
+    inputs.file(inputCss)
+    inputs.files(fileTree("src/main/resources/templates") { include("**/*.html") })
+    outputs.file(outputCss)
+    commandLine("./tools/tailwindcss", "-i", inputCss.path, "-o", outputCss.path, "--minify")
+}
+
+tasks.named("processResources") {
+    dependsOn(tailwindBuild)
+}
+```
+
+The `input.css` file contains `@import "tailwindcss"` and any custom CSS. Template HTML files are scanned for class names automatically by Tailwind 4. The output `tailwind.css` is generated fresh on each build; it is gitignored (not committed).
 
 ### 4.4 Infrastructure
 
@@ -241,8 +264,9 @@ For any candidate allocation, compute **effective number of independent bets**: 
 |---|---|---|
 | Database | PostgreSQL 16 | Docker container |
 | Reverse Proxy | Caddy 2 | Auto TLS via Let's Encrypt |
-| Container Runtime | Docker Compose | 4 services: app, optimizer, postgres, caddy |
-| Backup | pg_dump + cron + rclone | Nightly to off-site storage |
+| Secrets Management | HashiCorp Vault 1.19 | Dynamic DB credentials, mTLS PKI, KV for static secrets |
+| Container Runtime | Docker Compose | 6 services: vault, vault-init, app, optimizer, postgres, caddy |
+| Backup | pg_dump + cron + rclone | Nightly to off-site storage, Vault-issued DB creds |
 
 ---
 
@@ -538,6 +562,78 @@ CREATE POLICY optimization_runs_user_isolation ON optimization_runs
 
 Separate endpoint for computing correlation clusters without running a full optimization. Used for the "portfolio health check" feature.
 
+#### POST /fetch-prices
+
+Proxies yfinance price fetching for Spring Boot's market data scheduler.
+
+**Request body**:
+
+```json
+{
+  "tickers": ["GOOG", "4256.T", "CSU.TO"],
+  "start_date": "2021-03-15",
+  "end_date": "2026-03-15"
+}
+```
+
+**Response body** (200 OK):
+
+```json
+{
+  "prices": {
+    "GOOG": [
+      {"date": "2021-03-15", "close": 103.42},
+      {"date": "2021-03-16", "close": 104.10}
+    ],
+    "4256.T": [
+      {"date": "2021-03-15", "close": 1245.0},
+      {"date": "2021-03-16", "close": 1260.0}
+    ]
+  },
+  "metadata": {
+    "GOOG": {"currency": "USD", "name": "Alphabet Inc.", "market_cap": 1850000000000, "sector": "Technology"},
+    "4256.T": {"currency": "JPY", "name": "CYND Co., Ltd.", "market_cap": 52000000000, "sector": "Technology"}
+  },
+  "errors": {}
+}
+```
+
+If a ticker fails (delisted, invalid), it appears in `errors` rather than `prices`:
+
+```json
+{
+  "errors": {
+    "INVALID": "No data found for ticker INVALID"
+  }
+}
+```
+
+#### POST /fetch-fx-rates
+
+Proxies Frankfurter API FX rate fetching.
+
+**Request body**:
+
+```json
+{
+  "base": "EUR",
+  "currencies": ["USD", "CAD", "JPY", "GBP", "MXN", "HKD"],
+  "start_date": "2021-03-15",
+  "end_date": "2026-03-15"
+}
+```
+
+**Response body** (200 OK):
+
+```json
+{
+  "rates": {
+    "2021-03-15": {"USD": 1.1942, "CAD": 1.5012, "JPY": 130.21},
+    "2021-03-16": {"USD": 1.1938, "CAD": 1.5008, "JPY": 130.15}
+  }
+}
+```
+
 #### GET /health
 
 Returns `{"status": "ok", "version": "1.0.0"}`.
@@ -647,9 +743,10 @@ No `unsafe-inline`, no `unsafe-eval`, no CDN origins.
 
 | Route | Template | Description |
 |---|---|---|
-| `GET /` | `dashboard.html` | User's portfolios list, quick stats |
-| `GET /login` | `login.html` | Login form |
-| `GET /register` | `register.html` | Register with invite code (feature-flagged) |
+| `GET /` | `landing.html` / `dashboard.html` | Public: landing page with login + about links. Authenticated: user's portfolios list, quick stats |
+| `GET /about` | `about.html` | Public information page about the service |
+| `GET /login` | `login.html` | Login form (public) |
+| `GET /register` | `register.html` | Register with invite code (public, feature-flagged) |
 | `GET /portfolios/new` | `portfolio-form.html` | Create new portfolio |
 | `GET /portfolios/{id}` | `portfolio-detail.html` | View portfolio positions, add/edit/remove |
 | `GET /portfolios/{id}/optimize` | `optimize.html` | Select algorithm, set constraints, run optimization |
@@ -908,9 +1005,9 @@ Note: Some ETFs/ETCs may need different suffixes. The `TickerMapper` service mai
 @Bean
 fun securityFilterChain(http: HttpSecurity): SecurityFilterChain = http
     .authorizeHttpRequests { auth ->
-        auth.requestMatchers("/login", "/register", "/static/**").permitAll()
+        auth.requestMatchers("/", "/login", "/register", "/about", "/static/**").permitAll()  // Public: landing, login, registration, about, static assets
         auth.requestMatchers("/admin/**").hasRole("ADMIN")
-        auth.requestMatchers("/api/**").authenticated()  // JSON endpoints
+        auth.requestMatchers("/api/**").authenticated()  // All JSON endpoints require session auth (including /api/prices/latest)
         auth.anyRequest().authenticated()
     }
     .formLogin { form ->
@@ -957,12 +1054,14 @@ document.addEventListener('DOMContentLoaded', function() {
 
 On first startup, if the `users` table is empty:
 
-1. App reads `ADMIN_EMAIL` from environment
-2. Generates an invite code and sends it to `ADMIN_EMAIL` via SMTP
+1. App reads `ADMIN_EMAIL` from Vault KV store
+2. Generates an invite code and sends it to `ADMIN_EMAIL` via SMTP (credentials from Vault KV)
 3. Admin clicks the invite link, sets username and password
 4. Account is created with role `ADMIN`
 
 No special bootstrap endpoint or console token — the admin is just the first invited user. If `ADMIN_EMAIL` is unset or `users` is non-empty, this step is skipped.
+
+**Dev/local fallback**: If SMTP is not configured (no `spring.mail.host` in Vault or properties), the invite code is logged to stdout at `WARN` level: `"ADMIN INVITE CODE (no SMTP configured): {code}"`. This allows bootstrapping in local dev without an SMTP server.
 
 ### 10.5 Invite-Only Registration
 
@@ -1022,54 +1121,117 @@ Expose via `@ControllerAdvice` model attribute or custom Thymeleaf dialect:
 
 ## 12. Deployment
 
-### 12.1 Docker Compose
+### 12.1 Secrets Management: HashiCorp Vault
+
+All secrets (database credentials, SMTP credentials, session signing keys) are managed by HashiCorp Vault. No secrets are stored in `.env` files, docker-compose environment blocks, or source code.
+
+**Vault services used**:
+
+| Secrets Engine | Purpose | Consumers |
+|---|---|---|
+| **Database** (PostgreSQL) | Dynamic, short-lived DB credentials with auto-rotation | Spring Boot (`app`), pg_dump backup script |
+| **KV v2** | Static secrets: SMTP host/user/password, `ADMIN_EMAIL`, session signing key | Spring Boot (`app`) |
+| **PKI** | mTLS certificates for inter-service communication | All services (app ↔ optimizer, app ↔ postgres) |
+
+**Integration approach**:
+
+- **Spring Boot**: `spring-cloud-starter-vault-config` reads secrets at startup and refreshes on lease renewal. DB credentials come from Vault's database engine (dynamic). SMTP and other static secrets come from KV v2.
+- **Python FastAPI**: `hvac` library authenticates to Vault via AppRole on startup. For the stateless optimizer, the only secret needed is its own mTLS client certificate (injected by Vault Agent sidecar).
+- **Vault Agent sidecar**: Runs alongside each service container. Manages token renewal, certificate rotation (PKI), and writes secrets to a shared tmpfs volume. Services read certificates from the tmpfs mount — no secrets touch disk.
+- **PostgreSQL**: Initial bootstrap credentials for Vault's database engine setup are passed via Docker secrets (one-time setup). After that, Vault manages all DB credentials dynamically.
+
+**mTLS between containers**:
+
+All inter-service communication uses mutual TLS. Vault's PKI engine issues short-lived certificates (TTL: 24h, auto-renewed by Vault Agent).
+
+- `app` ↔ `optimizer`: mTLS on port 8000. Spring Boot's `WebClient` configured with Vault-issued client cert. FastAPI's Uvicorn configured with Vault-issued server cert + client CA verification.
+- `app` ↔ `postgres`: mTLS via PostgreSQL's `sslmode=verify-full`. Vault-issued client certs replace password-only auth.
+- `caddy` ↔ `app`: mTLS on port 8080. Caddy uses Vault-issued client cert for upstream connections.
+
+**Dev/local mode**: For local development and digital twins, Vault runs in `-dev` mode (in-memory, unsealed, root token = `dev-root-token`). The `docker-compose.dev.yml` override starts Vault in dev mode and pre-seeds it with test secrets via a `vault-init` container.
+
+### 12.2 Docker Compose
 
 ```yaml
-version: '3.8'
-
 services:
-  postgres:
-    image: postgres:16-alpine
+  vault:
+    image: hashicorp/vault:1.19
+    cap_add:
+      - IPC_LOCK
     environment:
-      POSTGRES_DB: portfolio_optimizer
-      POSTGRES_USER: ${DB_USER}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      VAULT_ADDR: "http://0.0.0.0:8200"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - vault_data:/vault/data
+      - ./vault/config:/vault/config:ro
+    command: vault server -config=/vault/config/vault.hcl
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]
+      test: ["CMD", "vault", "status"]
       interval: 10s
       timeout: 5s
       retries: 5
 
+  vault-init:
+    image: hashicorp/vault:1.19
+    depends_on:
+      vault:
+        condition: service_healthy
+    volumes:
+      - ./vault/init:/vault/init:ro
+      - vault_agent_certs:/vault/certs
+    entrypoint: /vault/init/setup.sh
+    environment:
+      VAULT_ADDR: "http://vault:8200"
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: portfolio_optimizer
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - vault_agent_certs:/vault/certs:ro
+      - ./postgres/pg_hba_mtls.conf:/etc/postgresql/pg_hba.conf:ro
+      - ./postgres/postgresql_ssl.conf:/etc/postgresql/conf.d/ssl.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      vault-init:
+        condition: service_completed_successfully
+
   optimizer:
     build: ./optimizer
     environment:
-      - PYTHONUNBUFFERED=1
+      VAULT_ADDR: "http://vault:8200"
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - vault_agent_certs:/vault/certs:ro
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "--cacert", "/vault/certs/ca.pem", "--cert", "/vault/certs/optimizer-client.pem", "--key", "/vault/certs/optimizer-client-key.pem", "-f", "https://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
+    depends_on:
+      vault-init:
+        condition: service_completed_successfully
 
   app:
-    build: ./app
+    build: ./web
     environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/portfolio_optimizer
-      SPRING_DATASOURCE_USERNAME: ${DB_USER}
-      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
-      OPTIMIZER_BASE_URL: http://optimizer:8000
+      VAULT_ADDR: "http://vault:8200"
       SPRING_PROFILES_ACTIVE: prod
-      ADMIN_EMAIL: ${ADMIN_EMAIL}
-      SPRING_MAIL_HOST: ${SMTP_HOST}
-      SPRING_MAIL_PORT: ${SMTP_PORT:-587}
-      SPRING_MAIL_USERNAME: ${SMTP_USERNAME}
-      SPRING_MAIL_PASSWORD: ${SMTP_PASSWORD}
+      SPRING_CLOUD_VAULT_TOKEN: "${VAULT_APP_TOKEN}"
+      OPTIMIZER_BASE_URL: "https://optimizer:8000"
+    volumes:
+      - vault_agent_certs:/vault/certs:ro
     depends_on:
       postgres:
         condition: service_healthy
       optimizer:
         condition: service_healthy
+      vault-init:
+        condition: service_completed_successfully
 
   caddy:
     image: caddy:2-alpine
@@ -1077,9 +1239,10 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
+      - vault_agent_certs:/vault/certs:ro
     depends_on:
       - app
 
@@ -1087,21 +1250,31 @@ volumes:
   pgdata:
   caddy_data:
   caddy_config:
+  vault_data:
+  vault_agent_certs:
 ```
 
-### 12.2 Caddyfile
+### 12.3 Caddyfile
 
 ```
 portfolio.yourdomain.com {
-    reverse_proxy app:8080
+    reverse_proxy https://app:8080 {
+        transport http {
+            tls_client_auth /vault/certs/caddy-client.pem /vault/certs/caddy-client-key.pem
+            tls_trusted_ca_certs /vault/certs/ca.pem
+        }
+    }
 }
 ```
 
-### 12.3 Backup Cron
+### 12.4 Backup Cron
+
+Backup uses Vault-issued short-lived DB credentials:
 
 ```bash
 # /etc/cron.d/portfolio-backup
-0 3 * * * root docker exec portfolio-postgres pg_dump -U $DB_USER portfolio_optimizer | gzip > /backups/portfolio-$(date +\%Y\%m\%d).sql.gz
+# Fetches a one-time Vault DB credential, dumps, and the credential auto-expires
+0 3 * * * root /opt/kernfolio/scripts/vault-pg-dump.sh | gzip > /backups/portfolio-$(date +\%Y\%m\%d).sql.gz
 0 4 * * * root find /backups -name "portfolio-*.sql.gz" -mtime +7 -delete
 ```
 
@@ -1119,12 +1292,14 @@ portfolio.yourdomain.com {
 - [ ] **bcrypt password hashing** (cost factor 10+)
 - [ ] **RLS on PostgreSQL** for defense-in-depth tenant isolation
 - [ ] **HTTPS only** (Caddy auto-TLS)
-- [ ] **No secrets in source code** — all via environment variables / `.env` file
-- [ ] **Python service not exposed externally** — only reachable via Docker internal network
+- [ ] **No secrets in source code** — all secrets managed by HashiCorp Vault (see §12.1). No `.env` files with credentials.
+- [ ] **mTLS between all containers** — Vault PKI-issued certificates for app ↔ optimizer, app ↔ postgres, caddy ↔ app. No plaintext inter-service communication.
+- [ ] **Dynamic database credentials** — Vault database secrets engine issues short-lived PostgreSQL credentials. No static DB passwords.
+- [ ] **Python service not exposed externally** — only reachable via Docker internal network, mTLS-authenticated
 - [ ] **Input validation** on all user inputs (Kotlin: Jakarta Bean Validation; Python: Pydantic)
 - [ ] **Rate limiting** on login attempts (Spring Security's `AuthenticationFailureHandler` with exponential backoff or lockout)
 - [ ] **Client-side portfolio values**: Absolute portfolio values (share counts, cash amounts, total portfolio value) are stored exclusively in the browser's `localStorage`. The backend never receives or stores these values. Only percentage weights and position types (`EQUITY`/`CASH`) are transmitted and persisted server-side. Cash positions use synthetic tickers (e.g., `CASH.USD`) and are continuously revalued against the base currency via FX rates
-- [ ] **Public price endpoint**: `GET /api/prices/latest` returns cached market prices (public data). Authenticated but not wealth-revealing. Used by browser for discrete allocation
+- [ ] **Authenticated price endpoint**: `GET /api/prices/latest` returns cached market prices. Requires session authentication (no unauthenticated access) to prevent external abuse and search engine indexing. Not wealth-revealing — returns only public market prices.
 
 ### 13.2 Recommended
 
@@ -1141,17 +1316,19 @@ portfolio.yourdomain.com {
 
 **Goal**: A working portfolio optimizer with Black-Litterman and Markowitz.
 
-1. Project scaffolding: Gradle Kotlin DSL, Spring Boot, Docker Compose, Liquibase migrations
-2. Database schema (V1 migration)
-3. User entity + Spring Security (session-based login, admin/user roles)
-4. Admin panel: create users (invite-only)
-5. Python FastAPI service: `/health`, `/optimize` (BL + MVO only)
-6. Portfolio CRUD: create portfolio, add/edit/remove positions (browser sends percentage weights only)
-7. Market data: yfinance price fetching + caching, Frankfurter FX rates, public price endpoint for browser
-8. Optimization flow: assemble percentage-based data → call Python → store weights+metrics → display
-9. Results page: allocation table (server-rendered weights), browser-side discrete allocation + trade list (JS)
-10. Client-side portfolio entry: localStorage for shares/cost basis, weight computation in browser
-11. Feature flags table + service (basic)
+1. Project scaffolding: Gradle Kotlin DSL, Spring Boot, Docker Compose, Liquibase migrations, Tailwind CSS standalone CLI build
+2. Vault integration: dev-mode Vault in docker-compose, PKI engine for mTLS, database engine for dynamic PostgreSQL credentials, KV for SMTP/static secrets, Spring Cloud Vault + hvac integration
+3. Database schema (V1 migration) with Vault-issued dynamic credentials
+4. User entity + Spring Security (session-based login, admin/user roles)
+5. Admin panel: create users (invite-only, SMTP via Vault KV, stdout fallback for dev)
+6. Python FastAPI service: `/health`, `/optimize` (BL + MVO only), `/fetch-prices`, `/fetch-fx-rates`
+7. Portfolio CRUD: create portfolio, add/edit/remove positions (browser sends percentage weights only)
+8. Market data: yfinance price fetching + caching, Frankfurter FX rates, authenticated price endpoint for browser
+9. Optimization flow: assemble percentage-based data (IV → CAGR view conversion in Spring Boot) → call Python → store weights+metrics → display
+10. Results page: allocation table (server-rendered weights), browser-side discrete allocation + trade list (JS)
+11. Client-side portfolio entry: localStorage for shares/cost basis, weight computation in browser
+12. Feature flags table + service (basic)
+13. Public landing page (`/about`) for pre-registration information
 
 ### Phase 2: Enhanced Analytics
 
