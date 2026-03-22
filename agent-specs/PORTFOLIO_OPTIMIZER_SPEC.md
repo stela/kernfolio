@@ -42,7 +42,7 @@ A self-hosted web application that helps individual investors optimize their sto
 - **Python is stateless**: Fed all data in each REST request from Kotlin. No DB access from Python. Pure function: `(data) → (result)`
 - **Server-rendered UI**: Thymeleaf + HTMX + Alpine.js. No SPA, no npm, no build toolchain
 - **Security-first**: No inline scripts/styles. Self-hosted JS libraries. HTTP-only session cookies. Strict CSP headers
-- **Client-side portfolio values**: Absolute portfolio values (shares held, cost basis, total value) never leave the browser. Backend stores only tickers, percentage weights, views, and confidences. Discrete allocation is computed in the browser
+- **Client-side portfolio values**: Absolute portfolio values (shares held, cash amounts, cost basis, total value) never leave the browser. Backend stores only tickers, position types (`EQUITY`/`CASH`), percentage weights, views, and confidences. Cash positions are modeled per currency (e.g., `CASH.USD`, `CASH.JPY`) with only their weight percentage stored server-side. Discrete allocation is computed in the browser. Stale weights are detected by reconciling localStorage share counts against current prices
 - **Multi-tenant**: PostgreSQL with row-level security. 10–50 concurrent users
 - **Phased rollout**: Feature flags control which optimization algorithms and UI features are available
 
@@ -133,7 +133,7 @@ A self-hosted web application that helps individual investors optimize their sto
 5. Apply half-Kelly sizing: `f = 0.5 × Σ_posterior⁻¹ × μ_posterior`
 6. Project onto constraints (position bounds, sector limits, long-only)
 
-**User inputs per position**: Ticker, current weight (%), 5-year intrinsic value estimate (in local currency), confidence level (0–100%). Share counts are entered in the browser but stay in localStorage — only percentage weights reach the backend.
+**User inputs per position**: Ticker, current weight (%), 5-year intrinsic value estimate (in local currency), confidence level (0–100%). Share counts and cash amounts are entered in the browser but stay in localStorage — only percentage weights reach the backend. Cash positions (per currency) are modeled as positions with `position_type = 'CASH'`.
 
 **System inputs**: Covariance matrix (from cached price history with Ledoit-Wolf shrinkage), market-cap weights (from yfinance), risk-free rate (from ECB data or hardcoded)
 
@@ -199,39 +199,39 @@ For any candidate allocation, compute **effective number of independent bets**: 
 
 | Component | Choice | Version | Notes |
 |---|---|---|---|
-| Language | Kotlin | 2.0+ | JVM 21 |
-| Framework | Spring Boot | 3.4.x | Web, Security, Data JPA, Actuator |
+| Language | Kotlin | 2.3.20 | JVM 25 |
+| Framework | Spring Boot | 4.0.4 | Web, Security, Data JPA, Actuator |
 | Template Engine | Thymeleaf | (bundled) | Server-side HTML rendering |
 | HTMX Integration | htmx-spring-boot-thymeleaf | latest | Wim Deblauwe's library (Maven Central) |
 | Database Access | Spring Data JPA + Hibernate | (bundled) | PostgreSQL dialect |
 | HTTP Client | Spring WebClient (WebFlux) | (bundled) | For calling Python service |
 | Resilience | Resilience4j | latest | Circuit breaker for Python service calls |
 | Migrations | Liquibase | latest | YAML-based changelogs |
-| Build | Gradle (Kotlin DSL) | 8.x | |
+| Build | Gradle (Kotlin DSL) | 9.4.1 | |
 | Testing | JUnit 5, MockK, Testcontainers | latest | |
 
 ### 4.2 Python Optimization Microservice
 
 | Component | Choice | Version | Notes |
 |---|---|---|---|
-| Language | Python | 3.11+ | |
-| Framework | FastAPI | 0.115+ | With Uvicorn ASGI server |
-| Portfolio Optimization | PyPortfolioOpt | 1.6.0 | BL, MVO, HRP, CVaR, discrete allocation |
-| Advanced Optimization | Riskfolio-Lib | 7.2+ | Phase 3: CVaR variants, risk budgeting |
-| Convex Solver | cvxpy | 1.8+ | Underlying engine (auto-installed) |
-| Numerics | numpy, scipy, pandas | latest | Foundation layer |
-| Validation | Pydantic | 2.x | Request/response schemas |
-| Testing | pytest | latest | |
+| Language | Python | 3.13.12 | |
+| Framework | FastAPI | 0.135.1 | With Uvicorn 0.42.0 ASGI server |
+| Portfolio Optimization | PyPortfolioOpt | 1.5.6 | BL, MVO, HRP, CVaR, discrete allocation |
+| Advanced Optimization | Riskfolio-Lib | 7.2.1 | Phase 3: CVaR variants, risk budgeting |
+| Convex Solver | cvxpy | 1.8.1 | Underlying engine (auto-installed) |
+| Numerics | numpy 2.4.3, scipy 1.17.1, pandas 3.0.1 | | Foundation layer |
+| Validation | Pydantic | 2.12.5 | Request/response schemas |
+| Testing | pytest | 9.0.2 | |
 
 ### 4.3 Frontend (No Build Tools Required)
 
 | Component | Choice | Version | Delivery |
 |---|---|---|---|
-| Server Interaction | HTMX | 2.0.x | Self-hosted: `/static/vendor/htmx/htmx.min.js` |
-| Client-side UI State | Alpine.js | 3.14.x | Self-hosted: `/static/vendor/alpinejs/alpine.min.js` |
-| Charts | Chart.js | 4.4.x | Self-hosted: `/static/vendor/chartjs/chart.umd.min.js` |
-| CSS Framework | Tailwind CSS (CDN-free) | 3.4.x | Pre-built CSS file, self-hosted |
-| Icons (optional) | Lucide | latest | Self-hosted SVG sprites |
+| Server Interaction | HTMX | 2.0.4 | Self-hosted: `/static/vendor/htmx/htmx.min.js` |
+| Client-side UI State | Alpine.js | 3.15.8 | Self-hosted: `/static/vendor/alpinejs/alpine.min.js` |
+| Charts | Chart.js | 4.5.1 | Self-hosted: `/static/vendor/chartjs/chart.umd.min.js` |
+| CSS Framework | Tailwind CSS (CDN-free) | 4.2.2 | Pre-built CSS file, self-hosted |
+| Icons (optional) | Lucide | 0.577.0 | Self-hosted SVG sprites |
 
 **CRITICAL**: All JavaScript/CSS libraries are self-hosted under `src/main/resources/static/vendor/`. No CDN references. No inline `<script>` or `<style>` tags anywhere in the codebase.
 
@@ -289,23 +289,25 @@ CREATE TABLE portfolios (
     name VARCHAR(100) NOT NULL,
     description TEXT,
     base_currency CHAR(3) NOT NULL DEFAULT 'EUR',
-    cash_reserve_pct NUMERIC(5,4) NOT NULL DEFAULT 0.05,  -- e.g., 0.05 = 5%
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- Positions within a portfolio
--- Absolute values (share counts, total value) stay in the browser.
+-- Absolute values (share counts, cash amounts, total value) stay in the browser.
 -- Backend stores only percentage weights and cost basis as a portfolio fraction.
+-- Both equity and cash positions are modeled here. Cash positions use synthetic
+-- tickers (e.g., "CASH.USD", "CASH.JPY") and have position_type = 'CASH'.
 CREATE TABLE positions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     portfolio_id UUID NOT NULL REFERENCES portfolios(id) ON DELETE CASCADE,
-    ticker VARCHAR(20) NOT NULL,         -- yfinance format: "4256.T", "3690.HK", "GOOG"
-    name VARCHAR(100),                    -- Human-readable: "CYND Co., Ltd."
+    position_type VARCHAR(10) NOT NULL DEFAULT 'EQUITY',  -- 'EQUITY' or 'CASH'
+    ticker VARCHAR(20) NOT NULL,         -- yfinance format: "4256.T", "3690.HK", "GOOG"; cash: "CASH.USD", "CASH.JPY"
+    name VARCHAR(100),                    -- Human-readable: "CYND Co., Ltd." or "US Dollar Cash"
     currency CHAR(3) NOT NULL,            -- Original trading currency: "JPY", "HKD", "USD"
     weight_pct NUMERIC(7,6) NOT NULL,     -- Current allocation as decimal (0.084000 = 8.4%)
     cost_basis_pct NUMERIC(7,6),          -- Cost basis as fraction of portfolio value; enables % gain/loss without absolute amounts
-    -- User's intrinsic value inputs:
+    -- User's intrinsic value inputs (equity only, NULL for cash):
     intrinsic_value_local NUMERIC(14,4),  -- 5-year IV per share in local currency
     confidence_pct NUMERIC(5,4),          -- 0.0 to 1.0 (0% to 100%); maps to BL view uncertainty via Idzorek
     sector VARCHAR(50),                   -- For sector constraints
@@ -382,15 +384,24 @@ ALTER TABLE positions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE optimization_runs ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY portfolios_user_isolation ON portfolios
-    USING (user_id = current_setting('app.current_user_id')::UUID);
+    USING (
+        user_id = current_setting('app.current_user_id')::UUID
+        OR current_setting('app.current_user_role') = 'ADMIN'
+    );
 CREATE POLICY positions_user_isolation ON positions
-    USING (portfolio_id IN (
-        SELECT id FROM portfolios WHERE user_id = current_setting('app.current_user_id')::UUID
-    ));
+    USING (
+        portfolio_id IN (
+            SELECT id FROM portfolios WHERE user_id = current_setting('app.current_user_id')::UUID
+        )
+        OR current_setting('app.current_user_role') = 'ADMIN'
+    );
 CREATE POLICY optimization_runs_user_isolation ON optimization_runs
-    USING (portfolio_id IN (
-        SELECT id FROM portfolios WHERE user_id = current_setting('app.current_user_id')::UUID
-    ));
+    USING (
+        portfolio_id IN (
+            SELECT id FROM portfolios WHERE user_id = current_setting('app.current_user_id')::UUID
+        )
+        OR current_setting('app.current_user_role') = 'ADMIN'
+    );
 ```
 
 ### 5.3 JSONB Structure for `optimization_runs.parameters`
@@ -405,7 +416,7 @@ CREATE POLICY optimization_runs_user_isolation ON optimization_runs
     "min_weight": 0.01,
     "max_weight": 0.08,
     "sector_max": { "Technology": 0.25 },
-    "cash_reserve": 0.05
+    "exclude_position_types": ["CASH"]
   },
   "covariance_method": "ledoit_wolf",
   "lookback_years": 3
@@ -597,7 +608,7 @@ src/main/kotlin/com/portfoliooptimizer/
 │   ├── OptimizerResponse.kt       -- Maps from Python service response (weights + metrics, no discrete allocation)
 │   └── ChartData.kt               -- JSON DTOs for Chart.js
 ├── marketdata/
-│   ├── YFinanceFetcher.kt         -- Calls yfinance via ProcessBuilder or thin Python helper
+│   ├── YFinanceFetcher.kt         -- Calls Python service's /fetch-prices endpoint via REST
 │   ├── FrankfurterClient.kt       -- REST client for api.frankfurter.dev
 │   └── TickerMapper.kt            -- Maps internal tickers to yfinance format
 └── security/
@@ -607,11 +618,11 @@ src/main/kotlin/com/portfoliooptimizer/
 
 ### 7.2 Key Design Decisions
 
-**yfinance from Kotlin**: Since yfinance is Python-only, the simplest approach is a tiny Python helper script (`scripts/fetch_prices.py`) invoked via `ProcessBuilder`. This script accepts tickers as args, fetches from yfinance, and prints JSON to stdout. Spring Boot parses the JSON. Alternative: add a `/fetch-prices` endpoint to the Python FastAPI service (cleaner separation, slight extra complexity). Either works; the FastAPI approach is preferred for consistency.
+**yfinance from Kotlin**: Since yfinance is Python-only, price fetching is exposed as endpoints on the Python FastAPI service (e.g., `POST /fetch-prices`, `POST /fetch-fx-rates`). Spring Boot calls these via REST, same as optimization requests. This keeps all Python dependencies in one service and avoids `ProcessBuilder` shelling out to scripts.
 
 **JSONB columns in JPA**: Use `@Type(JsonBinaryType::class)` from `vladmihalcea/hibernate-types` library. Map to `Map<String, Any>` or dedicated Kotlin data classes with Jackson.
 
-**TenantFilter**: A Spring `OncePerRequestFilter` that runs after authentication. Reads the authenticated user's ID and executes `SET LOCAL app.current_user_id = '{userId}'` on the current JDBC connection. This activates PostgreSQL RLS policies for the remainder of the request.
+**TenantFilter**: A Spring `OncePerRequestFilter` that runs after authentication. Reads the authenticated user's ID and role, then executes `SET LOCAL app.current_user_id = '{userId}'; SET LOCAL app.current_user_role = '{role}'` on the current JDBC connection. This activates PostgreSQL RLS policies for the remainder of the request. The policies use the single-argument `current_setting()` so that an unset variable throws an error — fail-fast to surface missing TenantFilter bugs rather than silently returning empty results.
 
 **CSP Headers (in WebConfig or SecurityConfig)**:
 ```
@@ -765,15 +776,23 @@ function discreteAllocation(weights, latestPrices, totalValue) {
 
 ### 8.6 Client-Side Portfolio Entry
 
-Users enter portfolio positions in the browser. Absolute values (shares held, total value) stay in `localStorage`; only percentages are sent to the backend. Cost basis is sent as a percentage of portfolio value (not an absolute amount), enabling gain/loss display without revealing position sizes.
+Users enter portfolio positions in the browser. Absolute values (shares held, cash amounts, total value) stay in `localStorage`; only percentages and position types are sent to the backend. Cost basis is sent as a percentage of portfolio value (not an absolute amount), enabling gain/loss display without revealing position sizes.
 
-**Entry flow**:
+**Entry flow (equity positions)**:
 
 1. User enters positions: ticker, shares held, cost basis (optional)
-2. Browser fetches current EUR prices from `GET /api/prices/latest?tickers=...`
+2. Browser fetches current EUR prices from `GET /api/prices/latest?tickers=...` and FX rates from cached rates
 3. Browser computes `weight_pct = (shares × price_eur) / totalValue` and `cost_basis_pct = (costBasis_eur) / totalValue` for each position
-4. Browser sends to backend: `{ ticker, weight_pct, cost_basis_pct, intrinsic_value_local, confidence_pct, sector }`
+4. Browser sends to backend: `{ ticker, position_type: "EQUITY", weight_pct, cost_basis_pct, intrinsic_value_local, confidence_pct, sector }`
 5. Browser stores in `localStorage`: `{ ticker, shares, costBasis, currency }` per position, plus `totalValue`
+
+**Entry flow (cash positions)**:
+
+1. User enters cash holdings per currency (e.g., 5000 USD, 200000 JPY)
+2. Browser converts each to EUR using cached FX rates
+3. Browser computes `weight_pct = cash_amount_eur / totalValue` for each currency
+4. Browser sends to backend: `{ ticker: "CASH.USD", position_type: "CASH", weight_pct, currency: "USD" }` (no intrinsic value, confidence, or sector)
+5. Browser stores in `localStorage`: `{ amount, currency }` per cash position
 
 **localStorage schema**:
 
@@ -783,14 +802,21 @@ Users enter portfolio positions in the browser. Absolute values (shares held, to
     "totalValue": 195000,
     "baseCurrency": "EUR",
     "holdings": {
-        "GOOG": { "shares": 25, "costBasis": 6200, "currency": "USD" },
-        "AMZN": { "shares": 40, "costBasis": 7500, "currency": "USD" },
-        "CSU.TO": { "shares": 6, "costBasis": 18000, "currency": "CAD" }
+        "GOOG": { "type": "EQUITY", "shares": 25, "costBasis": 6200, "currency": "USD" },
+        "AMZN": { "type": "EQUITY", "shares": 40, "costBasis": 7500, "currency": "USD" },
+        "CSU.TO": { "type": "EQUITY", "shares": 6, "costBasis": 18000, "currency": "CAD" }
+    },
+    "cash": {
+        "USD": { "amount": 2100 },
+        "JPY": { "amount": 350000 },
+        "EUR": { "amount": 800 }
     }
 }
 ```
 
-**UX note**: When editing positions, the browser pre-fills share counts from `localStorage`. If `localStorage` is cleared (new device, cleared cache), the user re-enters share counts — the backend still has the percentage weights, so optimization history is not lost.
+**Reconciliation**: When the browser has both `totalValue` and per-position share counts, it can recompute live weights from `shares × current_price_eur / totalValue` and compare against the `weight_pct` stored in the backend. If drift exceeds a threshold (e.g., price movements since last update), the UI flags stale weights and offers to resubmit updated percentages. Cash positions are revalued continuously against the base currency using cached FX rates — a JPY cash position's weight shifts as EUR/JPY moves.
+
+**Deriving share counts from totalValue**: If `localStorage` is cleared (new device, cleared cache), the browser can approximate share counts from the backend's `weight_pct` and current prices: `shares ≈ round(totalValue × weight_pct / price_eur)`. The user confirms or corrects these, then localStorage is repopulated. The backend still has the percentage weights, so optimization history is not lost.
 
 ---
 
@@ -927,11 +953,22 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 ```
 
-### 10.4 Invite-Only Registration
+### 10.4 Admin Bootstrapping
+
+On first startup, if the `users` table is empty:
+
+1. App reads `ADMIN_EMAIL` from environment
+2. Generates an invite code and sends it to `ADMIN_EMAIL` via SMTP
+3. Admin clicks the invite link, sets username and password
+4. Account is created with role `ADMIN`
+
+No special bootstrap endpoint or console token — the admin is just the first invited user. If `ADMIN_EMAIL` is unset or `users` is non-empty, this step is skipped.
+
+### 10.5 Invite-Only Registration
 
 1. Admin creates invite code via admin panel → stored in `invite_codes` table
-2. Admin shares code with intended user (email, message, etc.)
-3. User navigates to `/register`, enters username/email/password + invite code
+2. System emails the invite link to the intended user
+3. User clicks the link, sets username and password
 4. System validates code (exists, unused, not expired), creates user, marks code as used
 5. Later (feature flag `SELF_REGISTRATION`): Skip invite code requirement
 
@@ -1023,6 +1060,11 @@ services:
       SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
       OPTIMIZER_BASE_URL: http://optimizer:8000
       SPRING_PROFILES_ACTIVE: prod
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      SPRING_MAIL_HOST: ${SMTP_HOST}
+      SPRING_MAIL_PORT: ${SMTP_PORT:-587}
+      SPRING_MAIL_USERNAME: ${SMTP_USERNAME}
+      SPRING_MAIL_PASSWORD: ${SMTP_PASSWORD}
     depends_on:
       postgres:
         condition: service_healthy
@@ -1081,7 +1123,7 @@ portfolio.yourdomain.com {
 - [ ] **Python service not exposed externally** — only reachable via Docker internal network
 - [ ] **Input validation** on all user inputs (Kotlin: Jakarta Bean Validation; Python: Pydantic)
 - [ ] **Rate limiting** on login attempts (Spring Security's `AuthenticationFailureHandler` with exponential backoff or lockout)
-- [ ] **Client-side portfolio values**: Absolute portfolio values (share counts, cost basis, total portfolio value) are stored exclusively in the browser's `localStorage`. The backend never receives or stores these values. Only percentage weights are transmitted and persisted server-side
+- [ ] **Client-side portfolio values**: Absolute portfolio values (share counts, cash amounts, total portfolio value) are stored exclusively in the browser's `localStorage`. The backend never receives or stores these values. Only percentage weights and position types (`EQUITY`/`CASH`) are transmitted and persisted server-side. Cash positions use synthetic tickers (e.g., `CASH.USD`) and are continuously revalued against the base currency via FX rates
 - [ ] **Public price endpoint**: `GET /api/prices/latest` returns cached market prices (public data). Authenticated but not wealth-revealing. Used by browser for discrete allocation
 
 ### 13.2 Recommended
@@ -1258,7 +1300,10 @@ The primary test case is a portfolio with 36 positions across 7 currencies. The 
 | TUR | Amundi Turkey | EUR | 0.5% |
 | BOTZ | GX Robotics & AI | EUR | 0.5% |
 | CIB | Bancolombia ADR | USD | 0.4% |
-| Cash | (various currencies) | EUR | 2.7% |
+| CASH.USD | US Dollar Cash | USD | 1.1% |
+| CASH.EUR | Euro Cash | EUR | 0.4% |
+| CASH.JPY | Japanese Yen Cash | JPY | 0.7% |
+| CASH.CAD | Canadian Dollar Cash | CAD | 0.5% |
 
 New candidates to add: TEP.PA (Teleperformance), 3690.HK (Meituan), AMZN (Amazon)
 
