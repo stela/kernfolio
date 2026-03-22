@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "POST",
+    "urlPath": "/fetch-fx-rates",
+    "headers": {
+      "Content-Type": {
+        "equalTo": "application/json"
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "bodyFileName": "fetch-fx-rates-response.json",
+    "headers": {
+      "Content-Type": "application/json"
+    }
+  }
+}

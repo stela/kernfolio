@@ -1,0 +1,19 @@
+{
+  "priority": 2,
+  "request": {
+    "method": "POST",
+    "urlPath": "/optimize",
+    "bodyPatterns": [
+      {
+        "contains": "\"INVALID\""
+      }
+    ]
+  },
+  "response": {
+    "status": 422,
+    "bodyFileName": "optimize-error-response.json",
+    "headers": {
+      "Content-Type": "application/json"
+    }
+  }
+}

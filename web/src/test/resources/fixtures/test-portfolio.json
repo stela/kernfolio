@@ -1,0 +1,315 @@
+{
+  "positions": [
+    {
+      "ticker": "8PSB",
+      "yfinance_ticker": "8PSB.L",
+      "name": "Physical Silver ETC",
+      "currency": "EUR",
+      "position_type": "EQUITY",
+      "weight_pct": 8.4
+    },
+    {
+      "ticker": "EGLN",
+      "yfinance_ticker": "EGLN.L",
+      "name": "Physical Gold ETC",
+      "currency": "EUR",
+      "position_type": "EQUITY",
+      "weight_pct": 6.6
+    },
+    {
+      "ticker": "CSU.TO",
+      "yfinance_ticker": "CSU.TO",
+      "name": "Constellation Software",
+      "currency": "CAD",
+      "position_type": "EQUITY",
+      "weight_pct": 12.4
+    },
+    {
+      "ticker": "LULU",
+      "yfinance_ticker": "LULU",
+      "name": "Lululemon Athletica",
+      "currency": "USD",
+      "position_type": "EQUITY",
+      "weight_pct": 9.3
+    },
+    {
+      "ticker": "JCU",
+      "yfinance_ticker": "4975.T",
+      "name": "JCU Corporation",
+      "currency": "JPY",
+      "position_type": "EQUITY",
+      "weight_pct": 8.3
+    },
+    {
+      "ticker": "CYND",
+      "yfinance_ticker": "4256.T",
+      "name": "CYND Co., Ltd.",
+      "currency": "JPY",
+      "position_type": "EQUITY",
+      "weight_pct": 5.6
+    },
+    {
+      "ticker": "AMPX",
+      "yfinance_ticker": "AMPX",
+      "name": "Amprius Technologies",
+      "currency": "USD",
+      "position_type": "EQUITY",
+      "weight_pct": 4.0
+    },
+    {
+      "ticker": "PRE.L",
+      "yfinance_ticker": "PRE.L",
+      "name": "Pensana",
+      "currency": "GBP",
+      "position_type": "EQUITY",
+      "weight_pct": 4.2
+    },
+    {
+      "ticker": "HY9H",
+      "yfinance_ticker": "HY9H.DE",
+      "name": "SK Hynix GDR",
+      "currency": "EUR",
+      "position_type": "EQUITY",
+      "weight_pct": 3.6
+    },
+    {
+      "ticker": "GMEXICOB.MX",
+      "yfinance_ticker": "GMEXICOB.MX",
+      "name": "Grupo Mexico",
+      "currency": "MXN",
+      "position_type": "EQUITY",
+      "weight_pct": 3.5
+    },
+    {
+      "ticker": "GOOG",
+      "yfinance_ticker": "GOOG",
+      "name": "Alphabet",
+      "currency": "USD",
+      "position_type": "EQUITY",
+      "weight_pct": 3.4
+    },
+    {
+      "ticker": "NVDA",
+      "yfinance_ticker": "NVDA",
+      "name": "NVIDIA",
+      "currency": "USD",
+      "position_type": "EQUITY",
+      "weight_pct": 3.2
+    },
+    {
+      "ticker": "SKM",
+      "yfinance_ticker": "SKM",
+      "name": "SK Telecom ADR",
+      "currency": "USD",
+      "position_type": "EQUITY",
+      "weight_pct": 2.5
+    },
+    {
+      "ticker": "MOH",
+      "yfinance_ticker": "MOH",
+      "name": "Molina Healthcare",
+      "currency": "USD",
+      "position_type": "EQUITY",
+      "weight_pct": 2.3
+    },
+    {
+      "ticker": "ODET.PA",
+      "yfinance_ticker": "ODET.PA",
+      "name": "Compagnie de l'Odet",
+      "currency": "EUR",
+      "position_type": "EQUITY",
+      "weight_pct": 2.3
+    },
+    {
+      "ticker": "HOOD",
+      "yfinance_ticker": "HOOD",
+      "name": "Robinhood Markets",
+      "currency": "USD",
+      "position_type": "EQUITY",
+      "weight_pct": 2.0
+    },
+    {
+      "ticker": "CHTR",
+      "yfinance_ticker": "CHTR",
+      "name": "Charter Communications",
+      "currency": "USD",
+      "position_type": "EQUITY",
+      "weight_pct": 1.5
+    },
+    {
+      "ticker": "FFH.TO",
+      "yfinance_ticker": "FFH.TO",
+      "name": "Fairfax Financial",
+      "currency": "CAD",
+      "position_type": "EQUITY",
+      "weight_pct": 1.5
+    },
+    {
+      "ticker": "ANIC.L",
+      "yfinance_ticker": "ANIC.L",
+      "name": "Agronomics Ltd",
+      "currency": "GBP",
+      "position_type": "EQUITY",
+      "weight_pct": 1.4
+    },
+    {
+      "ticker": "BE",
+      "yfinance_ticker": "BE",
+      "name": "Bloom Energy",
+      "currency": "USD",
+      "position_type": "EQUITY",
+      "weight_pct": 1.4
+    },
+    {
+      "ticker": "DFND.L",
+      "yfinance_ticker": "DFND.L",
+      "name": "iShares Global Defense",
+      "currency": "USD",
+      "position_type": "EQUITY",
+      "weight_pct": 1.3
+    },
+    {
+      "ticker": "BRK.B",
+      "yfinance_ticker": "BRK-B",
+      "name": "Berkshire Hathaway",
+      "currency": "USD",
+      "position_type": "EQUITY",
+      "weight_pct": 1.3
+    },
+    {
+      "ticker": "H4N.HE",
+      "yfinance_ticker": "H4N.HE",
+      "name": "Solar Foods",
+      "currency": "EUR",
+      "position_type": "EQUITY",
+      "weight_pct": 1.1
+    },
+    {
+      "ticker": "FAST.AS",
+      "yfinance_ticker": "FAST.AS",
+      "name": "Fastned",
+      "currency": "EUR",
+      "position_type": "EQUITY",
+      "weight_pct": 1.0
+    },
+    {
+      "ticker": "MTH",
+      "yfinance_ticker": "MTH",
+      "name": "Meritage Homes",
+      "currency": "USD",
+      "position_type": "EQUITY",
+      "weight_pct": 0.9
+    },
+    {
+      "ticker": "JOBY",
+      "yfinance_ticker": "JOBY",
+      "name": "Joby Aviation",
+      "currency": "USD",
+      "position_type": "EQUITY",
+      "weight_pct": 0.7
+    },
+    {
+      "ticker": "9880.HK",
+      "yfinance_ticker": "9880.HK",
+      "name": "UBTECH Robotics",
+      "currency": "HKD",
+      "position_type": "EQUITY",
+      "weight_pct": 0.6
+    },
+    {
+      "ticker": "FLXT",
+      "yfinance_ticker": "FLXT",
+      "name": "Franklin FTSE Taiwan",
+      "currency": "EUR",
+      "position_type": "EQUITY",
+      "weight_pct": 0.5
+    },
+    {
+      "ticker": "BCH",
+      "yfinance_ticker": "BCH",
+      "name": "Banco de Chile ADR",
+      "currency": "USD",
+      "position_type": "EQUITY",
+      "weight_pct": 0.5
+    },
+    {
+      "ticker": "CEC",
+      "yfinance_ticker": "CEC",
+      "name": "Amundi Eastern Europe",
+      "currency": "EUR",
+      "position_type": "EQUITY",
+      "weight_pct": 0.5
+    },
+    {
+      "ticker": "TUR",
+      "yfinance_ticker": "TUR",
+      "name": "Amundi Turkey",
+      "currency": "EUR",
+      "position_type": "EQUITY",
+      "weight_pct": 0.5
+    },
+    {
+      "ticker": "BOTZ",
+      "yfinance_ticker": "BOTZ",
+      "name": "GX Robotics & AI",
+      "currency": "EUR",
+      "position_type": "EQUITY",
+      "weight_pct": 0.5
+    },
+    {
+      "ticker": "CIB",
+      "yfinance_ticker": "CIB",
+      "name": "Bancolombia ADR",
+      "currency": "USD",
+      "position_type": "EQUITY",
+      "weight_pct": 0.4
+    },
+    {
+      "ticker": "CASH.USD",
+      "yfinance_ticker": null,
+      "name": "US Dollar Cash",
+      "currency": "USD",
+      "position_type": "CASH",
+      "weight_pct": 1.1
+    },
+    {
+      "ticker": "CASH.EUR",
+      "yfinance_ticker": null,
+      "name": "Euro Cash",
+      "currency": "EUR",
+      "position_type": "CASH",
+      "weight_pct": 0.4
+    },
+    {
+      "ticker": "CASH.JPY",
+      "yfinance_ticker": null,
+      "name": "Japanese Yen Cash",
+      "currency": "JPY",
+      "position_type": "CASH",
+      "weight_pct": 0.7
+    },
+    {
+      "ticker": "CASH.CAD",
+      "yfinance_ticker": null,
+      "name": "Canadian Dollar Cash",
+      "currency": "CAD",
+      "position_type": "CASH",
+      "weight_pct": 0.5
+    }
+  ],
+  "metadata": {
+    "total_positions": 37,
+    "currencies": [
+      "CAD",
+      "EUR",
+      "GBP",
+      "HKD",
+      "JPY",
+      "MXN",
+      "USD"
+    ],
+    "equity_positions": 33,
+    "cash_positions": 4,
+    "generated_by": "scripts/generate_fixtures.py"
+  }
+}

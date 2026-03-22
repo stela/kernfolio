@@ -1334,7 +1334,7 @@ Backup uses Vault-issued short-lived DB credentials:
 
 1. **Vault is Block 8 (last).** Every other block uses plain env-var secrets. Vault is layered in as a cross-cutting concern after all features work. This avoids Vault infrastructure blocking any feature work.
 2. **Digital twins and Python fetch endpoints are separate blocks.** Twins are pure leaves serving fixture data; Python endpoints call real external APIs. Both implement the same API contract. In dev mode, `docker-compose.dev.yml` routes `YFINANCE_BASE_URL` / `FRANKFURTER_BASE_URL` to the twins, bypassing real APIs entirely.
-3. **Test fixtures are Block 0.** The 36-position portfolio JSON, fixture price CSVs, fixture FX rates, and golden-file optimization outputs are created first so every subsequent block has test data.
+3. **Test fixtures are Block 0.** The 37-position portfolio JSON, fixture price CSVs, fixture FX rates, and golden-file optimization outputs are created first so every subsequent block has test data.
 
 ### 14.2 Dependency Graph
 
@@ -1386,7 +1386,7 @@ Each block specifies: scope, directories touched, dependencies (blocks that must
 
 #### Block 0 — Test Data Fixtures
 
-**Scope**: 36-position portfolio JSON from Appendix B. Fixture price CSVs (3 years of daily closes for all tickers in the portfolio). Fixture FX rate JSON (EUR-based rates for USD, CAD, JPY, GBP, MXN, HKD). Pre-computed optimization golden files. WireMock response stubs for the Python service.
+**Scope**: 37-position portfolio JSON from Appendix B. Fixture price CSVs (3 years of daily closes for all tickers in the portfolio). Fixture FX rate JSON (EUR-based rates for USD, CAD, JPY, GBP, MXN, HKD). Pre-computed optimization golden files. WireMock response stubs for the Python service.
 
 **Directories**:
 - `optimizer/tests/fixtures/` — portfolio JSON, price CSV, expected optimization outputs
@@ -1681,7 +1681,7 @@ Each block specifies: scope, directories touched, dependencies (blocks that must
 
 ### 16.4 Test Data Fixtures
 
-Include a fixture file (`test-portfolio.json`) with the project owner's actual portfolio as a reference test case. The 36-position portfolio with positions across USD, CAD, JPY, GBP, MXN, HKD, and EUR provides excellent multi-currency test coverage. Expected optimization outputs should be pre-computed and stored as golden files.
+Include a fixture file (`test-portfolio.json`) with the project owner's actual portfolio as a reference test case. The 37-position portfolio with positions across USD, CAD, JPY, GBP, MXN, HKD, and EUR provides excellent multi-currency test coverage. Expected optimization outputs should be pre-computed and stored as golden files.
 
 ---
 
@@ -1738,7 +1738,7 @@ Where S is sample covariance, F is structured target (constant correlation or si
 
 ## Appendix B: Example Portfolio Data
 
-The primary test case is a portfolio with 36 positions across 7 currencies. The backend stores only percentage weights (the "Current %" column below). Absolute EUR values and share counts are held exclusively in the browser's localStorage for testing purposes.
+The primary test case is a portfolio with 37 positions across 7 currencies. The backend stores only percentage weights (the "Current %" column below). Absolute EUR values and share counts are held exclusively in the browser's localStorage for testing purposes.
 
 | Ticker | Name | Currency | Current % |
 |---|---|---|---|

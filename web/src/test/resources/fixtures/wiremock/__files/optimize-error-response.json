@@ -1,0 +1,5 @@
+{
+  "error": "OptimizationError",
+  "message": "Covariance matrix is singular. Need more price history.",
+  "detail": "Matrix condition number exceeds threshold."
+}

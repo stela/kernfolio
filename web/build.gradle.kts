@@ -37,6 +37,7 @@ dependencies {
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.security:spring-security-test")
     testImplementation("io.mockk:mockk:1.14.9")
+    testImplementation("org.wiremock:wiremock-standalone:3.13.0")
     testRuntimeOnly("com.h2database:h2")
 }
 

@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "POST",
+    "urlPath": "/optimize",
+    "headers": {
+      "Content-Type": {
+        "equalTo": "application/json"
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "bodyFileName": "optimize-response.json",
+    "headers": {
+      "Content-Type": "application/json"
+    }
+  }
+}
