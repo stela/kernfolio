@@ -7,11 +7,6 @@ spring:
     username: ${DB_USER:kernfolio}
     password: ${DB_PASSWORD:kernfolio}
 
-  jpa:
-    open-in-view: false
-    hibernate:
-      ddl-auto: validate
-
   liquibase:
     change-log: classpath:db/changelog/db.changelog-master.yaml
 

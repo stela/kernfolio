@@ -218,10 +218,10 @@ For any candidate allocation, compute **effective number of independent bets**: 
 | Component | Choice | Version | Notes |
 |---|---|---|---|
 | Language | Kotlin | 2.3.20 | JVM 25 |
-| Framework | Spring Boot | 4.0.4 | Web, Security, Data JPA, Actuator |
+| Framework | Spring Boot | 4.0.4 | Web, Security, Data JDBC, Actuator |
 | Template Engine | Thymeleaf | (bundled) | Server-side HTML rendering |
 | HTMX Integration | htmx-spring-boot-thymeleaf | latest | Wim Deblauwe's library (Maven Central) |
-| Database Access | Spring Data JPA + Hibernate | (bundled) | PostgreSQL dialect |
+| Database Access | Spring Data JDBC | (bundled) | No ORM — plain SQL with Kotlin data class mapping |
 | HTTP Client | Spring WebClient (WebFlux) | (bundled) | For calling Python service |
 | Resilience | Resilience4j | latest | Circuit breaker for Python service calls |
 | Migrations | Liquibase | latest | YAML-based changelogs |
@@ -677,15 +677,15 @@ src/main/kotlin/com/portfoliooptimizer/
 │   ├── OptimizerClientConfig.kt   -- WebClient + Resilience4j for Python service
 │   └── SchedulingConfig.kt        -- @EnableScheduling for market data refresh
 ├── domain/
-│   ├── User.kt                    -- JPA entity
-│   ├── Portfolio.kt               -- JPA entity
-│   ├── Position.kt                -- JPA entity
-│   ├── OptimizationRun.kt         -- JPA entity with JSONB columns
-│   ├── FeatureFlag.kt             -- JPA entity
-│   ├── InviteCode.kt              -- JPA entity
-│   ├── CachedPrice.kt             -- JPA entity (composite key)
-│   ├── CachedFxRate.kt            -- JPA entity (composite key)
-│   └── Instrument.kt              -- JPA entity
+│   ├── User.kt                    -- Spring Data JDBC entity
+│   ├── Portfolio.kt               -- Spring Data JDBC entity
+│   ├── Position.kt                -- Spring Data JDBC entity
+│   ├── OptimizationRun.kt         -- Spring Data JDBC entity, JSONB via custom Converter
+│   ├── FeatureFlag.kt             -- Spring Data JDBC entity
+│   ├── InviteCode.kt              -- Spring Data JDBC entity
+│   ├── CachedPrice.kt             -- Spring Data JDBC entity, composite key via @Embedded
+│   ├── CachedFxRate.kt            -- Spring Data JDBC entity, composite key via @Embedded
+│   └── Instrument.kt              -- Spring Data JDBC entity
 ├── repository/
 │   ├── UserRepository.kt
 │   ├── PortfolioRepository.kt
@@ -724,7 +724,7 @@ src/main/kotlin/com/portfoliooptimizer/
 │   ├── FrankfurterClient.kt       -- REST client for api.frankfurter.dev
 │   └── TickerMapper.kt            -- Maps internal tickers to yfinance format
 └── security/
-    ├── CustomUserDetailsService.kt -- JPA-backed UserDetailsService
+    ├── CustomUserDetailsService.kt -- Spring Data JDBC-backed UserDetailsService
     └── TenantFilter.kt            -- Sets app.current_user_id for RLS
 ```
 
@@ -732,7 +732,7 @@ src/main/kotlin/com/portfoliooptimizer/
 
 **yfinance from Kotlin**: Since yfinance is Python-only, price fetching is exposed as endpoints on the Python FastAPI service (e.g., `POST /fetch-prices`, `POST /fetch-fx-rates`). Spring Boot calls these via REST, same as optimization requests. This keeps all Python dependencies in one service and avoids `ProcessBuilder` shelling out to scripts.
 
-**JSONB columns in JPA**: Use `@Type(JsonBinaryType::class)` from `vladmihalcea/hibernate-types` library. Map to `Map<String, Any>` or dedicated Kotlin data classes with Jackson.
+**JSONB columns in Spring Data JDBC**: Register a custom `ReadingConverter` / `WritingConverter` pair that uses Jackson to serialize Kotlin data classes to/from `PGobject` with type `jsonb`. Register these converters via a `@Configuration` class extending `AbstractJdbcConfiguration`. No third-party library needed beyond Jackson (already included).
 
 **TenantFilter**: A Spring `OncePerRequestFilter` that runs after authentication. Reads the authenticated user's ID and role, then executes `SET LOCAL app.current_user_id = '{userId}'; SET LOCAL app.current_user_role = '{role}'` on the current JDBC connection. This activates PostgreSQL RLS policies for the remainder of the request. The policies use the single-argument `current_setting()` so that an unset variable throws an error — fail-fast to surface missing TenantFilter bugs rather than silently returning empty results.
 
@@ -1351,7 +1351,7 @@ Wave 2 (depend on Block 0, parallel):
   Block 2a: Liquibase Schema Migration
 
 Wave 3 (depends on 2a):
-  Block 2b: JPA Entities + Repositories
+  Block 2b: Entities + Repositories (Spring Data JDBC)
 
 Wave 4 (depend on 2b, parallel):
   Block 3a: Spring Security + TenantFilter
@@ -1458,15 +1458,15 @@ Each block specifies: scope, directories touched, dependencies (blocks that must
 
 ---
 
-#### Block 2b — JPA Entities + Repositories
+#### Block 2b — Entities + Repositories (Spring Data JDBC)
 
-**Scope**: 9 JPA entities (`User`, `InviteCode`, `Portfolio`, `Position`, `OptimizationRun`, `FeatureFlag`, `CachedPrice`, `CachedFxRate`, `Instrument`) and 9 Spring Data repositories. Composite keys for `CachedPrice` and `CachedFxRate`. JSONB mapping via `@JdbcTypeCode(SqlTypes.JSON)` (Hibernate 6+ native). UUID array for `FeatureFlag.allowedUserIds`. Add Testcontainers to `build.gradle.kts`.
+**Scope**: 9 Kotlin data classes as Spring Data JDBC entities (`User`, `InviteCode`, `Portfolio`, `Position`, `OptimizationRun`, `FeatureFlag`, `CachedPrice`, `CachedFxRate`, `Instrument`) and 9 `CrudRepository` interfaces. Composite keys for `CachedPrice` and `CachedFxRate` via `@Embedded`. JSONB columns via custom `ReadingConverter`/`WritingConverter` with Jackson. UUID array for `FeatureFlag.allowedUserIds`. Custom `@Query` with native SQL where needed. `AbstractJdbcConfiguration` subclass to register converters. Add Testcontainers to `build.gradle.kts`.
 
-**Directories**: `web/src/main/kotlin/com/kernfolio/domain/`, `web/src/main/kotlin/com/kernfolio/repository/`, `web/src/test/`, `web/build.gradle.kts`
+**Directories**: `web/src/main/kotlin/com/kernfolio/domain/`, `web/src/main/kotlin/com/kernfolio/repository/`, `web/src/main/kotlin/com/kernfolio/config/JdbcConfig.kt`, `web/src/test/`, `web/build.gradle.kts`
 
 **Dependencies**: Block 2a.
 
-**Verification**: Testcontainers integration tests (insert/query/delete against real PostgreSQL). `hibernate.ddl-auto=validate` passes (entity mappings match schema).
+**Verification**: Testcontainers integration tests (insert/query/delete against real PostgreSQL with Liquibase migrations applied). Schema matches entities (no ORM validation — Liquibase is the source of truth).
 
 ---
 
