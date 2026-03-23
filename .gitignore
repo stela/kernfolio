@@ -37,6 +37,9 @@ venv/
 # Claude Code
 .claude/
 
+# Generated CSS
+web/src/main/resources/static/css/tailwind.css
+
 # OS
 .DS_Store
 Thumbs.db

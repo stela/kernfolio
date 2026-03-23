@@ -30,6 +30,10 @@ dependencies {
     implementation("tools.jackson.module:jackson-module-kotlin")
     implementation("org.jetbrains.kotlin:kotlin-reflect")
     implementation("org.liquibase:liquibase-core")
+    implementation("io.github.wimdeblauwe:htmx-spring-boot-thymeleaf:4.0.1")
+    implementation("org.webjars.npm:htmx.org:2.0.4")
+    implementation("org.webjars.npm:alpinejs:3.15.8")
+    implementation("org.webjars.npm:chart.js:4.5.1")
     runtimeOnly("org.postgresql:postgresql")
 
     developmentOnly("org.springframework.boot:spring-boot-devtools")
@@ -39,6 +43,20 @@ dependencies {
     testImplementation("io.mockk:mockk:1.14.9")
     testImplementation("org.wiremock:wiremock-standalone:3.13.0")
     testRuntimeOnly("com.h2database:h2")
+}
+
+val tailwindBuild by tasks.registering(Exec::class) {
+    description = "Build Tailwind CSS from source"
+    val inputCss = file("src/main/resources/static/css/input.css")
+    val outputCss = file("src/main/resources/static/css/tailwind.css")
+    inputs.file(inputCss)
+    inputs.files(fileTree("src/main/resources/templates") { include("**/*.html") })
+    outputs.file(outputCss)
+    commandLine("tailwindcss", "-i", inputCss.path, "-o", outputCss.path, "--minify")
+}
+
+tasks.named("processResources") {
+    dependsOn(tailwindBuild)
 }
 
 tasks.withType<Test> {

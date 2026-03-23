@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" th:content="${_csrf.token}">
+    <meta name="csrf-header" th:content="${_csrf.headerName}">
+    <title th:fragment="title">Kernfolio</title>
+    <link rel="stylesheet" th:href="@{/css/tailwind.css}">
+</head>
+<body class="min-h-screen bg-gray-50 text-gray-900">
+
+    <nav th:fragment="nav" class="bg-white border-b border-gray-200">
+        <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <div class="flex h-16 items-center justify-between">
+                <a th:href="@{/}" class="text-xl font-semibold text-gray-900">Kernfolio</a>
+            </div>
+        </div>
+    </nav>
+
+    <main th:fragment="content" class="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+    </main>
+
+    <footer th:fragment="footer" class="mt-auto border-t border-gray-200 bg-white">
+        <div class="mx-auto max-w-7xl px-4 py-4 text-center text-sm text-gray-500 sm:px-6 lg:px-8">
+            Kernfolio
+        </div>
+    </footer>
+
+    <script th:src="@{/webjars/htmx.org/2.0.4/dist/htmx.min.js}"></script>
+    <script th:src="@{/webjars/alpinejs/3.15.8/dist/cdn.min.js}" defer></script>
+    <script th:src="@{/webjars/chart.js/4.5.1/dist/chart.umd.min.js}"></script>
+    <script th:src="@{/js/htmx-csrf.js}"></script>
+    <th:block th:fragment="scripts"></th:block>
+</body>
+</html>
