@@ -35,7 +35,7 @@ dependencies {
     implementation("org.webjars.npm:htmx.org:2.0.4")
     implementation("org.webjars.npm:alpinejs:3.15.8")
     implementation("org.webjars.npm:chart.js:4.5.1")
-    runtimeOnly("org.postgresql:postgresql")
+    implementation("org.postgresql:postgresql")
 
     developmentOnly("org.springframework.boot:spring-boot-devtools")
 
@@ -43,6 +43,10 @@ dependencies {
     testImplementation("org.springframework.security:spring-security-test")
     testImplementation("io.mockk:mockk:1.14.9")
     testImplementation("org.wiremock:wiremock-standalone:3.13.0")
+    testImplementation(platform("org.testcontainers:testcontainers-bom:1.20.6"))
+    testImplementation("org.testcontainers:junit-jupiter")
+    testImplementation("org.testcontainers:postgresql")
+    testImplementation("org.springframework.boot:spring-boot-testcontainers")
     testRuntimeOnly("com.h2database:h2")
 }
 
