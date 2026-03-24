@@ -1,0 +1,328 @@
+databaseChangeLog:
+
+  # ── pgcrypto extension ──────────────────────────────────────────────
+  - changeSet:
+      id: 001-pgcrypto
+      author: kernfolio
+      changes:
+        - sql:
+            sql: CREATE EXTENSION IF NOT EXISTS "pgcrypto"
+      rollback:
+        - sql:
+            sql: DROP EXTENSION IF EXISTS "pgcrypto"
+
+  # ── users ───────────────────────────────────────────────────────────
+  - changeSet:
+      id: 001-create-users
+      author: kernfolio
+      changes:
+        - sql:
+            sql: |
+              CREATE TABLE users (
+                  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                  username VARCHAR(50) UNIQUE NOT NULL,
+                  email VARCHAR(255) UNIQUE NOT NULL,
+                  password_hash VARCHAR(255) NOT NULL,
+                  role VARCHAR(20) NOT NULL DEFAULT 'USER',
+                  enabled BOOLEAN NOT NULL DEFAULT true,
+                  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+              )
+      rollback:
+        - sql:
+            sql: DROP TABLE IF EXISTS users
+
+  # ── invite_codes ────────────────────────────────────────────────────
+  - changeSet:
+      id: 001-create-invite-codes
+      author: kernfolio
+      changes:
+        - sql:
+            sql: |
+              CREATE TABLE invite_codes (
+                  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                  code VARCHAR(20) UNIQUE NOT NULL,
+                  created_by UUID NOT NULL REFERENCES users(id),
+                  used_by UUID REFERENCES users(id),
+                  used_at TIMESTAMPTZ,
+                  expires_at TIMESTAMPTZ,
+                  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+              )
+      rollback:
+        - sql:
+            sql: DROP TABLE IF EXISTS invite_codes
+
+  # ── portfolios ──────────────────────────────────────────────────────
+  - changeSet:
+      id: 001-create-portfolios
+      author: kernfolio
+      changes:
+        - sql:
+            sql: |
+              CREATE TABLE portfolios (
+                  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                  name VARCHAR(100) NOT NULL,
+                  description TEXT,
+                  base_currency CHAR(3) NOT NULL DEFAULT 'EUR',
+                  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+              )
+      rollback:
+        - sql:
+            sql: DROP TABLE IF EXISTS portfolios
+
+  # ── positions ───────────────────────────────────────────────────────
+  - changeSet:
+      id: 001-create-positions
+      author: kernfolio
+      changes:
+        - sql:
+            sql: |
+              CREATE TABLE positions (
+                  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                  portfolio_id UUID NOT NULL REFERENCES portfolios(id) ON DELETE CASCADE,
+                  position_type VARCHAR(10) NOT NULL DEFAULT 'EQUITY',
+                  ticker VARCHAR(20) NOT NULL,
+                  name VARCHAR(100),
+                  currency CHAR(3) NOT NULL,
+                  weight_pct NUMERIC(7,6) NOT NULL,
+                  cost_basis_pct NUMERIC(7,6),
+                  intrinsic_value_local NUMERIC(14,4),
+                  confidence_pct NUMERIC(5,4),
+                  sector VARCHAR(50),
+                  notes TEXT,
+                  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+              )
+      rollback:
+        - sql:
+            sql: DROP TABLE IF EXISTS positions
+
+  # ── optimization_runs ───────────────────────────────────────────────
+  - changeSet:
+      id: 001-create-optimization-runs
+      author: kernfolio
+      changes:
+        - sql:
+            sql: |
+              CREATE TABLE optimization_runs (
+                  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                  portfolio_id UUID NOT NULL REFERENCES portfolios(id) ON DELETE CASCADE,
+                  algorithm VARCHAR(30) NOT NULL,
+                  parameters JSONB NOT NULL,
+                  results JSONB NOT NULL,
+                  status VARCHAR(20) NOT NULL DEFAULT 'COMPLETED',
+                  error_message TEXT,
+                  computation_ms INTEGER,
+                  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+              )
+      rollback:
+        - sql:
+            sql: DROP TABLE IF EXISTS optimization_runs
+
+  # ── feature_flags ───────────────────────────────────────────────────
+  - changeSet:
+      id: 001-create-feature-flags
+      author: kernfolio
+      changes:
+        - sql:
+            sql: |
+              CREATE TABLE feature_flags (
+                  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                  flag_name VARCHAR(50) UNIQUE NOT NULL,
+                  enabled BOOLEAN NOT NULL DEFAULT false,
+                  description TEXT,
+                  allowed_user_ids UUID[] DEFAULT '{}',
+                  rollout_pct INTEGER DEFAULT 100,
+                  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+              )
+      rollback:
+        - sql:
+            sql: DROP TABLE IF EXISTS feature_flags
+
+  # ── cached_prices ───────────────────────────────────────────────────
+  - changeSet:
+      id: 001-create-cached-prices
+      author: kernfolio
+      changes:
+        - sql:
+            sql: |
+              CREATE TABLE cached_prices (
+                  ticker VARCHAR(20) NOT NULL,
+                  price_date DATE NOT NULL,
+                  close_price NUMERIC(14,4) NOT NULL,
+                  currency CHAR(3) NOT NULL,
+                  fetched_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                  PRIMARY KEY (ticker, price_date)
+              )
+      rollback:
+        - sql:
+            sql: DROP TABLE IF EXISTS cached_prices
+
+  # ── cached_fx_rates ─────────────────────────────────────────────────
+  - changeSet:
+      id: 001-create-cached-fx-rates
+      author: kernfolio
+      changes:
+        - sql:
+            sql: |
+              CREATE TABLE cached_fx_rates (
+                  currency_pair VARCHAR(7) NOT NULL,
+                  rate_date DATE NOT NULL,
+                  rate NUMERIC(14,8) NOT NULL,
+                  fetched_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                  PRIMARY KEY (currency_pair, rate_date)
+              )
+      rollback:
+        - sql:
+            sql: DROP TABLE IF EXISTS cached_fx_rates
+
+  # ── instruments ─────────────────────────────────────────────────────
+  - changeSet:
+      id: 001-create-instruments
+      author: kernfolio
+      changes:
+        - sql:
+            sql: |
+              CREATE TABLE instruments (
+                  ticker VARCHAR(20) PRIMARY KEY,
+                  name VARCHAR(200),
+                  exchange VARCHAR(50),
+                  currency CHAR(3),
+                  sector VARCHAR(50),
+                  market_cap_usd NUMERIC(16,2),
+                  last_refreshed_at TIMESTAMPTZ
+              )
+      rollback:
+        - sql:
+            sql: DROP TABLE IF EXISTS instruments
+
+  # ── indexes ─────────────────────────────────────────────────────────
+  - changeSet:
+      id: 001-create-indexes
+      author: kernfolio
+      changes:
+        - sql:
+            sql: |
+              CREATE INDEX idx_portfolios_user_id ON portfolios(user_id);
+              CREATE INDEX idx_positions_portfolio_id ON positions(portfolio_id);
+              CREATE INDEX idx_optimization_runs_portfolio_id ON optimization_runs(portfolio_id);
+              CREATE INDEX idx_cached_prices_ticker ON cached_prices(ticker);
+              CREATE INDEX idx_cached_fx_rates_pair ON cached_fx_rates(currency_pair)
+      rollback:
+        - sql:
+            sql: |
+              DROP INDEX IF EXISTS idx_cached_fx_rates_pair;
+              DROP INDEX IF EXISTS idx_cached_prices_ticker;
+              DROP INDEX IF EXISTS idx_optimization_runs_portfolio_id;
+              DROP INDEX IF EXISTS idx_positions_portfolio_id;
+              DROP INDEX IF EXISTS idx_portfolios_user_id
+
+  # ── Row-Level Security ──────────────────────────────────────────────
+  - changeSet:
+      id: 001-rls-policies
+      author: kernfolio
+      changes:
+        - sql:
+            sql: |
+              ALTER TABLE portfolios ENABLE ROW LEVEL SECURITY;
+              ALTER TABLE positions ENABLE ROW LEVEL SECURITY;
+              ALTER TABLE optimization_runs ENABLE ROW LEVEL SECURITY;
+
+              CREATE POLICY portfolios_user_isolation ON portfolios
+                  USING (
+                      user_id = current_setting('app.current_user_id')::UUID
+                      OR current_setting('app.current_user_role') = 'ADMIN'
+                  );
+
+              CREATE POLICY positions_user_isolation ON positions
+                  USING (
+                      portfolio_id IN (
+                          SELECT id FROM portfolios WHERE user_id = current_setting('app.current_user_id')::UUID
+                      )
+                      OR current_setting('app.current_user_role') = 'ADMIN'
+                  );
+
+              CREATE POLICY optimization_runs_user_isolation ON optimization_runs
+                  USING (
+                      portfolio_id IN (
+                          SELECT id FROM portfolios WHERE user_id = current_setting('app.current_user_id')::UUID
+                      )
+                      OR current_setting('app.current_user_role') = 'ADMIN'
+                  )
+      rollback:
+        - sql:
+            sql: |
+              DROP POLICY IF EXISTS optimization_runs_user_isolation ON optimization_runs;
+              DROP POLICY IF EXISTS positions_user_isolation ON positions;
+              DROP POLICY IF EXISTS portfolios_user_isolation ON portfolios;
+              ALTER TABLE optimization_runs DISABLE ROW LEVEL SECURITY;
+              ALTER TABLE positions DISABLE ROW LEVEL SECURITY;
+              ALTER TABLE portfolios DISABLE ROW LEVEL SECURITY
+
+  # ── COMMENT ON statements ───────────────────────────────────────────
+  - changeSet:
+      id: 001-comments
+      author: kernfolio
+      changes:
+        - sql:
+            sql: |
+              -- users
+              COMMENT ON TABLE users IS 'Application users with role-based access';
+              COMMENT ON COLUMN users.role IS '''USER'' or ''ADMIN''';
+              COMMENT ON COLUMN users.enabled IS 'Soft-disable without deleting';
+
+              -- invite_codes
+              COMMENT ON TABLE invite_codes IS 'Invite-only registration codes';
+              COMMENT ON COLUMN invite_codes.code IS 'Unique invite code string';
+              COMMENT ON COLUMN invite_codes.created_by IS 'Admin who generated this code';
+              COMMENT ON COLUMN invite_codes.used_by IS 'User who redeemed this code (NULL if unused)';
+
+              -- portfolios
+              COMMENT ON TABLE portfolios IS 'User candidate portfolios for optimization';
+              COMMENT ON COLUMN portfolios.base_currency IS 'ISO 4217 base currency for the portfolio (default EUR)';
+
+              -- positions
+              COMMENT ON TABLE positions IS 'Positions within a portfolio. Absolute values (share counts, cash amounts) stay in the browser; backend stores only percentage weights.';
+              COMMENT ON COLUMN positions.position_type IS '''EQUITY'' or ''CASH''';
+              COMMENT ON COLUMN positions.ticker IS 'yfinance format: "4256.T", "3690.HK", "GOOG"; cash: "CASH.USD", "CASH.JPY"';
+              COMMENT ON COLUMN positions.name IS 'Human-readable name, e.g. "CYND Co., Ltd." or "US Dollar Cash"';
+              COMMENT ON COLUMN positions.currency IS 'Original trading currency (ISO 4217)';
+              COMMENT ON COLUMN positions.weight_pct IS 'Current allocation as decimal (0.084000 = 8.4%)';
+              COMMENT ON COLUMN positions.cost_basis_pct IS 'Cost basis as fraction of portfolio value; enables % gain/loss without absolute amounts';
+              COMMENT ON COLUMN positions.intrinsic_value_local IS '5-year intrinsic value per share in local currency (equity only, NULL for cash)';
+              COMMENT ON COLUMN positions.confidence_pct IS '0.0 to 1.0; maps to BL view uncertainty via Idzorek (equity only, NULL for cash)';
+              COMMENT ON COLUMN positions.sector IS 'For sector constraints in optimization';
+
+              -- optimization_runs
+              COMMENT ON TABLE optimization_runs IS 'Stored optimization run results';
+              COMMENT ON COLUMN optimization_runs.algorithm IS '''BLACK_LITTERMAN'', ''MEAN_VARIANCE'', ''CVAR'', ''HRP'', or ''KELLY''';
+              COMMENT ON COLUMN optimization_runs.parameters IS 'Algorithm-specific inputs (JSONB)';
+              COMMENT ON COLUMN optimization_runs.results IS 'Optimized weights, metrics, correlation clusters (JSONB)';
+              COMMENT ON COLUMN optimization_runs.status IS '''RUNNING'', ''COMPLETED'', or ''FAILED''';
+              COMMENT ON COLUMN optimization_runs.computation_ms IS 'Execution time in milliseconds';
+
+              -- feature_flags
+              COMMENT ON TABLE feature_flags IS 'Feature flags for phased rollout';
+              COMMENT ON COLUMN feature_flags.allowed_user_ids IS 'Empty array = applies to all users (if enabled)';
+              COMMENT ON COLUMN feature_flags.rollout_pct IS '0-100 for gradual rollout';
+
+              -- cached_prices
+              COMMENT ON TABLE cached_prices IS 'Shared cache of daily closing prices';
+              COMMENT ON COLUMN cached_prices.close_price IS 'Daily closing price in local currency';
+
+              -- cached_fx_rates
+              COMMENT ON TABLE cached_fx_rates IS 'Shared cache of EUR-based daily FX rates';
+              COMMENT ON COLUMN cached_fx_rates.currency_pair IS 'e.g. "EURUSD", "EURJPY"';
+              COMMENT ON COLUMN cached_fx_rates.rate IS 'EUR-based exchange rate';
+
+              -- instruments
+              COMMENT ON TABLE instruments IS 'Shared instrument metadata cache';
+              COMMENT ON COLUMN instruments.market_cap_usd IS 'Market cap in USD for BL equilibrium weights'
+      rollback:
+        - sql:
+            sql: |
+              -- Comments are dropped automatically when tables are dropped
+              SELECT 1
