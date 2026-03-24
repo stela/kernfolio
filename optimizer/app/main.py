@@ -1,9 +1,14 @@
-from fastapi import FastAPI
+import traceback
+
+from fastapi import FastAPI, HTTPException
 
 from app.fetchers import fetch_fx_rates, fetch_prices
+from app.optimizer import run_optimization
 from app.schemas import (
     FxRateFetchRequest,
     FxRateFetchResponse,
+    OptimizeRequest,
+    OptimizeResponse,
     PriceFetchRequest,
     PriceFetchResponse,
 )
@@ -24,3 +29,18 @@ def fetch_prices_endpoint(request: PriceFetchRequest):
 @app.post("/fetch-fx-rates", response_model=FxRateFetchResponse)
 async def fetch_fx_rates_endpoint(request: FxRateFetchRequest):
     return await fetch_fx_rates(request)
+
+
+@app.post("/optimize", response_model=OptimizeResponse)
+def optimize_endpoint(request: OptimizeRequest):
+    try:
+        return run_optimization(request)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "OptimizationError",
+                "message": str(exc),
+                "detail": traceback.format_exc(),
+            },
+        ) from exc
