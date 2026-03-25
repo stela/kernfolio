@@ -1,0 +1,27 @@
+databaseChangeLog:
+  - changeSet:
+      id: 002-seed-feature-flags
+      author: kernfolio
+      changes:
+        - sql:
+            sql: |
+              INSERT INTO feature_flags (flag_name, enabled, description, rollout_pct) VALUES
+                ('ALGO_BLACK_LITTERMAN', true, 'Black-Litterman optimization available', 100),
+                ('ALGO_MEAN_VARIANCE', true, 'Markowitz mean-variance (max Sharpe) optimization', 100),
+                ('ALGO_KELLY', false, 'Multi-asset Kelly criterion optimization', 100),
+                ('ALGO_CVAR', false, 'CVaR (Expected Shortfall) optimization', 100),
+                ('ALGO_HRP', false, 'Hierarchical Risk Parity optimization', 100),
+                ('SHOW_EFFICIENT_FRONTIER', true, 'Efficient frontier chart on results page', 100),
+                ('SHOW_CORRELATION_HEATMAP', false, 'Correlation matrix heatmap visualization', 100),
+                ('SHOW_CLUSTER_ANALYSIS', false, 'Correlation cluster breakdown visualization', 100),
+                ('SELF_REGISTRATION', false, 'Public registration without invite code', 100),
+                ('IMPORT_IBKR', false, 'Import portfolio from IBKR CSV/report', 100)
+      rollback:
+        - sql:
+            sql: |
+              DELETE FROM feature_flags WHERE flag_name IN (
+                'ALGO_BLACK_LITTERMAN', 'ALGO_MEAN_VARIANCE', 'ALGO_KELLY',
+                'ALGO_CVAR', 'ALGO_HRP', 'SHOW_EFFICIENT_FRONTIER',
+                'SHOW_CORRELATION_HEATMAP', 'SHOW_CLUSTER_ANALYSIS',
+                'SELF_REGISTRATION', 'IMPORT_IBKR'
+              )
