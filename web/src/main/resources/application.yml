@@ -16,6 +16,18 @@ spring:
 optimizer:
   base-url: ${OPTIMIZER_BASE_URL:http://localhost:8000}
 
+market-data:
+  scheduler:
+    cron: "0 0 22 * * *"
+    enabled: true
+  default-currencies:
+    - USD
+    - CAD
+    - JPY
+    - GBP
+    - MXN
+    - HKD
+
 server:
   port: 8080
   servlet:
