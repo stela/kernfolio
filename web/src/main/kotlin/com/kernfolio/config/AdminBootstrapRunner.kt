@@ -27,6 +27,7 @@ class AdminBootstrapRunner(
             email = "system@kernfolio.local",
             rawPassword = java.util.UUID.randomUUID().toString(),
             role = "ADMIN",
+            enabled = false,
         )
 
         val inviteCode = inviteCodeService.generateCode(createdBy = systemUser.id!!)

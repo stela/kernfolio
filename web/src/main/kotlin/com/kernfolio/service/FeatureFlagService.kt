@@ -1,5 +1,6 @@
 package com.kernfolio.service
 
+import com.kernfolio.domain.FeatureFlag
 import com.kernfolio.repository.FeatureFlagRepository
 import org.springframework.stereotype.Service
 import java.util.UUID
@@ -21,5 +22,14 @@ class FeatureFlagService(private val featureFlagRepository: FeatureFlagRepositor
             return (userId.hashCode().absoluteValue % 100) < flag.rolloutPct
         }
         return true
+    }
+
+    fun findAll(): List<FeatureFlag> =
+        featureFlagRepository.findAll()
+
+    fun updateFlag(id: UUID, enabled: Boolean, rolloutPct: Int): FeatureFlag {
+        val flag = featureFlagRepository.findById(id)
+            .orElseThrow { IllegalArgumentException("Feature flag not found: $id") }
+        return featureFlagRepository.save(flag.copy(enabled = enabled, rolloutPct = rolloutPct))
     }
 }

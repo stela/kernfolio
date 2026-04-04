@@ -7,8 +7,10 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
+import com.kernfolio.repository.InviteCodeRepository
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.context.annotation.Import
+import org.springframework.transaction.annotation.Transactional
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user
@@ -30,6 +32,7 @@ class TenantFilterTest {
 
     @Autowired lateinit var context: WebApplicationContext
     @Autowired lateinit var userRepository: UserRepository
+    @Autowired lateinit var inviteCodeRepository: InviteCodeRepository
     @Autowired lateinit var passwordEncoder: PasswordEncoder
 
     lateinit var mockMvc: MockMvc
@@ -40,6 +43,7 @@ class TenantFilterTest {
         mockMvc = MockMvcBuilders.webAppContextSetup(context)
             .apply<DefaultMockMvcBuilder>(springSecurity())
             .build()
+        inviteCodeRepository.deleteAll()
         userRepository.deleteAll()
         testUser = userRepository.save(
             User(

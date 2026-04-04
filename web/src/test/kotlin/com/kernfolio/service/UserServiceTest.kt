@@ -8,6 +8,7 @@ import io.mockk.slot
 import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Nested
@@ -105,6 +106,66 @@ class UserServiceTest {
         fun `delegates to repository count`() {
             every { userRepository.count() } returns 42
             assertEquals(42, userService.countUsers())
+        }
+    }
+
+    @Nested
+    inner class FindAll {
+
+        @Test
+        fun `delegates to repository findAll`() {
+            val users = listOf(mockk<User>())
+            every { userRepository.findAll() } returns users
+            assertEquals(users, userService.findAll())
+        }
+    }
+
+    @Nested
+    inner class FindById {
+
+        @Test
+        fun `returns user when found`() {
+            val user = mockk<User>()
+            val id = UUID.randomUUID()
+            every { userRepository.findById(id) } returns java.util.Optional.of(user)
+            assertEquals(user, userService.findById(id))
+        }
+
+        @Test
+        fun `returns null when not found`() {
+            val id = UUID.randomUUID()
+            every { userRepository.findById(id) } returns java.util.Optional.empty()
+            assertNull(userService.findById(id))
+        }
+    }
+
+    @Nested
+    inner class SetEnabled {
+
+        @Test
+        fun `disables user`() {
+            val id = UUID.randomUUID()
+            val user = User(id = id, username = "alice", email = "a@b.com", passwordHash = "h", enabled = true)
+            val userSlot = slot<User>()
+            every { userRepository.findById(id) } returns java.util.Optional.of(user)
+            every { userRepository.save(capture(userSlot)) } answers { userSlot.captured }
+
+            userService.setEnabled(id, false)
+
+            assertFalse(userSlot.captured.enabled)
+        }
+
+        @Test
+        fun `enables user`() {
+            val id = UUID.randomUUID()
+            val user = User(id = id, username = "alice", email = "a@b.com", passwordHash = "h", enabled = false)
+            val userSlot = slot<User>()
+            every { userRepository.findById(id) } returns java.util.Optional.of(user)
+            every { userRepository.save(capture(userSlot)) } answers { userSlot.captured }
+
+            userService.setEnabled(id, true)
+
+            assertTrue(userSlot.captured.enabled)
         }
     }
 }

@@ -30,7 +30,7 @@ class AdminBootstrapRunnerTest {
         fun `creates system user and generates invite code`() {
             val systemUserId = UUID.randomUUID()
             every { userService.countUsers() } returns 0
-            every { userService.createUser(any(), any(), any(), any()) } returns User(
+            every { userService.createUser(any(), any(), any(), any(), any()) } returns User(
                 id = systemUserId,
                 username = "__system__",
                 email = "system@kernfolio.local",
@@ -45,7 +45,7 @@ class AdminBootstrapRunnerTest {
 
             runner.run(mockk())
 
-            verify { userService.createUser("__system__", "system@kernfolio.local", any(), "ADMIN") }
+            verify { userService.createUser("__system__", "system@kernfolio.local", any(), "ADMIN", false) }
             verify { inviteCodeService.generateCode(systemUserId) }
         }
     }
@@ -59,7 +59,7 @@ class AdminBootstrapRunnerTest {
 
             runner.run(mockk())
 
-            verify(exactly = 0) { userService.createUser(any(), any(), any(), any()) }
+            verify(exactly = 0) { userService.createUser(any(), any(), any(), any(), any()) }
             verify(exactly = 0) { inviteCodeService.generateCode(any()) }
         }
     }

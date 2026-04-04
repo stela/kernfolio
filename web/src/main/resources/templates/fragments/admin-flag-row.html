@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<body>
+
+<tr th:fragment="flag-row">
+    <td class="px-4 py-3 text-sm font-mono font-medium" th:text="${flag.flagName}"></td>
+    <td class="px-4 py-3 text-sm text-gray-500" th:text="${flag.description}"></td>
+    <td class="px-4 py-3 text-sm text-center">
+        <input type="checkbox" th:checked="${flag.enabled}" name="enabled" value="true"
+               class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+               form="flag-form" disabled>
+        <span th:if="${flag.enabled}" class="text-green-700 text-xs font-medium ml-1">ON</span>
+        <span th:unless="${flag.enabled}" class="text-gray-400 text-xs font-medium ml-1">OFF</span>
+    </td>
+    <td class="px-4 py-3 text-sm text-right font-mono" th:text="${flag.rolloutPct} + '%'"></td>
+    <td class="px-4 py-3 text-sm text-right">
+        <form class="inline-flex items-center gap-2">
+            <label class="text-xs text-gray-500">
+                <input type="checkbox" name="enabled" value="true" th:checked="${flag.enabled}"
+                       class="h-3.5 w-3.5 rounded border-gray-300 text-blue-600">
+            </label>
+            <input type="number" name="rolloutPct" th:value="${flag.rolloutPct}" min="0" max="100"
+                   class="w-16 rounded-md border border-gray-300 px-2 py-1 text-xs text-right">
+            <button type="button"
+                    th:attr="hx-post=@{/admin/flags/{id}(id=${flag.id})}"
+                    hx-include="closest form"
+                    hx-target="closest tr"
+                    hx-swap="outerHTML"
+                    class="rounded bg-blue-600 px-2 py-1 text-xs font-medium text-white hover:bg-blue-700">
+                Save
+            </button>
+        </form>
+    </td>
+</tr>
+
+</body>
+</html>

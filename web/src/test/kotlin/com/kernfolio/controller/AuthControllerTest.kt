@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.context.annotation.Import
+import org.springframework.transaction.annotation.Transactional
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf
 import org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity
@@ -29,6 +30,7 @@ import java.util.UUID
 
 @SpringBootTest
 @Import(TestcontainersConfiguration::class)
+@Transactional
 class AuthControllerTest {
 
     @Autowired lateinit var context: WebApplicationContext
@@ -44,8 +46,6 @@ class AuthControllerTest {
         mockMvc = MockMvcBuilders.webAppContextSetup(context)
             .apply<DefaultMockMvcBuilder>(springSecurity())
             .build()
-        inviteCodeRepository.deleteAll()
-        userRepository.deleteAll()
     }
 
     @Nested
@@ -225,9 +225,8 @@ class AuthControllerTest {
 
         @Test
         fun `first enabled user gets ADMIN role`() {
-            // Create system user (disabled) to have an invite code creator
-            val systemUser = createUser("__system__", "system@kernfolio.local", "ADMIN", enabled = false)
-            val invite = createInviteCode(systemUser.id!!)
+            // Use the invite code created by AdminBootstrapRunner at startup
+            val invite = inviteCodeRepository.findAllValid().first()
 
             mockMvc.perform(
                 post("/register")

@@ -40,7 +40,10 @@ class RepositoryIntegrationTest {
     inner class UserRepositoryTests {
 
         @BeforeEach
-        fun cleanup() = userRepository.deleteAll()
+        fun cleanup() {
+            inviteCodeRepository.deleteAll()
+            userRepository.deleteAll()
+        }
 
         @Test
         fun `save and find by id`() {
@@ -124,6 +127,7 @@ class RepositoryIntegrationTest {
         @BeforeEach
         fun cleanup() {
             portfolioRepository.deleteAll()
+            inviteCodeRepository.deleteAll()
             userRepository.deleteAll()
         }
 
@@ -158,6 +162,7 @@ class RepositoryIntegrationTest {
         fun cleanup() {
             positionRepository.deleteAll()
             portfolioRepository.deleteAll()
+            inviteCodeRepository.deleteAll()
             userRepository.deleteAll()
         }
 
@@ -228,6 +233,7 @@ class RepositoryIntegrationTest {
         fun cleanup() {
             optimizationRunRepository.deleteAll()
             portfolioRepository.deleteAll()
+            inviteCodeRepository.deleteAll()
             userRepository.deleteAll()
         }
 

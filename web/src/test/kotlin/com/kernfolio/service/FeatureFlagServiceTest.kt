@@ -4,9 +4,14 @@ import com.kernfolio.domain.FeatureFlag
 import com.kernfolio.repository.FeatureFlagRepository
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.slot
+import io.mockk.verify
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
+import java.util.Optional
 import java.util.UUID
 
 class FeatureFlagServiceTest {
@@ -80,5 +85,34 @@ class FeatureFlagServiceTest {
     fun `empty allowed list means no user restriction`() {
         every { repository.findByFlagName("TEST_FLAG") } returns flag(allowedUserIds = emptyList())
         assertTrue(service.isEnabled("TEST_FLAG", userId))
+    }
+
+    @Nested
+    inner class FindAll {
+
+        @Test
+        fun `returns all flags`() {
+            val flags = listOf(flag(), flag(enabled = false))
+            every { repository.findAll() } returns flags
+            assertEquals(flags, service.findAll())
+        }
+    }
+
+    @Nested
+    inner class UpdateFlag {
+
+        @Test
+        fun `updates enabled and rollout`() {
+            val flagId = UUID.randomUUID()
+            val existing = flag().copy(id = flagId, enabled = false, rolloutPct = 50)
+            val slot = slot<FeatureFlag>()
+            every { repository.findById(flagId) } returns Optional.of(existing)
+            every { repository.save(capture(slot)) } answers { slot.captured }
+
+            service.updateFlag(flagId, enabled = true, rolloutPct = 75)
+
+            assertTrue(slot.captured.enabled)
+            assertEquals(75, slot.captured.rolloutPct)
+        }
     }
 }

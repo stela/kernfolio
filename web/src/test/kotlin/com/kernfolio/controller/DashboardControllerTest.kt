@@ -3,7 +3,6 @@ package com.kernfolio.controller
 import com.kernfolio.TestcontainersConfiguration
 import com.kernfolio.domain.User
 import com.kernfolio.mockUserDetails
-import com.kernfolio.repository.InviteCodeRepository
 import com.kernfolio.repository.PortfolioRepository
 import com.kernfolio.repository.UserRepository
 import com.kernfolio.service.PortfolioService
@@ -14,6 +13,7 @@ import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.context.annotation.Import
+import org.springframework.transaction.annotation.Transactional
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user
 import org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity
@@ -28,12 +28,12 @@ import org.springframework.web.context.WebApplicationContext
 
 @SpringBootTest
 @Import(TestcontainersConfiguration::class)
+@Transactional
 class DashboardControllerTest {
 
     @Autowired lateinit var context: WebApplicationContext
     @Autowired lateinit var userRepository: UserRepository
     @Autowired lateinit var portfolioRepository: PortfolioRepository
-    @Autowired lateinit var inviteCodeRepository: InviteCodeRepository
     @Autowired lateinit var portfolioService: PortfolioService
     @Autowired lateinit var passwordEncoder: PasswordEncoder
 
@@ -44,9 +44,6 @@ class DashboardControllerTest {
         mockMvc = MockMvcBuilders.webAppContextSetup(context)
             .apply<DefaultMockMvcBuilder>(springSecurity())
             .build()
-        portfolioRepository.deleteAll()
-        inviteCodeRepository.deleteAll()
-        userRepository.deleteAll()
     }
 
     @Nested

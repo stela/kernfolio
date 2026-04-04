@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" th:content="${_csrf.token}">
+    <meta name="csrf-header" th:content="${_csrf.headerName}">
+    <title>Feature Flags - Admin - Kernfolio</title>
+    <link rel="stylesheet" th:href="@{/css/tailwind.css}">
+</head>
+<body class="min-h-screen bg-gray-50 text-gray-900">
+
+    <nav th:replace="~{layout/base :: nav}"></nav>
+
+    <main class="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+        <div class="flex items-center justify-between mb-6">
+            <h1 class="text-2xl font-semibold">Feature Flags</h1>
+            <a th:href="@{/admin}" class="text-sm font-medium text-blue-600 hover:text-blue-500">Back to admin</a>
+        </div>
+
+        <div class="bg-white shadow rounded-lg overflow-hidden">
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Flag</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Description</th>
+                        <th class="px-4 py-3 text-center text-xs font-medium uppercase text-gray-500">Enabled</th>
+                        <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500">Rollout %</th>
+                        <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200">
+                    <th:block th:each="flag : ${flags}">
+                        <tr th:replace="~{fragments/admin-flag-row :: flag-row}"></tr>
+                    </th:block>
+                </tbody>
+            </table>
+        </div>
+    </main>
+
+    <footer th:replace="~{layout/base :: footer}"></footer>
+
+    <script th:src="@{/webjars/htmx.org/2.0.4/dist/htmx.min.js}"></script>
+    <script th:src="@{/js/htmx-csrf.js}"></script>
+</body>
+</html>

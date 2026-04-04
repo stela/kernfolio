@@ -45,6 +45,9 @@ class InviteCodeService(
         return InviteCodeValidationResult.Valid(inviteCode)
     }
 
+    fun findAllValid(): List<InviteCode> =
+        inviteCodeRepository.findAllValid()
+
     fun redeemCode(code: String, usedBy: UUID): InviteCode {
         val inviteCode = inviteCodeRepository.findByCode(code)
             ?: throw IllegalArgumentException("Invite code not found: $code")
