@@ -1,5 +1,6 @@
 package com.kernfolio.service
 
+import com.kernfolio.config.MarketDataProperties
 import com.kernfolio.domain.CachedFxRate
 import com.kernfolio.domain.Position
 import com.kernfolio.marketdata.FrankfurterClient
@@ -21,10 +22,12 @@ class FxRateServiceTest {
     private val frankfurterClient = mockk<FrankfurterClient>()
     private val cachedFxRateRepository = mockk<CachedFxRateRepository>(relaxed = true)
     private val positionRepository = mockk<PositionRepository>()
-    private val defaultCurrencies = listOf("USD", "CAD", "JPY", "GBP", "MXN", "HKD")
+    private val marketDataProperties = MarketDataProperties(
+        defaultCurrencies = listOf("USD", "CAD", "JPY", "GBP", "MXN", "HKD"),
+    )
 
     private val service = FxRateService(
-        frankfurterClient, cachedFxRateRepository, positionRepository, defaultCurrencies
+        frankfurterClient, cachedFxRateRepository, positionRepository, marketDataProperties
     )
 
     private fun position(currency: String) = Position(

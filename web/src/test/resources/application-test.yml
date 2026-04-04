@@ -11,3 +11,6 @@ spring:
 market-data:
   scheduler:
     enabled: false
+  default-currencies:
+    - USD
+    - CAD

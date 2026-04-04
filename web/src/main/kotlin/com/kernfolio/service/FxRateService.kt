@@ -1,11 +1,11 @@
 package com.kernfolio.service
 
+import com.kernfolio.config.MarketDataProperties
 import com.kernfolio.domain.CachedFxRate
 import com.kernfolio.marketdata.FrankfurterClient
 import com.kernfolio.repository.CachedFxRateRepository
 import com.kernfolio.repository.PositionRepository
 import org.slf4j.LoggerFactory
-import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import java.math.BigDecimal
 import java.time.LocalDate
@@ -15,7 +15,7 @@ class FxRateService(
     private val frankfurterClient: FrankfurterClient,
     private val cachedFxRateRepository: CachedFxRateRepository,
     private val positionRepository: PositionRepository,
-    @Value("\${market-data.default-currencies}") private val defaultCurrencies: List<String>,
+    private val marketDataProperties: MarketDataProperties,
 ) {
     private val log = LoggerFactory.getLogger(FxRateService::class.java)
 
@@ -28,7 +28,7 @@ class FxRateService(
             .map { it.currency }
             .filter { it != BASE_CURRENCY }
             .distinct()
-        val allCurrencies = (defaultCurrencies + positionCurrencies).distinct()
+        val allCurrencies = (marketDataProperties.defaultCurrencies + positionCurrencies).distinct()
 
         if (allCurrencies.isEmpty()) {
             log.info("No currencies to fetch FX rates for")

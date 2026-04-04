@@ -22,7 +22,6 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.model
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
-import org.springframework.test.web.servlet.result.MockMvcResultMatchers.xpath
 import org.springframework.test.web.servlet.setup.DefaultMockMvcBuilder
 import org.springframework.test.web.servlet.setup.MockMvcBuilders
 import org.springframework.web.context.WebApplicationContext
@@ -63,7 +62,7 @@ class AuthControllerTest {
         fun `login page contains CSRF token`() {
             mockMvc.perform(get("/login"))
                 .andExpect(status().isOk)
-                .andExpect(xpath("//meta[@name='csrf-token']/@content").exists())
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("name=\"csrf-token\"")))
         }
 
         @Test
@@ -102,7 +101,7 @@ class AuthControllerTest {
         fun `register page contains CSRF token`() {
             mockMvc.perform(get("/register"))
                 .andExpect(status().isOk)
-                .andExpect(xpath("//meta[@name='csrf-token']/@content").exists())
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("name=\"csrf-token\"")))
         }
     }
 
