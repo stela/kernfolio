@@ -12,6 +12,42 @@ class CurrencyConversionService(
     private val fxRateService: FxRateService,
 ) {
 
+    fun convertTo(
+        prices: List<CachedPrice>,
+        sourceCurrency: String,
+        targetCurrency: String,
+    ): List<Pair<LocalDate, BigDecimal>> {
+        if (sourceCurrency == targetCurrency) {
+            return prices.map { it.priceDate to it.closePrice }
+        }
+        if (targetCurrency == FxRateService.BASE_CURRENCY) {
+            return convertToEur(prices, sourceCurrency)
+        }
+
+        // Convert source→EUR→target
+        val eurPrices = if (sourceCurrency == FxRateService.BASE_CURRENCY) {
+            prices.map { it.priceDate to it.closePrice }
+        } else {
+            convertToEur(prices, sourceCurrency)
+        }
+
+        if (eurPrices.isEmpty()) return emptyList()
+
+        val startDate = eurPrices.first().first
+        val endDate = eurPrices.last().first
+        val targetRates = fxRateService.getRatesForDateRange(targetCurrency, startDate, endDate)
+        val rateByDate = targetRates.associate { it.rateDate to it.rate }
+
+        return eurPrices.map { (date, eurPrice) ->
+            val rate = findRate(rateByDate, date)
+                ?: throw MarketDataException(
+                    "No FX rate available for $targetCurrency on or before $date"
+                )
+            // EUR/TARGET rate means 1 EUR = rate TARGET, so EUR_price * rate = TARGET_price
+            date to eurPrice.multiply(rate).setScale(6, RoundingMode.HALF_UP)
+        }
+    }
+
     fun convertToEur(
         prices: List<CachedPrice>,
         sourceCurrency: String,

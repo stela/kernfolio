@@ -1,0 +1,363 @@
+package com.kernfolio.service
+
+import com.kernfolio.domain.CachedPrice
+import com.kernfolio.domain.Instrument
+import com.kernfolio.domain.OptimizationRun
+import com.kernfolio.domain.Portfolio
+import com.kernfolio.domain.Position
+import com.kernfolio.marketdata.TickerMapper
+import com.kernfolio.repository.CachedPriceRepository
+import com.kernfolio.repository.InstrumentRepository
+import com.kernfolio.repository.OptimizationRunRepository
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.slot
+import io.mockk.verify
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Nested
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
+import org.springframework.web.reactive.function.client.WebClient
+import tools.jackson.databind.ObjectMapper
+import java.math.BigDecimal
+import java.time.LocalDate
+import java.util.UUID
+
+class OptimizerServiceTest {
+
+    private val portfolioService = mockk<PortfolioService>()
+    private val cachedPriceRepository = mockk<CachedPriceRepository>()
+    private val instrumentRepository = mockk<InstrumentRepository>()
+    private val currencyConversionService = mockk<CurrencyConversionService>()
+    private val tickerMapper = TickerMapper()
+    private val optimizationRunRepository = mockk<OptimizationRunRepository> {
+        every { save(any<OptimizationRun>()) } answers { firstArg() }
+    }
+    private val optimizerWebClient = mockk<WebClient>()
+    private val objectMapper = mockk<ObjectMapper>()
+
+    private val service = OptimizerService(
+        portfolioService, cachedPriceRepository, instrumentRepository,
+        currencyConversionService, tickerMapper, optimizationRunRepository,
+        optimizerWebClient, objectMapper,
+    )
+
+    private val userId = UUID.randomUUID()
+    private val portfolioId = UUID.randomUUID()
+
+    private val portfolio = Portfolio(
+        id = portfolioId,
+        userId = userId,
+        name = "Test Portfolio",
+        baseCurrency = "EUR",
+    )
+
+    private fun position(
+        ticker: String,
+        currency: String = "USD",
+        intrinsicValue: BigDecimal? = null,
+        confidence: BigDecimal? = null,
+        sector: String? = "Technology",
+        type: String = "EQUITY",
+    ) = Position(
+        id = UUID.randomUUID(),
+        portfolioId = portfolioId,
+        ticker = ticker,
+        currency = currency,
+        weightPct = BigDecimal("0.05"),
+        intrinsicValueLocal = intrinsicValue,
+        confidencePct = confidence,
+        sector = sector,
+        positionType = type,
+    )
+
+    private fun cachedPrice(ticker: String, date: LocalDate, price: BigDecimal, currency: String = "USD") =
+        CachedPrice(ticker = ticker, priceDate = date, closePrice = price, currency = currency)
+
+    @Nested
+    inner class CagrConversion {
+
+        @Test
+        fun `computes correct CAGR for IV above current price`() {
+            // IV=150, P=100 -> (1.5)^(1/5) - 1 ≈ 0.08447
+            val cagr = OptimizerService.computeCagr(150.0, 100.0)
+            assertEquals(0.08447, cagr, 0.001)
+        }
+
+        @Test
+        fun `computes negative CAGR for IV below current price`() {
+            val cagr = OptimizerService.computeCagr(80.0, 100.0)
+            assertTrue(cagr < 0)
+        }
+
+        @Test
+        fun `computes zero CAGR when IV equals price`() {
+            val cagr = OptimizerService.computeCagr(100.0, 100.0)
+            assertEquals(0.0, cagr, 0.0001)
+        }
+    }
+
+    @Nested
+    inner class PayloadAssembly {
+
+        @Test
+        fun `includes only positions with intrinsic values in views`() {
+            val posWithIV = position("GOOG", intrinsicValue = BigDecimal("200"), confidence = BigDecimal("80"))
+            val posWithoutIV = position("AMZN")
+            val posPartialIV = position("NVDA", intrinsicValue = BigDecimal("150"))
+
+            every { portfolioService.findByIdAndUserId(portfolioId, userId) } returns portfolio
+            every { portfolioService.findPositionsByPortfolioId(portfolioId, userId) } returns
+                listOf(posWithIV, posWithoutIV, posPartialIV)
+
+            val dates = listOf(LocalDate.of(2025, 1, 1), LocalDate.of(2025, 1, 2))
+            val prices = listOf("GOOG", "AMZN", "NVDA").flatMap { ticker ->
+                dates.map { date -> cachedPrice(ticker, date, BigDecimal("100")) }
+            }
+            every { cachedPriceRepository.findByTickersAndDateRange(any(), any(), any()) } returns prices
+            every { currencyConversionService.convertTo(any(), any(), any()) } answers {
+                (firstArg<List<CachedPrice>>()).map { it.priceDate to it.closePrice }
+            }
+            every { cachedPriceRepository.findLatestByTicker("GOOG") } returns
+                cachedPrice("GOOG", LocalDate.now(), BigDecimal("100"))
+            every { cachedPriceRepository.findLatestByTicker("AMZN") } returns
+                cachedPrice("AMZN", LocalDate.now(), BigDecimal("100"))
+            every { cachedPriceRepository.findLatestByTicker("NVDA") } returns
+                cachedPrice("NVDA", LocalDate.now(), BigDecimal("100"))
+            every { instrumentRepository.findByTickers(any()) } returns listOf(
+                Instrument(ticker = "GOOG", currency = "USD", marketCapUsd = BigDecimal("1850000000000")),
+                Instrument(ticker = "AMZN", currency = "USD", marketCapUsd = BigDecimal("2100000000000")),
+                Instrument(ticker = "NVDA", currency = "USD", marketCapUsd = BigDecimal("3000000000000")),
+            )
+
+            // Capture the request sent to the optimizer
+            val requestSlot = slot<Any>()
+            val requestSpec = mockk<WebClient.RequestBodyUriSpec>()
+            val requestBodySpec = mockk<WebClient.RequestBodySpec>()
+            val responseSpec = mockk<WebClient.ResponseSpec>()
+            every { optimizerWebClient.post() } returns requestSpec
+            every { requestSpec.uri("/optimize") } returns requestBodySpec
+            every { requestBodySpec.bodyValue(capture(requestSlot)) } returns requestBodySpec
+            every { requestBodySpec.retrieve() } returns responseSpec
+            every { responseSpec.bodyToMono(any<Class<*>>()) } returns mockk {
+                every { block() } returns com.kernfolio.dto.OptimizeResponseDto(
+                    weights = mapOf("GOOG" to 0.4, "AMZN" to 0.3, "NVDA" to 0.3),
+                    metrics = com.kernfolio.dto.OptimizeMetricsDto(0.09, 0.17, 0.35, -0.03),
+                    efficientFrontier = emptyList(),
+                    correlationMatrix = emptyMap(),
+                    computationMs = 100,
+                )
+            }
+
+            service.optimize(portfolioId, userId, "black_litterman")
+
+            val request = requestSlot.captured as com.kernfolio.dto.OptimizeRequestDto
+            // Only GOOG has both IV and confidence
+            assertEquals(1, request.views.size)
+            assertTrue(request.views.containsKey("GOOG"))
+            assertEquals(1, request.confidences.size)
+            assertTrue(request.confidences.containsKey("GOOG"))
+        }
+
+        @Test
+        fun `excludes CASH positions`() {
+            val equity = position("GOOG")
+            val cash = position("CASH.USD", type = "CASH")
+
+            every { portfolioService.findByIdAndUserId(portfolioId, userId) } returns portfolio
+            every { portfolioService.findPositionsByPortfolioId(portfolioId, userId) } returns listOf(equity, cash)
+
+            val dates = listOf(LocalDate.of(2025, 1, 1), LocalDate.of(2025, 1, 2))
+            val prices = dates.map { date -> cachedPrice("GOOG", date, BigDecimal("100")) }
+            every { cachedPriceRepository.findByTickersAndDateRange(any(), any(), any()) } returns prices
+            every { currencyConversionService.convertTo(any(), any(), any()) } answers {
+                (firstArg<List<CachedPrice>>()).map { it.priceDate to it.closePrice }
+            }
+            every { cachedPriceRepository.findLatestByTicker(any()) } returns null
+            every { instrumentRepository.findByTickers(any()) } returns listOf(
+                Instrument(ticker = "GOOG", currency = "USD", marketCapUsd = BigDecimal("1850000000000")),
+            )
+
+            val requestSlot = slot<Any>()
+            val requestSpec = mockk<WebClient.RequestBodyUriSpec>()
+            val requestBodySpec = mockk<WebClient.RequestBodySpec>()
+            val responseSpec = mockk<WebClient.ResponseSpec>()
+            every { optimizerWebClient.post() } returns requestSpec
+            every { requestSpec.uri("/optimize") } returns requestBodySpec
+            every { requestBodySpec.bodyValue(capture(requestSlot)) } returns requestBodySpec
+            every { requestBodySpec.retrieve() } returns responseSpec
+            every { responseSpec.bodyToMono(any<Class<*>>()) } returns mockk {
+                every { block() } returns com.kernfolio.dto.OptimizeResponseDto(
+                    weights = mapOf("GOOG" to 1.0),
+                    metrics = com.kernfolio.dto.OptimizeMetricsDto(0.09, 0.17, 0.35, -0.03),
+                    efficientFrontier = emptyList(),
+                    correlationMatrix = emptyMap(),
+                    computationMs = 100,
+                )
+            }
+
+            service.optimize(portfolioId, userId, "black_litterman")
+
+            val request = requestSlot.captured as com.kernfolio.dto.OptimizeRequestDto
+            // Only GOOG, not CASH.USD
+            assertTrue(request.prices.containsKey("GOOG"))
+            assertFalse(request.prices.containsKey("CASH.USD"))
+            assertEquals(1, request.sectors.size)
+        }
+
+        @Test
+        fun `uses yfinance tickers in request`() {
+            val pos = position("GMEXICOB", currency = "MXN")
+
+            every { portfolioService.findByIdAndUserId(portfolioId, userId) } returns portfolio
+            every { portfolioService.findPositionsByPortfolioId(portfolioId, userId) } returns listOf(pos)
+
+            val dates = listOf(LocalDate.of(2025, 1, 1), LocalDate.of(2025, 1, 2))
+            val prices = dates.map { date -> cachedPrice("GMEXICOB", date, BigDecimal("50"), "MXN") }
+            every { cachedPriceRepository.findByTickersAndDateRange(any(), any(), any()) } returns prices
+            every { currencyConversionService.convertTo(any(), eq("MXN"), eq("EUR")) } answers {
+                (firstArg<List<CachedPrice>>()).map { it.priceDate to it.closePrice }
+            }
+            every { cachedPriceRepository.findLatestByTicker(any()) } returns null
+            every { instrumentRepository.findByTickers(any()) } returns listOf(
+                Instrument(ticker = "GMEXICOB", currency = "MXN", marketCapUsd = BigDecimal("5000000000")),
+            )
+
+            val requestSlot = slot<Any>()
+            val requestSpec = mockk<WebClient.RequestBodyUriSpec>()
+            val requestBodySpec = mockk<WebClient.RequestBodySpec>()
+            val responseSpec = mockk<WebClient.ResponseSpec>()
+            every { optimizerWebClient.post() } returns requestSpec
+            every { requestSpec.uri("/optimize") } returns requestBodySpec
+            every { requestBodySpec.bodyValue(capture(requestSlot)) } returns requestBodySpec
+            every { requestBodySpec.retrieve() } returns responseSpec
+            every { responseSpec.bodyToMono(any<Class<*>>()) } returns mockk {
+                every { block() } returns com.kernfolio.dto.OptimizeResponseDto(
+                    weights = mapOf("GMEXICOB.MX" to 1.0),
+                    metrics = com.kernfolio.dto.OptimizeMetricsDto(0.09, 0.17, 0.35, -0.03),
+                    efficientFrontier = emptyList(),
+                    correlationMatrix = emptyMap(),
+                    computationMs = 100,
+                )
+            }
+
+            val result = service.optimize(portfolioId, userId, "black_litterman")
+
+            val request = requestSlot.captured as com.kernfolio.dto.OptimizeRequestDto
+            assertTrue(request.prices.containsKey("GMEXICOB.MX"))
+            assertFalse(request.prices.containsKey("GMEXICOB"))
+            // Result weights should be mapped back to internal tickers
+            assertTrue(result.results.optimizedWeights.containsKey("GMEXICOB"))
+        }
+    }
+
+    @Nested
+    inner class CurrencyConversionInOptimizer {
+
+        @Test
+        fun `converts prices to portfolio base currency`() {
+            val pos = position("GOOG", currency = "USD")
+            val usdPortfolio = portfolio.copy(baseCurrency = "USD")
+
+            every { portfolioService.findByIdAndUserId(portfolioId, userId) } returns usdPortfolio
+            every { portfolioService.findPositionsByPortfolioId(portfolioId, userId) } returns listOf(pos)
+
+            val dates = listOf(LocalDate.of(2025, 1, 1), LocalDate.of(2025, 1, 2))
+            val prices = dates.map { date -> cachedPrice("GOOG", date, BigDecimal("180"), "USD") }
+            every { cachedPriceRepository.findByTickersAndDateRange(any(), any(), any()) } returns prices
+            every { currencyConversionService.convertTo(any(), eq("USD"), eq("USD")) } answers {
+                (firstArg<List<CachedPrice>>()).map { it.priceDate to it.closePrice }
+            }
+            every { cachedPriceRepository.findLatestByTicker(any()) } returns null
+            every { instrumentRepository.findByTickers(any()) } returns listOf(
+                Instrument(ticker = "GOOG", currency = "USD", marketCapUsd = BigDecimal("1850000000000")),
+            )
+
+            val requestSpec = mockk<WebClient.RequestBodyUriSpec>()
+            val requestBodySpec = mockk<WebClient.RequestBodySpec>()
+            val responseSpec = mockk<WebClient.ResponseSpec>()
+            every { optimizerWebClient.post() } returns requestSpec
+            every { requestSpec.uri("/optimize") } returns requestBodySpec
+            every { requestBodySpec.bodyValue(any()) } returns requestBodySpec
+            every { requestBodySpec.retrieve() } returns responseSpec
+            every { responseSpec.bodyToMono(any<Class<*>>()) } returns mockk {
+                every { block() } returns com.kernfolio.dto.OptimizeResponseDto(
+                    weights = mapOf("GOOG" to 1.0),
+                    metrics = com.kernfolio.dto.OptimizeMetricsDto(0.09, 0.17, 0.35, -0.03),
+                    efficientFrontier = emptyList(),
+                    correlationMatrix = emptyMap(),
+                    computationMs = 100,
+                )
+            }
+
+            service.optimize(portfolioId, userId, "black_litterman")
+
+            verify { currencyConversionService.convertTo(any(), "USD", "USD") }
+        }
+    }
+
+    @Nested
+    inner class ErrorHandling {
+
+        @Test
+        fun `throws when no equity positions`() {
+            every { portfolioService.findByIdAndUserId(portfolioId, userId) } returns portfolio
+            every { portfolioService.findPositionsByPortfolioId(portfolioId, userId) } returns listOf(
+                position("CASH.USD", type = "CASH"),
+            )
+
+            assertThrows<OptimizationException> {
+                service.optimize(portfolioId, userId, "black_litterman")
+            }
+        }
+
+        @Test
+        fun `throws when no price data available`() {
+            every { portfolioService.findByIdAndUserId(portfolioId, userId) } returns portfolio
+            every { portfolioService.findPositionsByPortfolioId(portfolioId, userId) } returns listOf(
+                position("GOOG"),
+            )
+            every { cachedPriceRepository.findByTickersAndDateRange(any(), any(), any()) } returns emptyList()
+
+            assertThrows<OptimizationException> {
+                service.optimize(portfolioId, userId, "black_litterman")
+            }
+        }
+
+        @Test
+        fun `saves FAILED run on optimizer error`() {
+            every { portfolioService.findByIdAndUserId(portfolioId, userId) } returns portfolio
+            every { portfolioService.findPositionsByPortfolioId(portfolioId, userId) } returns listOf(
+                position("GOOG"),
+            )
+
+            val dates = listOf(LocalDate.of(2025, 1, 1), LocalDate.of(2025, 1, 2))
+            val prices = dates.map { date -> cachedPrice("GOOG", date, BigDecimal("100")) }
+            every { cachedPriceRepository.findByTickersAndDateRange(any(), any(), any()) } returns prices
+            every { currencyConversionService.convertTo(any(), any(), any()) } answers {
+                (firstArg<List<CachedPrice>>()).map { it.priceDate to it.closePrice }
+            }
+            every { cachedPriceRepository.findLatestByTicker(any()) } returns null
+            every { instrumentRepository.findByTickers(any()) } returns listOf(
+                Instrument(ticker = "GOOG", currency = "USD", marketCapUsd = BigDecimal("1850000000000")),
+            )
+
+            val requestSpec = mockk<WebClient.RequestBodyUriSpec>()
+            val requestBodySpec = mockk<WebClient.RequestBodySpec>()
+            every { optimizerWebClient.post() } returns requestSpec
+            every { requestSpec.uri("/optimize") } returns requestBodySpec
+            every { requestBodySpec.bodyValue(any()) } returns requestBodySpec
+            every { requestBodySpec.retrieve() } throws RuntimeException("Connection refused")
+
+            assertThrows<OptimizationException> {
+                service.optimize(portfolioId, userId, "black_litterman")
+            }
+
+            verify {
+                optimizationRunRepository.save(match<OptimizationRun> { it.status == "FAILED" })
+            }
+        }
+    }
+}
