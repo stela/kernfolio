@@ -110,9 +110,10 @@ class RepositoryIntegrationTest {
         @Test
         fun `find all valid excludes used codes`() {
             val admin = createUser(username = "admin", email = "admin@example.com")
-            inviteCodeRepository.save(InviteCode(code = "VALID1", createdBy = admin.id!!))
+            val adminId = admin.id!!
+            inviteCodeRepository.save(InviteCode(code = "VALID1", createdBy = adminId))
             inviteCodeRepository.save(
-                InviteCode(code = "USED1", createdBy = admin.id!!, usedBy = admin.id)
+                InviteCode(code = "USED1", createdBy = adminId, usedBy = adminId)
             )
 
             val valid = inviteCodeRepository.findAllValid()
@@ -134,12 +135,13 @@ class RepositoryIntegrationTest {
         @Test
         fun `save and find by user id`() {
             val user = createUser()
+            val userId = user.id!!
             val saved = portfolioRepository.save(
-                Portfolio(userId = user.id!!, name = "My Portfolio", baseCurrency = "USD")
+                Portfolio(userId = userId, name = "My Portfolio", baseCurrency = "USD")
             )
             assertNotNull(saved.id)
 
-            val portfolios = portfolioRepository.findByUserId(user.id!!)
+            val portfolios = portfolioRepository.findByUserId(userId)
             assertEquals(1, portfolios.size)
             assertEquals("My Portfolio", portfolios[0].name)
             assertEquals("USD", portfolios[0].baseCurrency)
@@ -170,9 +172,10 @@ class RepositoryIntegrationTest {
         fun `save and find by portfolio id`() {
             val user = createUser()
             val portfolio = portfolioRepository.save(Portfolio(userId = user.id!!, name = "Test"))
+            val portfolioId = portfolio.id!!
             val saved = positionRepository.save(
                 Position(
-                    portfolioId = portfolio.id!!,
+                    portfolioId = portfolioId,
                     ticker = "GOOG",
                     currency = "USD",
                     weightPct = BigDecimal("0.084000"),
@@ -180,7 +183,7 @@ class RepositoryIntegrationTest {
             )
             assertNotNull(saved.id)
 
-            val positions = positionRepository.findByPortfolioId(portfolio.id!!)
+            val positions = positionRepository.findByPortfolioId(portfolioId)
             assertEquals(1, positions.size)
             assertEquals("GOOG", positions[0].ticker)
             assertEquals(0, BigDecimal("0.084000").compareTo(positions[0].weightPct))
@@ -190,9 +193,10 @@ class RepositoryIntegrationTest {
         fun `BigDecimal precision preserved`() {
             val user = createUser()
             val portfolio = portfolioRepository.save(Portfolio(userId = user.id!!, name = "Test"))
+            val portfolioId = portfolio.id!!
             positionRepository.save(
                 Position(
-                    portfolioId = portfolio.id!!,
+                    portfolioId = portfolioId,
                     ticker = "4256.T",
                     currency = "JPY",
                     weightPct = BigDecimal("0.023500"),
@@ -202,7 +206,7 @@ class RepositoryIntegrationTest {
                 )
             )
 
-            val positions = positionRepository.findByPortfolioId(portfolio.id!!)
+            val positions = positionRepository.findByPortfolioId(portfolioId)
             val pos = positions[0]
             assertEquals(0, BigDecimal("0.023500").compareTo(pos.weightPct))
             assertEquals(0, BigDecimal("0.019200").compareTo(pos.costBasisPct))
@@ -214,15 +218,16 @@ class RepositoryIntegrationTest {
         fun `delete by portfolio id`() {
             val user = createUser()
             val portfolio = portfolioRepository.save(Portfolio(userId = user.id!!, name = "Test"))
+            val portfolioId = portfolio.id!!
             positionRepository.save(
-                Position(portfolioId = portfolio.id!!, ticker = "GOOG", currency = "USD", weightPct = BigDecimal("0.05"))
+                Position(portfolioId = portfolioId, ticker = "GOOG", currency = "USD", weightPct = BigDecimal("0.05"))
             )
             positionRepository.save(
-                Position(portfolioId = portfolio.id!!, ticker = "AMZN", currency = "USD", weightPct = BigDecimal("0.05"))
+                Position(portfolioId = portfolioId, ticker = "AMZN", currency = "USD", weightPct = BigDecimal("0.05"))
             )
 
-            positionRepository.deleteByPortfolioId(portfolio.id!!)
-            assertTrue(positionRepository.findByPortfolioId(portfolio.id!!).isEmpty())
+            positionRepository.deleteByPortfolioId(portfolioId)
+            assertTrue(positionRepository.findByPortfolioId(portfolioId).isEmpty())
         }
     }
 

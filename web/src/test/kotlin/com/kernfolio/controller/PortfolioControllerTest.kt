@@ -119,8 +119,9 @@ class PortfolioControllerTest {
         @Test
         fun `GET portfolio detail returns 200 with positions`() {
             val testUser = createUser("alice")
-            val portfolio = portfolioService.create(testUser.id!!, "My Fund", null, "EUR")
-            portfolioService.addPosition(portfolio.id!!, testUser.id!!, PositionForm(
+            val userId = testUser.id!!
+            val portfolio = portfolioService.create(userId, "My Fund", null, "EUR")
+            portfolioService.addPosition(portfolio.id!!, userId, PositionForm(
                 ticker = "GOOG", currency = "USD", weightPct = BigDecimal("0.15"),
             ))
 
@@ -256,27 +257,31 @@ class PortfolioControllerTest {
         @Test
         fun `DELETE position returns empty body`() {
             val testUser = createUser("alice")
-            val portfolio = portfolioService.create(testUser.id!!, "Test", null, "EUR")
-            val position = portfolioService.addPosition(portfolio.id!!, testUser.id!!, PositionForm(
+            val userId = testUser.id!!
+            val portfolio = portfolioService.create(userId, "Test", null, "EUR")
+            val portfolioId = portfolio.id!!
+            val position = portfolioService.addPosition(portfolioId, userId, PositionForm(
                 ticker = "GOOG", currency = "USD", weightPct = BigDecimal("0.10"),
             ))
 
             mockMvc.perform(
-                delete("/portfolios/${portfolio.id}/positions/${position.id}")
+                delete("/portfolios/$portfolioId/positions/${position.id}")
                     .with(mockUserDetails(testUser))
                     .with(csrf())
             )
                 .andExpect(status().isOk)
                 .andExpect(content().string(""))
 
-            assert(positionRepository.findByPortfolioId(portfolio.id!!).isEmpty())
+            assert(positionRepository.findByPortfolioId(portfolioId).isEmpty())
         }
 
         @Test
         fun `DELETE position without CSRF returns 403`() {
             val testUser = createUser("alice")
-            val portfolio = portfolioService.create(testUser.id!!, "Test", null, "EUR")
-            val position = portfolioService.addPosition(portfolio.id!!, testUser.id!!, PositionForm(
+            val userId = testUser.id!!
+            val portfolio = portfolioService.create(userId, "Test", null, "EUR")
+            val portfolioId = portfolio.id!!
+            val position = portfolioService.addPosition(portfolioId, userId, PositionForm(
                 ticker = "GOOG", currency = "USD", weightPct = BigDecimal("0.10"),
             ))
 

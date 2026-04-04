@@ -69,10 +69,11 @@ class ChartDataControllerTest {
     fun `allocation-data returns correct JSON structure`() {
         val user = createUser("alice")
         val portfolio = portfolioService.create(user.id!!, "Test", null, "EUR")
+        val portfolioId = portfolio.id!!
 
         positionRepository.save(
             Position(
-                portfolioId = portfolio.id!!,
+                portfolioId = portfolioId,
                 ticker = "GOOG",
                 currency = "USD",
                 weightPct = BigDecimal("0.060000"),
@@ -81,7 +82,7 @@ class ChartDataControllerTest {
         )
         positionRepository.save(
             Position(
-                portfolioId = portfolio.id!!,
+                portfolioId = portfolioId,
                 ticker = "AMZN",
                 currency = "USD",
                 weightPct = BigDecimal("0.040000"),
@@ -91,7 +92,7 @@ class ChartDataControllerTest {
 
         val run = optimizationRunRepository.save(
             OptimizationRun(
-                portfolioId = portfolio.id!!,
+                portfolioId = portfolioId,
                 algorithm = "black_litterman",
                 parameters = OptimizationParameters(),
                 results = OptimizationResults(
@@ -160,8 +161,9 @@ class ChartDataControllerTest {
     @Test
     fun `returns 404 when run does not belong to portfolio`() {
         val user = createUser("charlie")
-        val portfolio1 = portfolioService.create(user.id!!, "P1", null, "EUR")
-        val portfolio2 = portfolioService.create(user.id!!, "P2", null, "EUR")
+        val userId = user.id!!
+        val portfolio1 = portfolioService.create(userId, "P1", null, "EUR")
+        val portfolio2 = portfolioService.create(userId, "P2", null, "EUR")
 
         val run = optimizationRunRepository.save(
             OptimizationRun(

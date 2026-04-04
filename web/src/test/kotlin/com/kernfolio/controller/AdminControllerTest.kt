@@ -144,17 +144,18 @@ class AdminControllerTest {
         fun `admin can enable a user`() {
             val admin = createAdmin("admin5")
             val targetUser = createUser("target2")
-            userService.setEnabled(targetUser.id!!, false)
+            val targetUserId = targetUser.id!!
+            userService.setEnabled(targetUserId, false)
 
             mockMvc.perform(
-                post("/admin/users/${targetUser.id}/toggle")
+                post("/admin/users/$targetUserId/toggle")
                     .with(mockUserDetails(admin))
                     .with(csrf())
                     .param("enabled", "true")
             )
                 .andExpect(status().isOk)
 
-            val updated = userRepository.findById(targetUser.id!!).get()
+            val updated = userRepository.findById(targetUserId).get()
             assert(updated.enabled) { "User should be enabled" }
         }
     }
