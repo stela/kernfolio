@@ -38,7 +38,14 @@ data class OptimizationConstraints(
 data class OptimizationResults(
     val optimizedWeights: Map<String, Double> = emptyMap(),
     val metrics: OptimizationMetrics? = null,
+    val efficientFrontier: List<FrontierPoint> = emptyList(),
+    val correlationMatrix: Map<String, Map<String, Double>> = emptyMap(),
     val correlationClusters: List<CorrelationCluster>? = null,
+)
+
+data class FrontierPoint(
+    val risk: Double,
+    val ret: Double,
 )
 
 data class OptimizationMetrics(

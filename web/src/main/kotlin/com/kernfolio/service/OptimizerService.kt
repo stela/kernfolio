@@ -5,6 +5,7 @@ import com.kernfolio.domain.OptimizationMetrics
 import com.kernfolio.domain.OptimizationParameters
 import com.kernfolio.domain.OptimizationResults
 import com.kernfolio.domain.OptimizationRun
+import com.kernfolio.domain.FrontierPoint
 import com.kernfolio.domain.Position
 import com.kernfolio.dto.OptimizeConstraintsDto
 import com.kernfolio.dto.OptimizeErrorDto
@@ -271,6 +272,10 @@ class OptimizerService(
                     sharpeRatio = response.metrics.sharpeRatio,
                     cvar95 = response.metrics.cvar95,
                 ),
+                efficientFrontier = response.efficientFrontier.map {
+                    FrontierPoint(risk = it.risk, ret = it.ret)
+                },
+                correlationMatrix = response.correlationMatrix,
             ),
             status = "COMPLETED",
             computationMs = response.computationMs,

@@ -1,5 +1,6 @@
 package com.kernfolio.controller
 
+import com.kernfolio.repository.OptimizationRunRepository
 import com.kernfolio.security.KernfolioUserDetails
 import com.kernfolio.service.OptimizationException
 import com.kernfolio.service.OptimizerService
@@ -30,6 +31,7 @@ data class OptimizeForm(
 class OptimizationController(
     private val optimizerService: OptimizerService,
     private val portfolioService: PortfolioService,
+    private val optimizationRunRepository: OptimizationRunRepository,
 ) {
 
     @GetMapping("/portfolios/{id}/optimize")
@@ -53,7 +55,7 @@ class OptimizationController(
         authentication: Authentication,
     ): String {
         val userId = currentUserId(authentication)
-        val portfolio = portfolioService.findByIdAndUserId(id, userId)
+        portfolioService.findByIdAndUserId(id, userId)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
         return try {
             val result = optimizerService.optimize(
@@ -68,13 +70,33 @@ class OptimizationController(
                 maxWeight = optimizeForm.maxWeight,
                 longOnly = optimizeForm.longOnly,
             )
-            model.addAttribute("result", result)
-            model.addAttribute("portfolio", portfolio)
-            "fragments/optimize-results :: results"
+            "redirect:/portfolios/$id/results/${result.id}"
         } catch (e: OptimizationException) {
             model.addAttribute("error", e.message)
             "fragments/optimize-results :: error"
         }
+    }
+
+    @GetMapping("/portfolios/{id}/results/{runId}")
+    fun results(
+        @PathVariable id: UUID,
+        @PathVariable runId: UUID,
+        model: Model,
+        authentication: Authentication,
+    ): String {
+        val userId = currentUserId(authentication)
+        val portfolio = portfolioService.findByIdAndUserId(id, userId)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        val run = optimizationRunRepository.findById(runId).orElse(null)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        if (run.portfolioId != id) {
+            throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        }
+        val positions = portfolioService.findPositionsByPortfolioId(id, userId)
+        model.addAttribute("portfolio", portfolio)
+        model.addAttribute("run", run)
+        model.addAttribute("positions", positions)
+        return "results"
     }
 
     private fun currentUserId(authentication: Authentication): UUID =
