@@ -8,6 +8,11 @@ import kotlin.math.absoluteValue
 @Service
 class FeatureFlagService(private val featureFlagRepository: FeatureFlagRepository) {
 
+    fun isGloballyEnabled(flagName: String): Boolean {
+        val flag = featureFlagRepository.findByFlagName(flagName) ?: return false
+        return flag.enabled
+    }
+
     fun isEnabled(flagName: String, userId: UUID): Boolean {
         val flag = featureFlagRepository.findByFlagName(flagName) ?: return false
         if (!flag.enabled) return false
