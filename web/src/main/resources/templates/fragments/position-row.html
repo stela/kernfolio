@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<body>
+
+<!-- Editable new row fragment (returned by GET /portfolios/{id}/positions/new-row) -->
+<tr th:fragment="new-row">
+    <td class="px-4 py-2">
+        <select name="positionType" class="rounded-md border border-gray-300 px-2 py-1 text-sm">
+            <option value="EQUITY" selected>EQUITY</option>
+            <option value="CASH">CASH</option>
+        </select>
+    </td>
+    <td class="px-4 py-2">
+        <input type="text" name="ticker" required placeholder="e.g. GOOG"
+               class="w-24 rounded-md border border-gray-300 px-2 py-1 text-sm font-mono">
+    </td>
+    <td class="px-4 py-2">
+        <input type="text" name="name" placeholder="Optional"
+               class="w-32 rounded-md border border-gray-300 px-2 py-1 text-sm">
+    </td>
+    <td class="px-4 py-2">
+        <input type="text" name="currency" required value="USD" maxlength="3"
+               class="w-16 rounded-md border border-gray-300 px-2 py-1 text-sm font-mono uppercase">
+    </td>
+    <td class="px-4 py-2">
+        <input type="number" name="weightPct" required step="0.000001" min="0" max="1" placeholder="0.10"
+               class="w-20 rounded-md border border-gray-300 px-2 py-1 text-sm text-right">
+    </td>
+    <td class="px-4 py-2">
+        <input type="text" name="sector" placeholder="Optional"
+               class="w-24 rounded-md border border-gray-300 px-2 py-1 text-sm">
+    </td>
+    <td class="px-4 py-2 text-right">
+        <button type="button"
+                th:attr="hx-post=@{/portfolios/{id}/positions(id=${portfolioId})}"
+                hx-include="closest tr"
+                hx-target="closest tr"
+                hx-swap="outerHTML"
+                class="text-blue-600 hover:text-blue-800 text-sm font-medium mr-2">
+            Save
+        </button>
+        <button type="button" onclick="this.closest('tr').remove()"
+                class="text-gray-400 hover:text-gray-600 text-sm font-medium">
+            Cancel
+        </button>
+    </td>
+</tr>
+
+<!-- Saved row fragment (returned by POST /portfolios/{id}/positions) -->
+<tr th:fragment="saved-row">
+    <td class="px-4 py-3 text-sm" th:text="${position.positionType}"></td>
+    <td class="px-4 py-3 text-sm font-mono font-medium" th:text="${position.ticker}"></td>
+    <td class="px-4 py-3 text-sm text-gray-500" th:text="${position.name}"></td>
+    <td class="px-4 py-3 text-sm font-mono" th:text="${position.currency}"></td>
+    <td class="px-4 py-3 text-sm text-right"
+        th:text="${#numbers.formatDecimal(position.weightPct * 100, 1, 2)} + '%'"></td>
+    <td class="px-4 py-3 text-sm text-gray-500" th:text="${position.sector}"></td>
+    <td class="px-4 py-3 text-sm text-right">
+        <button type="button"
+                th:attr="hx-delete=@{/portfolios/{pid}/positions/{posId}(pid=${portfolioId},posId=${position.id})}"
+                hx-target="closest tr"
+                hx-swap="outerHTML"
+                hx-confirm="Remove this position?"
+                class="text-red-600 hover:text-red-800 text-sm font-medium">
+            Remove
+        </button>
+    </td>
+</tr>
+
+</body>
+</html>

@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" th:content="${_csrf.token}">
+    <meta name="csrf-header" th:content="${_csrf.headerName}">
+    <title th:text="${portfolio.name} + ' - Kernfolio'">Portfolio - Kernfolio</title>
+    <link rel="stylesheet" th:href="@{/css/tailwind.css}">
+</head>
+<body class="min-h-screen bg-gray-50 text-gray-900">
+
+    <nav th:replace="~{layout/base :: nav}"></nav>
+
+    <main class="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+        <div class="flex items-center justify-between mb-6">
+            <div>
+                <h1 class="text-2xl font-semibold" th:text="${portfolio.name}"></h1>
+                <p th:if="${portfolio.description}" class="mt-1 text-sm text-gray-500" th:text="${portfolio.description}"></p>
+                <p class="mt-1 text-sm text-gray-400">
+                    Base currency: <span class="font-mono" th:text="${portfolio.baseCurrency}"></span>
+                </p>
+            </div>
+            <div class="flex gap-2">
+                <a th:href="@{/portfolios/{id}/edit(id=${portfolio.id})}"
+                   class="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50">
+                    Edit
+                </a>
+                <form th:action="@{/portfolios/{id}/delete(id=${portfolio.id})}" method="post"
+                      onsubmit="return confirm('Delete this portfolio and all its positions?')">
+                    <button type="submit"
+                            class="rounded-md border border-red-300 bg-white px-3 py-2 text-sm font-medium text-red-700 shadow-sm hover:bg-red-50">
+                        Delete
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <div class="bg-white shadow rounded-lg overflow-hidden">
+            <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+                <h2 class="text-lg font-medium">Positions</h2>
+                <button type="button"
+                        th:attr="hx-get=@{/portfolios/{id}/positions/new-row(id=${portfolio.id})}"
+                        hx-target="#positions-table tbody"
+                        hx-swap="beforeend"
+                        class="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-blue-700">
+                    Add position
+                </button>
+            </div>
+
+            <table id="positions-table" class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Type</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Ticker</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Name</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Currency</th>
+                        <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500">Weight %</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Sector</th>
+                        <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200">
+                    <tr th:each="pos : ${positions}">
+                        <td class="px-4 py-3 text-sm" th:text="${pos.positionType}"></td>
+                        <td class="px-4 py-3 text-sm font-mono font-medium" th:text="${pos.ticker}"></td>
+                        <td class="px-4 py-3 text-sm text-gray-500" th:text="${pos.name}"></td>
+                        <td class="px-4 py-3 text-sm font-mono" th:text="${pos.currency}"></td>
+                        <td class="px-4 py-3 text-sm text-right"
+                            th:text="${#numbers.formatDecimal(pos.weightPct * 100, 1, 2)} + '%'"></td>
+                        <td class="px-4 py-3 text-sm text-gray-500" th:text="${pos.sector}"></td>
+                        <td class="px-4 py-3 text-sm text-right">
+                            <button type="button"
+                                    th:attr="hx-delete=@{/portfolios/{pid}/positions/{posId}(pid=${portfolio.id},posId=${pos.id})}"
+                                    hx-target="closest tr"
+                                    hx-swap="outerHTML"
+                                    hx-confirm="Remove this position?"
+                                    class="text-red-600 hover:text-red-800 text-sm font-medium">
+                                Remove
+                            </button>
+                        </td>
+                    </tr>
+                    <tr th:if="${#lists.isEmpty(positions)}" id="empty-state">
+                        <td colspan="7" class="px-4 py-8 text-center text-sm text-gray-500">
+                            No positions yet. Click "Add position" to get started.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="mt-4">
+            <a th:href="@{/dashboard}" class="text-sm font-medium text-blue-600 hover:text-blue-500">
+                Back to dashboard
+            </a>
+        </div>
+    </main>
+
+    <footer th:replace="~{layout/base :: footer}"></footer>
+
+    <script th:src="@{/webjars/htmx.org/2.0.4/dist/htmx.min.js}"></script>
+    <script th:src="@{/js/htmx-csrf.js}"></script>
+</body>
+</html>

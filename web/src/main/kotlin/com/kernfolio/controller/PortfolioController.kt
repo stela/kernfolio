@@ -1,0 +1,173 @@
+package com.kernfolio.controller
+
+import com.kernfolio.security.KernfolioUserDetails
+import com.kernfolio.service.PortfolioNotFoundException
+import com.kernfolio.service.PortfolioService
+import com.kernfolio.service.PositionForm
+import jakarta.validation.Valid
+import jakarta.validation.constraints.NotBlank
+import jakarta.validation.constraints.Size
+import org.springframework.http.HttpStatus
+import org.springframework.security.core.Authentication
+import org.springframework.stereotype.Controller
+import org.springframework.transaction.annotation.Transactional
+import org.springframework.ui.Model
+import org.springframework.validation.BindingResult
+import org.springframework.web.bind.annotation.DeleteMapping
+import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.ModelAttribute
+import org.springframework.web.bind.annotation.PathVariable
+import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.ResponseBody
+import org.springframework.web.server.ResponseStatusException
+import java.math.BigDecimal
+import java.util.UUID
+
+data class PortfolioForm(
+    @field:NotBlank(message = "Portfolio name is required")
+    @field:Size(max = 100, message = "Name must be 100 characters or less")
+    val name: String = "",
+    val description: String? = null,
+    @field:Size(min = 3, max = 3, message = "Currency must be a 3-letter code")
+    val baseCurrency: String = "EUR",
+)
+
+@Controller
+class PortfolioController(
+    private val portfolioService: PortfolioService,
+) {
+
+    @GetMapping("/portfolios/new")
+    fun newPortfolio(model: Model): String {
+        model.addAttribute("portfolioForm", PortfolioForm())
+        return "portfolio-form"
+    }
+
+    @PostMapping("/portfolios")
+    @Transactional
+    fun createPortfolio(
+        @Valid @ModelAttribute portfolioForm: PortfolioForm,
+        bindingResult: BindingResult,
+        authentication: Authentication,
+    ): String {
+        if (bindingResult.hasErrors()) return "portfolio-form"
+        val portfolio = portfolioService.create(
+            userId = currentUserId(authentication),
+            name = portfolioForm.name,
+            description = portfolioForm.description,
+            baseCurrency = portfolioForm.baseCurrency,
+        )
+        return "redirect:/portfolios/${portfolio.id}"
+    }
+
+    @GetMapping("/portfolios/{id}")
+    fun portfolioDetail(@PathVariable id: UUID, model: Model, authentication: Authentication): String {
+        val userId = currentUserId(authentication)
+        val portfolio = portfolioService.findByIdAndUserId(id, userId)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        val positions = portfolioService.findPositionsByPortfolioId(id, userId)
+        model.addAttribute("portfolio", portfolio)
+        model.addAttribute("positions", positions)
+        model.addAttribute("positionForm", PositionForm())
+        return "portfolio-detail"
+    }
+
+    @GetMapping("/portfolios/{id}/edit")
+    fun editPortfolio(@PathVariable id: UUID, model: Model, authentication: Authentication): String {
+        val portfolio = portfolioService.findByIdAndUserId(id, currentUserId(authentication))
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        model.addAttribute("portfolioForm", PortfolioForm(
+            name = portfolio.name,
+            description = portfolio.description,
+            baseCurrency = portfolio.baseCurrency,
+        ))
+        model.addAttribute("portfolioId", portfolio.id)
+        return "portfolio-form"
+    }
+
+    @PostMapping("/portfolios/{id}")
+    @Transactional
+    fun updatePortfolio(
+        @PathVariable id: UUID,
+        @Valid @ModelAttribute portfolioForm: PortfolioForm,
+        bindingResult: BindingResult,
+        model: Model,
+        authentication: Authentication,
+    ): String {
+        if (bindingResult.hasErrors()) {
+            model.addAttribute("portfolioId", id)
+            return "portfolio-form"
+        }
+        try {
+            portfolioService.update(
+                id = id,
+                userId = currentUserId(authentication),
+                name = portfolioForm.name,
+                description = portfolioForm.description,
+                baseCurrency = portfolioForm.baseCurrency,
+            )
+        } catch (_: PortfolioNotFoundException) {
+            throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        }
+        return "redirect:/portfolios/$id"
+    }
+
+    @PostMapping("/portfolios/{id}/delete")
+    @Transactional
+    fun deletePortfolio(@PathVariable id: UUID, authentication: Authentication): String {
+        try {
+            portfolioService.delete(id, currentUserId(authentication))
+        } catch (_: PortfolioNotFoundException) {
+            throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        }
+        return "redirect:/dashboard"
+    }
+
+    // -- HTMX position endpoints --
+
+    @GetMapping("/portfolios/{id}/positions/new-row")
+    fun newPositionRow(@PathVariable id: UUID, model: Model, authentication: Authentication): String {
+        portfolioService.findByIdAndUserId(id, currentUserId(authentication))
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        model.addAttribute("portfolioId", id)
+        model.addAttribute("positionForm", PositionForm())
+        return "fragments/position-row :: new-row"
+    }
+
+    @PostMapping("/portfolios/{id}/positions")
+    @Transactional
+    fun addPosition(
+        @PathVariable id: UUID,
+        @ModelAttribute positionForm: PositionForm,
+        authentication: Authentication,
+        model: Model,
+    ): String {
+        try {
+            val position = portfolioService.addPosition(id, currentUserId(authentication), positionForm)
+            model.addAttribute("position", position)
+            model.addAttribute("portfolioId", id)
+            return "fragments/position-row :: saved-row"
+        } catch (_: PortfolioNotFoundException) {
+            throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        }
+    }
+
+    @DeleteMapping("/portfolios/{id}/positions/{posId}")
+    @Transactional
+    @ResponseBody
+    fun deletePosition(
+        @PathVariable id: UUID,
+        @PathVariable posId: UUID,
+        authentication: Authentication,
+    ): String {
+        try {
+            portfolioService.deletePosition(posId, id, currentUserId(authentication))
+        } catch (_: PortfolioNotFoundException) {
+            throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        }
+        return ""
+    }
+
+    private fun currentUserId(authentication: Authentication): UUID =
+        (authentication.principal as KernfolioUserDetails).id
+}

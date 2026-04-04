@@ -7,7 +7,9 @@ import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.context.annotation.Import
+import com.kernfolio.mockUserDetails
 import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user
+import java.util.UUID
 import org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
@@ -86,8 +88,8 @@ class SecurityConfigTest {
 
         @Test
         fun `authenticated user can access protected routes`() {
-            mockMvc.perform(get("/portfolios").with(user("alice").roles("USER")))
-                .andExpect(status().isNotFound) // 404 not 403 — access is granted, no controller yet
+            mockMvc.perform(get("/dashboard").with(mockUserDetails(UUID.randomUUID(), "alice")))
+                .andExpect(status().isOk) // 200 — access is granted, dashboard renders
         }
     }
 
