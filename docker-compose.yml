@@ -3,6 +3,7 @@ services:
     image: hashicorp/vault:1.19
     cap_add:
       - IPC_LOCK
+    mem_limit: 512m
     environment:
       VAULT_ADDR: "http://0.0.0.0:8200"
     volumes:
@@ -17,6 +18,7 @@ services:
 
   vault-init:
     build: ./vault/init
+    mem_limit: 128m
     depends_on:
       vault:
         condition: service_healthy
@@ -29,6 +31,7 @@ services:
 
   postgres:
     image: postgres:16-alpine
+    mem_limit: 256m
     environment:
       POSTGRES_DB: kernfolio
       POSTGRES_USER: kernfolio
@@ -49,6 +52,7 @@ services:
 
   vault-db-init:
     image: hashicorp/vault:1.19
+    mem_limit: 128m
     depends_on:
       vault:
         condition: service_healthy
@@ -62,6 +66,7 @@ services:
 
   optimizer:
     build: ./optimizer
+    mem_limit: 512m
     environment:
       VAULT_ADDR: "http://vault:8200"
       PYTHONUNBUFFERED: "1"
@@ -78,13 +83,21 @@ services:
 
   web:
     build: ./web
+    mem_limit: 512m
     environment:
       VAULT_ADDR: "http://vault:8200"
       SPRING_PROFILES_ACTIVE: prod,vault
       SPRING_CLOUD_VAULT_TOKEN: "${VAULT_APP_TOKEN:-dev-root-token}"
       OPTIMIZER_BASE_URL: "https://optimizer:8000"
+      JAVA_TOOL_OPTIONS: "-Xmx384m"
     volumes:
       - vault_agent_certs:/vault/certs:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO /dev/null http://localhost:8080/actuator/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     depends_on:
       postgres:
         condition: service_healthy
@@ -95,6 +108,7 @@ services:
 
   caddy:
     image: caddy:2-alpine
+    mem_limit: 64m
     ports:
       - "80:80"
       - "443:443"
