@@ -2,7 +2,6 @@ package com.kernfolio.controller
 
 import com.kernfolio.security.KernfolioUserDetails
 import com.kernfolio.service.PortfolioService
-import com.kernfolio.service.PositionForm
 import org.springframework.security.authentication.AnonymousAuthenticationToken
 import org.springframework.security.core.Authentication
 import org.springframework.stereotype.Controller
@@ -32,4 +31,7 @@ class DashboardController(
         model.addAttribute("username", user.username)
         return "dashboard"
     }
+
+    @GetMapping("/about")
+    fun about(): String = "about"
 }

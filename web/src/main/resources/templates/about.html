@@ -2,9 +2,104 @@
 <html lang="en" xmlns:th="http://www.thymeleaf.org">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>About - Kernfolio</title>
+    <link rel="stylesheet" th:href="@{/css/tailwind.css}">
 </head>
-<body>
-    <h1>About Kernfolio</h1>
+<body class="min-h-screen bg-gray-50 text-gray-900 flex flex-col">
+
+    <nav class="bg-white border-b border-gray-200">
+        <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <div class="flex h-16 items-center justify-between">
+                <a th:href="@{/}" class="text-xl font-semibold text-gray-900">Kernfolio</a>
+                <div class="flex items-center gap-4">
+                    <a th:href="@{/about}" class="text-sm font-medium text-blue-600">About</a>
+                    <a th:href="@{/login}" class="text-sm font-medium text-gray-600 hover:text-gray-900">Login</a>
+                    <a th:href="@{/register}"
+                       class="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700">
+                        Register
+                    </a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <main class="flex-1">
+        <div class="mx-auto max-w-3xl px-4 py-16 sm:px-6 lg:px-8">
+            <h1 class="text-3xl font-bold tracking-tight text-gray-900">About Kernfolio</h1>
+
+            <div class="mt-8 space-y-8 text-sm leading-6 text-gray-600">
+                <section>
+                    <h2 class="text-lg font-semibold text-gray-900">What is Kernfolio?</h2>
+                    <p class="mt-2">
+                        Kernfolio is a portfolio optimization tool for investors who want
+                        quantitative allocation advice without handing their financial data
+                        to a third party. You define your positions, enter your views on
+                        intrinsic values, and Kernfolio computes optimal weights using
+                        established financial models.
+                    </p>
+                </section>
+
+                <section>
+                    <h2 class="text-lg font-semibold text-gray-900">Optimization Algorithms</h2>
+                    <ul class="mt-2 list-disc list-inside space-y-1">
+                        <li><strong>Black-Litterman</strong> &mdash; Combines market equilibrium with your personal views on expected returns, weighted by your confidence level (Idzorek method).</li>
+                        <li><strong>Max Sharpe Ratio</strong> &mdash; Finds the portfolio on the efficient frontier with the highest risk-adjusted return.</li>
+                        <li><strong>Minimum Variance</strong> &mdash; Minimizes portfolio volatility regardless of expected returns.</li>
+                        <li><strong>Risk Parity</strong> &mdash; Equalizes risk contribution across all holdings.</li>
+                    </ul>
+                    <p class="mt-2">
+                        Covariance estimation uses Ledoit-Wolf shrinkage for robustness with
+                        limited price history.
+                    </p>
+                </section>
+
+                <section>
+                    <h2 class="text-lg font-semibold text-gray-900">Multi-Currency</h2>
+                    <p class="mt-2">
+                        Hold positions denominated in any currency. Kernfolio fetches daily
+                        FX rates and converts all prices to your portfolio's base currency
+                        before optimization. Discrete allocation handles mixed-currency
+                        portfolios seamlessly.
+                    </p>
+                </section>
+
+                <section>
+                    <h2 class="text-lg font-semibold text-gray-900">Privacy</h2>
+                    <p class="mt-2">
+                        Your total portfolio value, share counts, and cash amounts are stored
+                        exclusively in your browser's local storage. The server receives only
+                        percentage weights and position types &mdash; never absolute monetary
+                        values. This means Kernfolio cannot determine how much money you have
+                        invested, even if its database were compromised.
+                    </p>
+                </section>
+
+                <section>
+                    <h2 class="text-lg font-semibold text-gray-900">Technology</h2>
+                    <p class="mt-2">
+                        Kernfolio is built with Kotlin and Spring Boot on the backend,
+                        a Python microservice (PyPortfolioOpt) for numerical optimization,
+                        and a lightweight frontend using Thymeleaf, HTMX, Alpine.js, and
+                        Chart.js. Market data is sourced from yfinance and FX rates from
+                        the Frankfurter API.
+                    </p>
+                </section>
+            </div>
+
+            <div class="mt-12">
+                <a th:href="@{/}" class="text-sm font-medium text-blue-600 hover:text-blue-500">
+                    &larr; Back to home
+                </a>
+            </div>
+        </div>
+    </main>
+
+    <footer class="border-t border-gray-200 bg-white">
+        <div class="mx-auto max-w-7xl px-4 py-4 text-center text-sm text-gray-500 sm:px-6 lg:px-8">
+            Kernfolio
+        </div>
+    </footer>
+
 </body>
 </html>

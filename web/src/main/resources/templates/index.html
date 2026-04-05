@@ -2,9 +2,88 @@
 <html lang="en" xmlns:th="http://www.thymeleaf.org">
 <head>
     <meta charset="UTF-8">
-    <title>Kernfolio</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kernfolio - Portfolio Optimization</title>
+    <link rel="stylesheet" th:href="@{/css/tailwind.css}">
 </head>
-<body>
-    <h1>Kernfolio</h1>
+<body class="min-h-screen bg-gray-50 text-gray-900 flex flex-col">
+
+    <nav class="bg-white border-b border-gray-200">
+        <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <div class="flex h-16 items-center justify-between">
+                <a th:href="@{/}" class="text-xl font-semibold text-gray-900">Kernfolio</a>
+                <div class="flex items-center gap-4">
+                    <a th:href="@{/about}" class="text-sm font-medium text-gray-600 hover:text-gray-900">About</a>
+                    <a th:href="@{/login}" class="text-sm font-medium text-gray-600 hover:text-gray-900">Login</a>
+                    <a th:href="@{/register}"
+                       class="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700">
+                        Register
+                    </a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <main class="flex-1">
+        <!-- Hero -->
+        <div class="mx-auto max-w-7xl px-4 py-20 sm:px-6 lg:px-8 text-center">
+            <h1 class="text-4xl font-bold tracking-tight text-gray-900 sm:text-5xl">
+                Optimize your portfolio
+            </h1>
+            <p class="mt-6 text-lg leading-8 text-gray-600 max-w-2xl mx-auto">
+                Kernfolio helps you find optimal portfolio allocations using Black-Litterman,
+                Mean-Variance, and other quantitative methods. Multi-currency, privacy-first,
+                and built for serious investors.
+            </p>
+            <div class="mt-10 flex items-center justify-center gap-x-4">
+                <a th:href="@{/register}"
+                   class="rounded-md bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600">
+                    Get started
+                </a>
+                <a th:href="@{/about}" class="text-sm font-semibold leading-6 text-gray-900">
+                    Learn more &rarr;
+                </a>
+            </div>
+        </div>
+
+        <!-- Features -->
+        <div class="bg-white border-t border-gray-200">
+            <div class="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
+                <div class="grid grid-cols-1 gap-8 sm:grid-cols-3">
+                    <div>
+                        <h3 class="text-base font-semibold text-gray-900">Quantitative Optimization</h3>
+                        <p class="mt-2 text-sm text-gray-600">
+                            Black-Litterman with investor views, Mean-Variance (max Sharpe),
+                            Minimum Variance, and Risk Parity. Ledoit-Wolf covariance shrinkage
+                            for robust estimates.
+                        </p>
+                    </div>
+                    <div>
+                        <h3 class="text-base font-semibold text-gray-900">Multi-Currency Support</h3>
+                        <p class="mt-2 text-sm text-gray-600">
+                            Hold positions in any currency. Prices and FX rates are automatically
+                            converted to your portfolio's base currency for optimization and
+                            discrete allocation.
+                        </p>
+                    </div>
+                    <div>
+                        <h3 class="text-base font-semibold text-gray-900">Privacy First</h3>
+                        <p class="mt-2 text-sm text-gray-600">
+                            Your total portfolio value, share counts, and cash amounts never
+                            leave your browser. The server only sees percentage weights &mdash;
+                            no absolute values.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer class="border-t border-gray-200 bg-white">
+        <div class="mx-auto max-w-7xl px-4 py-4 text-center text-sm text-gray-500 sm:px-6 lg:px-8">
+            Kernfolio
+        </div>
+    </footer>
+
 </body>
 </html>
