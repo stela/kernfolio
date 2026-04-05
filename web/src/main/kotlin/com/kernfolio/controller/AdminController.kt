@@ -31,14 +31,14 @@ class AdminController(
         model.addAttribute("enabledUserCount", userService.countEnabledUsers())
         model.addAttribute("flagCount", featureFlagService.findAll().size)
         model.addAttribute("activeFlagCount", featureFlagService.findAll().count { it.enabled })
-        return "admin/dashboard"
+        return "page/admin/dashboard"
     }
 
     @GetMapping("/users")
     fun users(model: Model): String {
         model.addAttribute("users", userService.findAll())
         model.addAttribute("inviteCodes", inviteCodeService.findAllValid())
-        return "admin/users"
+        return "page/admin/users"
     }
 
     @PostMapping("/users/invite")
@@ -59,13 +59,13 @@ class AdminController(
     ): String {
         val user = userService.setEnabled(id, enabled)
         model.addAttribute("user", user)
-        return "fragments/admin-user-row :: user-row"
+        return "partial/admin-user-row"
     }
 
     @GetMapping("/flags")
     fun flags(model: Model): String {
         model.addAttribute("flags", featureFlagService.findAll())
-        return "admin/flags"
+        return "page/admin/flags"
     }
 
     @PostMapping("/flags/{id}")
@@ -78,6 +78,6 @@ class AdminController(
     ): String {
         val flag = featureFlagService.updateFlag(id, enabled, rolloutPct)
         model.addAttribute("flag", flag)
-        return "fragments/admin-flag-row :: flag-row"
+        return "partial/admin-flag-row"
     }
 }

@@ -22,7 +22,6 @@ configurations.all {
 dependencies {
     implementation("org.springframework.cloud:spring-cloud-starter-vault-config:5.0.1")
     implementation("org.springframework.boot:spring-boot-starter-web")
-    implementation("org.springframework.boot:spring-boot-starter-thymeleaf")
     implementation("org.springframework.boot:spring-boot-starter-data-jdbc")
     implementation("org.springframework.boot:spring-boot-starter-security")
     implementation("org.springframework.boot:spring-boot-starter-validation")
@@ -32,9 +31,9 @@ dependencies {
     implementation("org.jetbrains.kotlin:kotlin-reflect")
     implementation("org.springframework.boot:spring-boot-liquibase")
     implementation("org.liquibase:liquibase-core")
-    implementation("io.github.wimdeblauwe:htmx-spring-boot-thymeleaf:5.1.0")
-    implementation("org.webjars.npm:htmx.org:2.0.4")
-    implementation("org.webjars.npm:alpinejs:3.15.8")
+    implementation("gg.jte:jte:3.2.3")
+    implementation("gg.jte:jte-kotlin:3.2.3")
+    implementation("gg.jte:jte-spring-boot-starter-3:3.2.3")
     implementation("org.webjars.npm:chart.js:4.5.1")
     implementation("org.postgresql:postgresql")
 
@@ -56,7 +55,7 @@ val tailwindBuild by tasks.registering(Exec::class) {
     val inputCss = file("src/main/resources/static/css/input.css")
     val outputCss = file("src/main/resources/static/css/tailwind.css")
     inputs.file(inputCss)
-    inputs.files(fileTree("src/main/resources/templates") { include("**/*.html") })
+    inputs.files(fileTree("src/main/jte") { include("**/*.kte") })
     outputs.file(outputCss)
     commandLine("tailwindcss", "-i", inputCss.path, "-o", outputCss.path, "--minify")
 }

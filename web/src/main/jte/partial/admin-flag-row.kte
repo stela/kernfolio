@@ -1,0 +1,33 @@
+@import com.kernfolio.domain.FeatureFlag
+
+@param flag: FeatureFlag
+
+<tr>
+    <td class="px-4 py-3 text-sm font-mono font-medium">${flag.flagName}</td>
+    <td class="px-4 py-3 text-sm text-gray-500">${flag.description}</td>
+    <td class="px-4 py-3 text-sm text-center">
+        <input type="checkbox" ${flag.enabled ? "checked" : ""} disabled
+               class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+        @if(flag.enabled)
+            <span class="text-green-700 text-xs font-medium ml-1">ON</span>
+        @else
+            <span class="text-gray-400 text-xs font-medium ml-1">OFF</span>
+        @endif
+    </td>
+    <td class="px-4 py-3 text-sm text-right font-mono">${flag.rolloutPct}%</td>
+    <td class="px-4 py-3 text-sm text-right">
+        <form class="inline-flex items-center gap-2">
+            <label class="text-xs text-gray-500">
+                <input type="checkbox" name="enabled" value="true" ${flag.enabled ? "checked" : ""}
+                       class="h-3.5 w-3.5 rounded border-gray-300 text-blue-600">
+            </label>
+            <input type="number" name="rolloutPct" value="${flag.rolloutPct}" min="0" max="100"
+                   class="w-16 rounded-md border border-gray-300 px-2 py-1 text-xs text-right">
+            <button type="button"
+                    data-update-flag="${flag.id}"
+                    class="rounded bg-blue-600 px-2 py-1 text-xs font-medium text-white hover:bg-blue-700">
+                Save
+            </button>
+        </form>
+    </td>
+</tr>

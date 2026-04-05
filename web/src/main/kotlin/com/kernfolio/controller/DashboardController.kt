@@ -18,7 +18,7 @@ class DashboardController(
         if (authentication == null || !authentication.isAuthenticated ||
             authentication is AnonymousAuthenticationToken
         ) {
-            return "index"
+            return "page/index"
         }
         return "redirect:/dashboard"
     }
@@ -29,9 +29,9 @@ class DashboardController(
         val portfolios = portfolioService.findByUserId(user.id)
         model.addAttribute("portfolios", portfolios)
         model.addAttribute("username", user.username)
-        return "dashboard"
+        return "page/dashboard"
     }
 
     @GetMapping("/about")
-    fun about(): String = "about"
+    fun about(): String = "page/about"
 }

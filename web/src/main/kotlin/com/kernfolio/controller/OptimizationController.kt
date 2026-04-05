@@ -44,7 +44,7 @@ class OptimizationController(
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
         model.addAttribute("portfolio", portfolio)
         model.addAttribute("optimizeForm", OptimizeForm())
-        return "optimize"
+        return "page/optimize"
     }
 
     @PostMapping("/portfolios/{id}/optimize")
@@ -73,7 +73,7 @@ class OptimizationController(
             "redirect:/portfolios/$id/results/${result.id}"
         } catch (e: OptimizationException) {
             model.addAttribute("error", e.message)
-            "fragments/optimize-results :: error"
+            "partial/optimize-error"
         }
     }
 
@@ -96,7 +96,7 @@ class OptimizationController(
         model.addAttribute("portfolio", portfolio)
         model.addAttribute("run", run)
         model.addAttribute("positions", positions)
-        return "results"
+        return "page/results"
     }
 
     private fun currentUserId(authentication: Authentication): UUID =

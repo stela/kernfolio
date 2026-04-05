@@ -1,284 +1,309 @@
 /**
- * Alpine.js component for client-side portfolio entry.
+ * Client-side portfolio entry — vanilla JS (replaces Alpine.js component).
  *
  * Users enter share counts (equity) or cash amounts instead of weight percentages.
  * The browser computes weight_pct from current prices and total portfolio value,
  * stores absolute values in localStorage, and sends only percentages to the backend.
  */
-function portfolioEntry() {
-    return {
-        portfolioId: '',
-        baseCurrency: '',
-        totalValue: 0,
-        holdings: {},
-        cash: {},
-        positions: [],
-        prices: {},
-        fxRates: {},
-        driftWarning: false,
-        driftPositions: [],
-        loaded: false,
-        recovering: false,
+var PortfolioEntry = (function () {
+    var portfolioId = '';
+    var baseCurrency = '';
+    var totalValue = 0;
+    var holdings = {};
+    var cash = {};
+    var positions = [];
+    var prices = {};
+    var fxRates = {};
+    var loaded = false;
 
-        init: function () {
-            // Extract portfolio ID from URL: /portfolios/{id}
-            var match = window.location.pathname.match(/\/portfolios\/([^/]+)/);
-            if (!match) return;
-            this.portfolioId = match[1];
+    function init() {
+        var main = document.getElementById('portfolio-main');
+        if (!main) return;
+        portfolioId = main.dataset.portfolioId;
+        baseCurrency = main.dataset.baseCurrency;
+        if (!portfolioId) return;
 
-            this.loadFromLocalStorage();
-            this.fetchEntryData();
-        },
+        loadFromLocalStorage();
+        setupTotalValueInput();
+        setupRecoveryButton();
+        fetchEntryData();
+    }
 
-        storageKey: function () {
-            return 'kernfolio_portfolio_' + this.portfolioId;
-        },
+    function storageKey() {
+        return 'kernfolio_portfolio_' + portfolioId;
+    }
 
-        loadFromLocalStorage: function () {
-            try {
-                var data = JSON.parse(localStorage.getItem(this.storageKey()) || '{}');
-                this.totalValue = data.totalValue || 0;
-                this.holdings = data.holdings || {};
-                this.cash = data.cash || {};
-            } catch (e) {
-                this.totalValue = 0;
-                this.holdings = {};
-                this.cash = {};
-            }
-        },
+    function loadFromLocalStorage() {
+        try {
+            var data = JSON.parse(localStorage.getItem(storageKey()) || '{}');
+            totalValue = data.totalValue || 0;
+            holdings = data.holdings || {};
+            cash = data.cash || {};
+        } catch (e) {
+            totalValue = 0;
+            holdings = {};
+            cash = {};
+        }
+        var input = document.getElementById('total-value-input');
+        if (input && totalValue > 0) input.value = totalValue;
+    }
 
-        saveToLocalStorage: function () {
-            var data = {
-                totalValue: this.totalValue,
-                baseCurrency: this.baseCurrency,
-                holdings: this.holdings,
-                cash: this.cash,
-            };
-            localStorage.setItem(this.storageKey(), JSON.stringify(data));
+    function saveToLocalStorage() {
+        var data = {
+            totalValue: totalValue,
+            baseCurrency: baseCurrency,
+            holdings: holdings,
+            cash: cash,
+        };
+        localStorage.setItem(storageKey(), JSON.stringify(data));
+        localStorage.setItem('totalValue', String(totalValue));
+        var currentHoldings = {};
+        for (var ticker in holdings) {
+            currentHoldings[ticker] = holdings[ticker].shares || 0;
+        }
+        localStorage.setItem('currentHoldings', JSON.stringify(currentHoldings));
+    }
 
-            // Also write to discrete-allocation keys for compatibility
-            localStorage.setItem('totalValue', String(this.totalValue));
-            var currentHoldings = {};
-            for (var ticker in this.holdings) {
-                currentHoldings[ticker] = this.holdings[ticker].shares || 0;
-            }
-            localStorage.setItem('currentHoldings', JSON.stringify(currentHoldings));
-        },
+    function setupTotalValueInput() {
+        var input = document.getElementById('total-value-input');
+        if (!input) return;
+        input.addEventListener('input', function () {
+            totalValue = parseFloat(input.value) || 0;
+            saveToLocalStorage();
+            updateDisplays();
+        });
+    }
 
-        fetchEntryData: function () {
-            var self = this;
-            fetch('/api/portfolios/' + this.portfolioId + '/entry-data')
-                .then(function (r) { return r.json(); })
-                .then(function (data) {
-                    self.baseCurrency = data.baseCurrency;
-                    self.positions = data.positions;
+    function setupRecoveryButton() {
+        var btn = document.getElementById('recover-shares-btn');
+        if (btn) {
+            btn.addEventListener('click', function () {
+                recoverShares();
+            });
+        }
+    }
 
-                    // Collect tickers to fetch prices for
-                    var tickers = data.positions
-                        .filter(function (p) { return p.positionType === 'EQUITY'; })
-                        .map(function (p) { return p.ticker; });
+    function fetchEntryData() {
+        fetch('/api/portfolios/' + portfolioId + '/entry-data')
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                baseCurrency = data.baseCurrency;
+                positions = data.positions;
 
-                    if (tickers.length === 0) {
-                        self.loaded = true;
-                        return;
-                    }
+                var tickers = data.positions
+                    .filter(function (p) { return p.positionType === 'EQUITY'; })
+                    .map(function (p) { return p.ticker; });
 
-                    return fetch('/api/prices/latest?tickers=' + encodeURIComponent(tickers.join(',')))
-                        .then(function (r) { return r.json(); })
-                        .then(function (priceData) {
-                            self.prices = priceData;
+                if (tickers.length === 0) {
+                    loaded = true;
+                    updateDisplays();
+                    return;
+                }
 
-                            // Collect non-base currencies for FX
-                            var currencies = [];
-                            for (var i = 0; i < tickers.length; i++) {
-                                var t = tickers[i];
-                                if (priceData[t] && priceData[t].currency && priceData[t].currency !== self.baseCurrency) {
-                                    if (currencies.indexOf(priceData[t].currency) === -1) {
-                                        currencies.push(priceData[t].currency);
-                                    }
-                                }
+                return fetch('/api/prices/latest?tickers=' + encodeURIComponent(tickers.join(',')))
+                    .then(function (r) { return r.json(); })
+                    .then(function (priceData) {
+                        prices = priceData;
+
+                        var currencies = [];
+                        for (var i = 0; i < tickers.length; i++) {
+                            var t = tickers[i];
+                            if (priceData[t] && priceData[t].currency && priceData[t].currency !== baseCurrency) {
+                                if (currencies.indexOf(priceData[t].currency) === -1) currencies.push(priceData[t].currency);
                             }
-                            // Also add currencies from cash positions
-                            data.positions.forEach(function (p) {
-                                if (p.positionType === 'CASH' && p.currency !== self.baseCurrency) {
-                                    if (currencies.indexOf(p.currency) === -1) currencies.push(p.currency);
-                                }
-                            });
-
-                            if (currencies.length === 0) {
-                                self.loaded = true;
-                                self.checkReconciliation();
-                                return;
+                        }
+                        data.positions.forEach(function (p) {
+                            if (p.positionType === 'CASH' && p.currency !== baseCurrency) {
+                                if (currencies.indexOf(p.currency) === -1) currencies.push(p.currency);
                             }
-
-                            return fetch('/api/fx/latest?base=' + encodeURIComponent(self.baseCurrency) +
-                                '&currencies=' + encodeURIComponent(currencies.join(',')))
-                                .then(function (r) { return r.json(); })
-                                .then(function (fxData) {
-                                    self.fxRates = fxData;
-                                    self.loaded = true;
-                                    self.checkReconciliation();
-                                });
                         });
-                });
-        },
 
-        priceInBaseCurrency: function (ticker) {
-            var pd = this.prices[ticker];
-            if (!pd || !pd.close) return 0;
-            var nativePrice = parseFloat(pd.close);
-            if (pd.currency === this.baseCurrency) return nativePrice;
-            var fx = this.fxRates[pd.currency];
-            if (!fx || !fx.rate) return 0;
-            return nativePrice / parseFloat(fx.rate);
-        },
+                        if (currencies.length === 0) {
+                            loaded = true;
+                            checkReconciliation();
+                            updateDisplays();
+                            return;
+                        }
 
-        cashInBaseCurrency: function (currency, amount) {
-            if (currency === this.baseCurrency) return amount;
-            var fx = this.fxRates[currency];
-            if (!fx || !fx.rate) return 0;
-            return amount / parseFloat(fx.rate);
-        },
-
-        computeWeightPct: function (ticker, positionType, currency) {
-            if (this.totalValue <= 0) return 0;
-            if (positionType === 'CASH') {
-                var cashData = this.cash[currency];
-                if (!cashData) return 0;
-                return this.cashInBaseCurrency(currency, cashData.amount) / this.totalValue;
-            }
-            var h = this.holdings[ticker];
-            if (!h || !h.shares) return 0;
-            var priceBase = this.priceInBaseCurrency(ticker);
-            return (h.shares * priceBase) / this.totalValue;
-        },
-
-        computeCostBasisPct: function (ticker, currency) {
-            if (this.totalValue <= 0) return 0;
-            var h = this.holdings[ticker];
-            if (!h || !h.costBasis) return 0;
-            return this.cashInBaseCurrency(currency, h.costBasis) / this.totalValue;
-        },
-
-        formatWeight: function (ticker, positionType, currency) {
-            var w = this.computeWeightPct(ticker, positionType, currency);
-            return (w * 100).toFixed(2) + '%';
-        },
-
-        getShares: function (ticker) {
-            return this.holdings[ticker] ? this.holdings[ticker].shares || 0 : 0;
-        },
-
-        getCostBasis: function (ticker) {
-            return this.holdings[ticker] ? this.holdings[ticker].costBasis || '' : '';
-        },
-
-        getCashAmount: function (currency) {
-            return this.cash[currency] ? this.cash[currency].amount || 0 : 0;
-        },
-
-        updateShares: function (ticker, shares, currency) {
-            if (!this.holdings[ticker]) {
-                this.holdings[ticker] = { shares: 0, costBasis: 0, currency: currency };
-            }
-            this.holdings[ticker].shares = parseFloat(shares) || 0;
-            this.holdings[ticker].currency = currency;
-            this.saveToLocalStorage();
-        },
-
-        updateCostBasis: function (ticker, costBasis, currency) {
-            if (!this.holdings[ticker]) {
-                this.holdings[ticker] = { shares: 0, costBasis: 0, currency: currency };
-            }
-            this.holdings[ticker].costBasis = parseFloat(costBasis) || 0;
-            this.saveToLocalStorage();
-        },
-
-        updateCashAmount: function (currency, amount) {
-            if (!this.cash[currency]) {
-                this.cash[currency] = { amount: 0 };
-            }
-            this.cash[currency].amount = parseFloat(amount) || 0;
-            this.saveToLocalStorage();
-        },
-
-        updateTotalValue: function (value) {
-            this.totalValue = parseFloat(value) || 0;
-            this.saveToLocalStorage();
-        },
-
-        // Populate hidden form fields before HTMX submits
-        prepareSubmit: function (el, ticker, positionType, currency) {
-            var weightPct = this.computeWeightPct(ticker, positionType, currency);
-            var costBasisPct = this.computeCostBasisPct(ticker, currency);
-            var row = el.closest('tr');
-            var wpField = row.querySelector('input[name="weightPct"]');
-            var cbField = row.querySelector('input[name="costBasisPct"]');
-            if (wpField) wpField.value = weightPct.toFixed(6);
-            if (cbField) cbField.value = costBasisPct > 0 ? costBasisPct.toFixed(6) : '';
-        },
-
-        // Reconciliation: check for weight drift
-        checkReconciliation: function () {
-            if (this.totalValue <= 0 || Object.keys(this.holdings).length === 0) return;
-
-            var drifted = [];
-            for (var i = 0; i < this.positions.length; i++) {
-                var pos = this.positions[i];
-                if (pos.positionType !== 'EQUITY') continue;
-
-                var h = this.holdings[pos.ticker];
-                if (!h || !h.shares) continue;
-
-                var currentWeight = this.computeWeightPct(pos.ticker, 'EQUITY', pos.currency);
-                var backendWeight = parseFloat(pos.weightPct);
-                var drift = Math.abs(currentWeight - backendWeight);
-
-                if (drift > 0.01) { // >1% drift
-                    drifted.push({
-                        ticker: pos.ticker,
-                        backendWeight: (backendWeight * 100).toFixed(2),
-                        currentWeight: (currentWeight * 100).toFixed(2),
+                        return fetch('/api/fx/latest?base=' + encodeURIComponent(baseCurrency) +
+                            '&currencies=' + encodeURIComponent(currencies.join(',')))
+                            .then(function (r) { return r.json(); })
+                            .then(function (fxData) {
+                                fxRates = fxData;
+                                loaded = true;
+                                checkReconciliation();
+                                updateDisplays();
+                            });
                     });
+            });
+    }
+
+    function priceInBaseCurrency(ticker) {
+        var pd = prices[ticker];
+        if (!pd || !pd.close) return 0;
+        var nativePrice = parseFloat(pd.close);
+        if (pd.currency === baseCurrency) return nativePrice;
+        var fx = fxRates[pd.currency];
+        if (!fx || !fx.rate) return 0;
+        return nativePrice / parseFloat(fx.rate);
+    }
+
+    function cashInBaseCurrency(currency, amount) {
+        if (currency === baseCurrency) return amount;
+        var fx = fxRates[currency];
+        if (!fx || !fx.rate) return 0;
+        return amount / parseFloat(fx.rate);
+    }
+
+    function computeWeightPct(ticker, positionType, currency) {
+        if (totalValue <= 0) return 0;
+        if (positionType === 'CASH') {
+            var cashData = cash[currency];
+            if (!cashData) return 0;
+            return cashInBaseCurrency(currency, cashData.amount) / totalValue;
+        }
+        var h = holdings[ticker];
+        if (!h || !h.shares) return 0;
+        var priceBase = priceInBaseCurrency(ticker);
+        return (h.shares * priceBase) / totalValue;
+    }
+
+    function computeCostBasisPct(ticker, currency) {
+        if (totalValue <= 0) return 0;
+        var h = holdings[ticker];
+        if (!h || !h.costBasis) return 0;
+        return cashInBaseCurrency(currency, h.costBasis) / totalValue;
+    }
+
+    function formatWeight(ticker, positionType, currency) {
+        var w = computeWeightPct(ticker, positionType, currency);
+        return (w * 100).toFixed(2) + '%';
+    }
+
+    function getShares(ticker) {
+        return holdings[ticker] ? holdings[ticker].shares || 0 : 0;
+    }
+
+    function getCashAmount(currency) {
+        return cash[currency] ? cash[currency].amount || 0 : 0;
+    }
+
+    function updateShares(ticker, shares, currency) {
+        if (!holdings[ticker]) {
+            holdings[ticker] = { shares: 0, costBasis: 0, currency: currency };
+        }
+        holdings[ticker].shares = parseFloat(shares) || 0;
+        holdings[ticker].currency = currency;
+        saveToLocalStorage();
+    }
+
+    function updateCashAmount(currency, amount) {
+        if (!cash[currency]) {
+            cash[currency] = { amount: 0 };
+        }
+        cash[currency].amount = parseFloat(amount) || 0;
+        saveToLocalStorage();
+    }
+
+    function updateDisplays() {
+        // Update shares displays
+        document.querySelectorAll('[data-shares-ticker]').forEach(function (el) {
+            el.textContent = getShares(el.dataset.sharesTicker);
+        });
+        // Update cash displays
+        document.querySelectorAll('[data-cash-currency]').forEach(function (el) {
+            el.textContent = getCashAmount(el.dataset.cashCurrency);
+        });
+
+        // Show/hide recovery prompt
+        var recoveryPrompt = document.getElementById('recovery-prompt');
+        if (recoveryPrompt) {
+            var hasLocal = Object.keys(holdings).length > 0 || Object.keys(cash).length > 0;
+            var show = loaded && !hasLocal && positions.length > 0 && totalValue > 0;
+            recoveryPrompt.classList.toggle('hidden', !show);
+        }
+    }
+
+    function checkReconciliation() {
+        if (totalValue <= 0 || Object.keys(holdings).length === 0) return;
+
+        var drifted = [];
+        for (var i = 0; i < positions.length; i++) {
+            var pos = positions[i];
+            if (pos.positionType !== 'EQUITY') continue;
+            var h = holdings[pos.ticker];
+            if (!h || !h.shares) continue;
+            var currentWeight = computeWeightPct(pos.ticker, 'EQUITY', pos.currency);
+            var backendWeight = parseFloat(pos.weightPct);
+            var drift = Math.abs(currentWeight - backendWeight);
+            if (drift > 0.01) {
+                drifted.push({
+                    ticker: pos.ticker,
+                    backendWeight: (backendWeight * 100).toFixed(2),
+                    currentWeight: (currentWeight * 100).toFixed(2),
+                });
+            }
+        }
+
+        var warning = document.getElementById('drift-warning');
+        var list = document.getElementById('drift-list');
+        if (warning && list) {
+            if (drifted.length > 0) {
+                list.innerHTML = '';
+                drifted.forEach(function (d) {
+                    var li = document.createElement('li');
+                    li.textContent = d.ticker + ': backend ' + d.backendWeight + '% vs. current ' + d.currentWeight + '%';
+                    list.appendChild(li);
+                });
+                warning.classList.remove('hidden');
+            } else {
+                warning.classList.add('hidden');
+            }
+        }
+    }
+
+    function recoverShares() {
+        if (totalValue <= 0) return;
+
+        for (var i = 0; i < positions.length; i++) {
+            var pos = positions[i];
+            if (pos.positionType === 'CASH') {
+                var cashAmount = parseFloat(pos.weightPct) * totalValue;
+                var cashBase = cashInBaseCurrency(pos.currency, 1);
+                if (cashBase > 0) {
+                    cash[pos.currency] = { amount: Math.round(cashAmount / cashBase * 100) / 100 };
                 }
+                continue;
             }
 
-            this.driftPositions = drifted;
-            this.driftWarning = drifted.length > 0;
-        },
+            var priceBase = priceInBaseCurrency(pos.ticker);
+            if (priceBase <= 0) continue;
 
-        // Recovery: estimate shares from backend weights
-        recoverShares: function () {
-            if (this.totalValue <= 0) return;
+            var estimatedShares = Math.round(totalValue * parseFloat(pos.weightPct) / priceBase);
+            holdings[pos.ticker] = {
+                shares: estimatedShares,
+                costBasis: 0,
+                currency: pos.currency,
+            };
+        }
 
-            for (var i = 0; i < this.positions.length; i++) {
-                var pos = this.positions[i];
-                if (pos.positionType === 'CASH') {
-                    var cashAmount = parseFloat(pos.weightPct) * this.totalValue;
-                    var cashBase = this.cashInBaseCurrency(pos.currency, 1);
-                    if (cashBase > 0) {
-                        this.cash[pos.currency] = { amount: Math.round(cashAmount / cashBase * 100) / 100 };
-                    }
-                    continue;
-                }
+        saveToLocalStorage();
+        updateDisplays();
 
-                var priceBase = this.priceInBaseCurrency(pos.ticker);
-                if (priceBase <= 0) continue;
+        var recoveryPrompt = document.getElementById('recovery-prompt');
+        if (recoveryPrompt) recoveryPrompt.classList.add('hidden');
+    }
 
-                var estimatedShares = Math.round(this.totalValue * parseFloat(pos.weightPct) / priceBase);
-                this.holdings[pos.ticker] = {
-                    shares: estimatedShares,
-                    costBasis: 0,
-                    currency: pos.currency,
-                };
-            }
+    document.addEventListener('DOMContentLoaded', init);
 
-            this.saveToLocalStorage();
-            this.recovering = false;
-        },
-
-        hasLocalData: function () {
-            return Object.keys(this.holdings).length > 0 || Object.keys(this.cash).length > 0;
-        },
+    return {
+        computeWeightPct: computeWeightPct,
+        computeCostBasisPct: computeCostBasisPct,
+        formatWeight: formatWeight,
+        getShares: getShares,
+        getCashAmount: getCashAmount,
+        updateShares: updateShares,
+        updateCashAmount: updateCashAmount,
+        updateDisplays: updateDisplays,
     };
-}
+})();

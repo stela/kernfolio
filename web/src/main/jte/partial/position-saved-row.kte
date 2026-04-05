@@ -1,0 +1,30 @@
+@import com.kernfolio.domain.Position
+@import java.util.UUID
+
+@param position: Position
+@param portfolioId: UUID
+
+<tr>
+    <td class="px-4 py-3 text-sm">${position.positionType}</td>
+    <td class="px-4 py-3 text-sm font-mono font-medium">${position.ticker}</td>
+    <td class="px-4 py-3 text-sm text-gray-500">${position.name}</td>
+    <td class="px-4 py-3 text-sm font-mono">${position.currency}</td>
+    <td class="px-4 py-3 text-sm text-right font-mono">
+        @if(position.positionType == "EQUITY")
+            <span data-shares-ticker="${position.ticker}"></span>
+        @elseif(position.positionType == "CASH")
+            <span data-cash-currency="${position.currency}"></span>
+        @else
+            ${"%.2f".format(position.weightPct.toDouble() * 100)}%
+        @endif
+    </td>
+    <td class="px-4 py-3 text-sm text-right">${"%.2f".format(position.weightPct.toDouble() * 100)}%</td>
+    <td class="px-4 py-3 text-sm text-gray-500">${position.sector}</td>
+    <td class="px-4 py-3 text-sm text-right">
+        <button type="button"
+                data-delete-position="/portfolios/${portfolioId}/positions/${position.id}"
+                class="text-red-600 hover:text-red-800 text-sm font-medium">
+            Remove
+        </button>
+    </td>
+</tr>

@@ -1,29 +1,14 @@
-<!DOCTYPE html>
-<html lang="en" xmlns:th="http://www.thymeleaf.org">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kernfolio - Portfolio Optimization</title>
-    <link rel="stylesheet" th:href="@{/css/tailwind.css}">
-</head>
-<body class="min-h-screen bg-gray-50 text-gray-900 flex flex-col">
+@param nonce: String
+@param csrfToken: String
+@param csrfHeaderName: String
 
-    <nav class="bg-white border-b border-gray-200">
-        <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-            <div class="flex h-16 items-center justify-between">
-                <a th:href="@{/}" class="text-xl font-semibold text-gray-900">Kernfolio</a>
-                <div class="flex items-center gap-4">
-                    <a th:href="@{/about}" class="text-sm font-medium text-gray-600 hover:text-gray-900">About</a>
-                    <a th:href="@{/login}" class="text-sm font-medium text-gray-600 hover:text-gray-900">Login</a>
-                    <a th:href="@{/register}"
-                       class="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700">
-                        Register
-                    </a>
-                </div>
-            </div>
-        </div>
-    </nav>
-
+@template.layout.base(
+    title = "Kernfolio - Portfolio Optimization",
+    nonce = nonce,
+    csrfToken = csrfToken,
+    csrfHeaderName = csrfHeaderName,
+    authenticated = false,
+    content = @`
     <main class="flex-1">
         <!-- Hero -->
         <div class="mx-auto max-w-7xl px-4 py-20 sm:px-6 lg:px-8 text-center">
@@ -36,11 +21,11 @@
                 and built for serious investors.
             </p>
             <div class="mt-10 flex items-center justify-center gap-x-4">
-                <a th:href="@{/register}"
+                <a href="/register"
                    class="rounded-md bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600">
                     Get started
                 </a>
-                <a th:href="@{/about}" class="text-sm font-semibold leading-6 text-gray-900">
+                <a href="/about" class="text-sm font-semibold leading-6 text-gray-900">
                     Learn more &rarr;
                 </a>
             </div>
@@ -78,12 +63,5 @@
             </div>
         </div>
     </main>
-
-    <footer class="border-t border-gray-200 bg-white">
-        <div class="mx-auto max-w-7xl px-4 py-4 text-center text-sm text-gray-500 sm:px-6 lg:px-8">
-            Kernfolio
-        </div>
-    </footer>
-
-</body>
-</html>
+    `
+)

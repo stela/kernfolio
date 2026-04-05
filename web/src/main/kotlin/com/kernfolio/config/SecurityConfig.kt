@@ -1,5 +1,6 @@
 package com.kernfolio.config
 
+import com.kernfolio.security.CspNonceFilter
 import com.kernfolio.security.TenantFilter
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
@@ -14,6 +15,7 @@ import org.springframework.security.web.AuthenticationEntryPoint
 import org.springframework.security.web.SecurityFilterChain
 import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter
+import org.springframework.security.web.header.HeaderWriterFilter
 
 @Configuration
 @EnableWebSecurity
@@ -40,16 +42,10 @@ class SecurityConfig {
             exceptions.authenticationEntryPoint(ApiAwareAuthenticationEntryPoint())
         }
         .headers { headers ->
-            headers.contentSecurityPolicy { csp ->
-                csp.policyDirectives(
-                    "default-src 'self'; script-src 'self'; style-src 'self'; " +
-                        "img-src 'self' data:; font-src 'self'; connect-src 'self'; " +
-                        "frame-ancestors 'none'; form-action 'self'"
-                )
-            }
             headers.referrerPolicy { it.policy(org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter.ReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN) }
             headers.permissionsPolicy { it.policy("camera=(), microphone=(), geolocation=()") }
         }
+        .addFilterAfter(CspNonceFilter(), HeaderWriterFilter::class.java)
         .addFilterAfter(TenantFilter(), UsernamePasswordAuthenticationFilter::class.java)
         .build()
 }

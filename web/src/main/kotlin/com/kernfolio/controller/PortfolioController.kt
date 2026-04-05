@@ -40,7 +40,7 @@ class PortfolioController(
     @GetMapping("/portfolios/new")
     fun newPortfolio(model: Model): String {
         model.addAttribute("portfolioForm", PortfolioForm())
-        return "portfolio-form"
+        return "page/portfolio-form"
     }
 
     @PostMapping("/portfolios")
@@ -48,9 +48,13 @@ class PortfolioController(
     fun createPortfolio(
         @Valid @ModelAttribute portfolioForm: PortfolioForm,
         bindingResult: BindingResult,
+        model: Model,
         authentication: Authentication,
     ): String {
-        if (bindingResult.hasErrors()) return "portfolio-form"
+        if (bindingResult.hasErrors()) {
+            model.addAttribute("errors", FormErrors(bindingResult))
+            return "page/portfolio-form"
+        }
         val portfolio = portfolioService.create(
             userId = currentUserId(authentication),
             name = portfolioForm.name,
@@ -69,7 +73,7 @@ class PortfolioController(
         model.addAttribute("portfolio", portfolio)
         model.addAttribute("positions", positions)
         model.addAttribute("positionForm", PositionForm())
-        return "portfolio-detail"
+        return "page/portfolio-detail"
     }
 
     @GetMapping("/portfolios/{id}/edit")
@@ -82,7 +86,7 @@ class PortfolioController(
             baseCurrency = portfolio.baseCurrency,
         ))
         model.addAttribute("portfolioId", portfolio.id)
-        return "portfolio-form"
+        return "page/portfolio-form"
     }
 
     @PostMapping("/portfolios/{id}")
@@ -96,7 +100,8 @@ class PortfolioController(
     ): String {
         if (bindingResult.hasErrors()) {
             model.addAttribute("portfolioId", id)
-            return "portfolio-form"
+            model.addAttribute("errors", FormErrors(bindingResult))
+            return "page/portfolio-form"
         }
         try {
             portfolioService.update(
@@ -123,7 +128,7 @@ class PortfolioController(
         return "redirect:/dashboard"
     }
 
-    // -- HTMX position endpoints --
+    // -- Position endpoints (partial templates) --
 
     @GetMapping("/portfolios/{id}/positions/new-row")
     fun newPositionRow(@PathVariable id: UUID, model: Model, authentication: Authentication): String {
@@ -131,7 +136,7 @@ class PortfolioController(
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
         model.addAttribute("portfolioId", id)
         model.addAttribute("positionForm", PositionForm())
-        return "fragments/position-row :: new-row"
+        return "partial/position-new-row"
     }
 
     @PostMapping("/portfolios/{id}/positions")
@@ -146,7 +151,7 @@ class PortfolioController(
             val position = portfolioService.addPosition(id, currentUserId(authentication), positionForm)
             model.addAttribute("position", position)
             model.addAttribute("portfolioId", id)
-            return "fragments/position-row :: saved-row"
+            return "partial/position-saved-row"
         } catch (_: PortfolioNotFoundException) {
             throw ResponseStatusException(HttpStatus.NOT_FOUND)
         }

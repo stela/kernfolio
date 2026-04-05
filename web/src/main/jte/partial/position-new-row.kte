@@ -1,0 +1,50 @@
+@import java.util.UUID
+
+@param portfolioId: UUID
+
+<tr data-new-row data-submit-url="/portfolios/${portfolioId}/positions">
+    <td class="px-4 py-2">
+        <select name="positionType" class="js-pos-type rounded-md border border-gray-300 px-2 py-1 text-sm">
+            <option value="EQUITY" selected>EQUITY</option>
+            <option value="CASH">CASH</option>
+        </select>
+    </td>
+    <td class="px-4 py-2">
+        <input type="text" name="ticker" required placeholder="e.g. GOOG"
+               class="js-ticker-input js-equity-field w-24 rounded-md border border-gray-300 px-2 py-1 text-sm font-mono">
+        <span class="js-cash-ticker js-cash-field hidden text-sm text-gray-500"></span>
+        <input type="hidden" name="cashTicker" class="js-cash-ticker-hidden js-cash-field hidden">
+    </td>
+    <td class="px-4 py-2">
+        <input type="text" name="name" placeholder="Optional"
+               class="js-equity-field w-32 rounded-md border border-gray-300 px-2 py-1 text-sm">
+        <input type="hidden" name="cashName" class="js-cash-field hidden">
+    </td>
+    <td class="px-4 py-2">
+        <input type="text" name="currency" value="USD" required maxlength="3"
+               class="js-currency w-16 rounded-md border border-gray-300 px-2 py-1 text-sm font-mono uppercase">
+    </td>
+    <td class="px-4 py-2">
+        <input type="number" step="any" min="0" placeholder="Shares"
+               class="js-shares js-equity-field w-20 rounded-md border border-gray-300 px-2 py-1 text-sm text-right">
+        <input type="number" step="0.01" min="0" placeholder="Amount"
+               class="js-cash-amount js-cash-field hidden w-20 rounded-md border border-gray-300 px-2 py-1 text-sm text-right">
+    </td>
+    <td class="px-4 py-2 text-right text-sm text-gray-500">
+        <span class="js-weight-display"></span>
+    </td>
+    <td class="px-4 py-2">
+        <input type="text" name="sector" placeholder="Sector"
+               class="js-equity-field w-24 rounded-md border border-gray-300 px-2 py-1 text-sm">
+    </td>
+    <td class="px-4 py-2 text-right">
+        <input type="hidden" name="weightPct" value="0">
+        <input type="hidden" name="costBasisPct" value="">
+        <button type="button" class="js-save-position text-blue-600 hover:text-blue-800 text-sm font-medium mr-2">
+            Save
+        </button>
+        <button type="button" class="js-cancel-row text-gray-400 hover:text-gray-600 text-sm font-medium">
+            Cancel
+        </button>
+    </td>
+</tr>

@@ -1,0 +1,141 @@
+@import com.kernfolio.config.FeatureFlagAccessor
+@import com.kernfolio.domain.OptimizationRun
+@import com.kernfolio.domain.Portfolio
+@import com.kernfolio.domain.Position
+@import java.time.ZoneId
+@import java.time.format.DateTimeFormatter
+
+@param portfolio: Portfolio
+@param run: OptimizationRun
+@param positions: List<Position>
+@param featureFlags: FeatureFlagAccessor
+@param nonce: String
+@param csrfToken: String
+@param csrfHeaderName: String
+
+!{val fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(ZoneId.systemDefault())}
+!{val positionWeights = positions.associateBy({ it.ticker }, { it.weightPct.toDouble() * 100 })}
+
+@template.layout.base(
+    title = "Results - " + portfolio.name + " - Kernfolio",
+    nonce = nonce,
+    csrfToken = csrfToken,
+    csrfHeaderName = csrfHeaderName,
+    includeChartJs = true,
+    content = @`
+    <main class="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+        <div class="mb-6">
+            <a href="/portfolios/${portfolio.id}"
+               class="text-sm font-medium text-blue-600 hover:text-blue-500">
+                &larr; Back to ${portfolio.name}
+            </a>
+            <h1 class="mt-2 text-2xl font-semibold">Optimization Results</h1>
+            <p class="mt-1 text-sm text-gray-500">
+                Algorithm: <span class="font-mono">${run.algorithm}</span>
+                @if(run.computationMs != null)
+                    <span class="ml-2 text-gray-400">(${run.computationMs}ms)</span>
+                @endif
+                @if(run.createdAt != null)
+                    <span class="ml-2 text-gray-400">&mdash; ${fmt.format(run.createdAt)}</span>
+                @endif
+            </p>
+        </div>
+
+        <!-- Metrics cards -->
+        @if(run.results.metrics != null)
+            !{val m = run.results.metrics!!}
+            <div class="grid grid-cols-2 gap-4 sm:grid-cols-4 mb-8">
+                <div class="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+                    <p class="text-xs font-medium uppercase text-gray-500">Expected Return</p>
+                    <p class="mt-1 text-xl font-semibold">${"%.2f".format((m.expectedAnnualReturn ?: 0.0) * 100)}%</p>
+                </div>
+                <div class="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+                    <p class="text-xs font-medium uppercase text-gray-500">Volatility</p>
+                    <p class="mt-1 text-xl font-semibold">${"%.2f".format((m.annualVolatility ?: 0.0) * 100)}%</p>
+                </div>
+                <div class="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+                    <p class="text-xs font-medium uppercase text-gray-500">Sharpe Ratio</p>
+                    <p class="mt-1 text-xl font-semibold">${"%.2f".format(m.sharpeRatio ?: 0.0)}</p>
+                </div>
+                <div class="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+                    <p class="text-xs font-medium uppercase text-gray-500">CVaR 95%</p>
+                    <p class="mt-1 text-xl font-semibold">${"%.2f".format((m.cvar95 ?: 0.0) * 100)}%</p>
+                </div>
+            </div>
+        @endif
+
+        <!-- Charts: allocation -->
+        <div class="grid grid-cols-1 gap-6 mb-8 lg:grid-cols-2">
+            <div class="bg-white shadow rounded-lg p-6">
+                <h3 class="text-sm font-medium text-gray-700 mb-4">Optimized Allocation</h3>
+                <canvas id="allocation-pie" class="max-h-80"></canvas>
+            </div>
+            <div class="bg-white shadow rounded-lg p-6">
+                <h3 class="text-sm font-medium text-gray-700 mb-4">Current vs. Optimized</h3>
+                <canvas id="allocation-bar" class="max-h-80"></canvas>
+            </div>
+        </div>
+
+        <!-- Chart: efficient frontier -->
+        @if(featureFlags.isEnabled("SHOW_EFFICIENT_FRONTIER"))
+            <div class="bg-white shadow rounded-lg p-6 mb-8">
+                <h3 class="text-sm font-medium text-gray-700 mb-4">Efficient Frontier</h3>
+                <canvas id="efficient-frontier" class="max-h-96"></canvas>
+            </div>
+        @endif
+
+        <!-- Weights table -->
+        <div class="bg-white shadow rounded-lg overflow-hidden mb-8">
+            <div class="px-6 py-4 border-b border-gray-200">
+                <h3 class="text-lg font-medium">Optimized Weights</h3>
+            </div>
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Ticker</th>
+                        <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500">Optimized</th>
+                        <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500">Current</th>
+                        <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500">Delta</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200">
+                    @for(entry in run.results.optimizedWeights)
+                        !{val optimizedPct = entry.value * 100}
+                        !{val currentPct = positionWeights.getOrDefault(entry.key, 0.0)}
+                        !{val delta = optimizedPct - currentPct}
+                        <tr>
+                            <td class="px-4 py-2 text-sm font-mono font-medium">${entry.key}</td>
+                            <td class="px-4 py-2 text-sm text-right">${"%.2f".format(optimizedPct)}%</td>
+                            <td class="px-4 py-2 text-sm text-right">${"%.2f".format(currentPct)}%</td>
+                            <td class="px-4 py-2 text-sm text-right font-medium ${if(delta > 0) "text-green-600" else if(delta < 0) "text-red-600" else "text-gray-400"}">${if(delta > 0) "+" else ""}${"%.2f".format(delta)}%</td>
+                        </tr>
+                    @endfor
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Discrete allocation (browser-computed) -->
+        <div id="discrete-allocation" class="bg-white shadow rounded-lg p-6 mb-8"></div>
+
+        <div class="flex gap-4">
+            <a href="/portfolios/${portfolio.id}/optimize"
+               class="text-sm font-medium text-blue-600 hover:text-blue-500">
+                Run another optimization
+            </a>
+            <a href="/portfolios/${portfolio.id}"
+               class="text-sm font-medium text-gray-600 hover:text-gray-500">
+                Back to portfolio
+            </a>
+        </div>
+    </main>
+    `,
+    scripts = @`
+        <script src="/js/charts/chart-utils.js" nonce="${nonce}"></script>
+        <script src="/js/charts/allocation-pie.js" nonce="${nonce}"></script>
+        <script src="/js/charts/allocation-bar.js" nonce="${nonce}"></script>
+        @if(featureFlags.isEnabled("SHOW_EFFICIENT_FRONTIER"))
+            <script src="/js/charts/efficient-frontier.js" nonce="${nonce}"></script>
+        @endif
+        <script src="/js/discrete-allocation.js" nonce="${nonce}"></script>
+    `
+)

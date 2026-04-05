@@ -29,7 +29,7 @@ cd optimizer && uv run pytest tests/test_optimize.py  # Single test file
 **Hybrid multi-module app**: Kotlin Spring Boot web server + Python FastAPI optimization microservice + PostgreSQL.
 
 ### Modules
-- **`web/`** — Spring Boot 4.0.3, Kotlin 2.3.10, Java 25. Server-rendered UI (Thymeleaf + HTMX + Alpine.js). Spring Data JDBC (not JPA/Hibernate).
+- **`web/`** — Spring Boot 4.0.3, Kotlin 2.3.10, Java 25. Server-rendered UI (JTE 3.2.3 `.kte` templates + vanilla JS). Spring Data JDBC (not JPA/Hibernate).
 - **`optimizer/`** — FastAPI, Python 3.11+. Stateless: receives all data in request body, no DB access. Endpoints: `/optimize`, `/fetch-prices`, `/fetch-fx-rates`, `/health`.
 - **`digital-twins/`** — Mock yfinance and Frankfurter APIs for local dev.
 
@@ -40,6 +40,8 @@ cd optimizer && uv run pytest tests/test_optimize.py  # Single test file
 4. Results page: server renders metrics/weights, Chart.js fetches data from JSON API endpoints
 
 ### Key Patterns
+- **JTE templates**: `.kte` files in `web/src/main/jte/`. Full pages in `page/`, partials (for fetch-based DOM updates) in `partial/`. Layout via `@template.layout.base(...)`. Each template declares `@param` for its required model attributes.
+- **CSRF for fetch**: `csrf-fetch.js` reads token from `<meta>` tags. All `fetch()` POST/PUT/DELETE must include `Csrf.headers()`.
 - **WebClient for optimizer calls**: `optimizerWebClient` bean in `OptimizerClientConfig.kt`, blocking `.block()` pattern (see `YFinanceFetcher.kt`)
 - **Jackson 3.x**: Group ID is `tools.jackson` (not `com.fasterxml.jackson`). Annotations still use `com.fasterxml.jackson.annotation`. Snake-case DTOs use `@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy::class)`.
 - **Ticker mapping**: Internal tickers ↔ yfinance format via `TickerMapper` (e.g., `GMEXICOB` ↔ `GMEXICOB.MX`)
@@ -48,7 +50,8 @@ cd optimizer && uv run pytest tests/test_optimize.py  # Single test file
 - **Feature flags**: DB-driven via `FeatureFlagService`, available in templates as `featureFlags.isEnabled('FLAG_NAME')`
 
 ### Security
-- **No dynamic data in HTML**: Never use `th:data-*` attributes to pass server data to JavaScript. Use JSON API endpoints instead (XSS prevention). Chart JS files parse IDs from URL path via `ChartUtils.getIdsFromUrl()`.
+- **Nonce-based CSP**: `CspNonceFilter` generates a per-request nonce. Every `<script>` and `<link rel="stylesheet">` tag must include `nonce="${nonce}"`. CSP header: `script-src 'self' 'nonce-...'`. No `unsafe-eval` or `unsafe-inline`. All client-side JS must be in static `.js` files, never inline. Do not use JS frameworks that require `eval()` / `new Function()`.
+- **No dynamic data in HTML**: Never embed server data in HTML `data-*` attributes for JavaScript consumption. Use JSON API endpoints instead (XSS prevention). Chart JS files parse IDs from URL path via `ChartUtils.getIdsFromUrl()`.
 - **Privacy**: Backend never sees total portfolio value, share counts, or cash amounts. Only percentage weights.
 - **Vault** (optional `vault` profile): `spring-cloud-starter-vault-config:5.0.1` for dynamic DB credentials and KV secrets. Disabled by default (`spring.cloud.vault.enabled=false`).
 

@@ -1,0 +1,39 @@
+@import com.kernfolio.domain.User
+
+@param user: User
+
+<tr>
+    <td class="px-4 py-3 text-sm font-medium">${user.username}</td>
+    <td class="px-4 py-3 text-sm text-gray-500">${user.email}</td>
+    <td class="px-4 py-3 text-sm">
+        @if(user.role == "ADMIN")
+            <span class="text-purple-700 bg-purple-50 px-2 py-0.5 rounded-full text-xs font-medium">${user.role}</span>
+        @else
+            <span class="text-gray-500 text-xs">${user.role}</span>
+        @endif
+    </td>
+    <td class="px-4 py-3 text-sm">
+        @if(user.enabled)
+            <span class="text-green-700 bg-green-50 px-2 py-0.5 rounded-full text-xs font-medium">Enabled</span>
+        @else
+            <span class="text-red-700 bg-red-50 px-2 py-0.5 rounded-full text-xs font-medium">Disabled</span>
+        @endif
+    </td>
+    <td class="px-4 py-3 text-sm text-right">
+        @if(user.enabled)
+            <button type="button"
+                    data-toggle-user="${user.id}"
+                    data-enabled="false"
+                    class="text-red-600 hover:text-red-800 text-sm font-medium">
+                Disable
+            </button>
+        @else
+            <button type="button"
+                    data-toggle-user="${user.id}"
+                    data-enabled="true"
+                    class="text-green-600 hover:text-green-800 text-sm font-medium">
+                Enable
+            </button>
+        @endif
+    </td>
+</tr>

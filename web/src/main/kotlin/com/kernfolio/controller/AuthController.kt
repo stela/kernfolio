@@ -54,14 +54,14 @@ class AuthController(
         model.addAttribute("error", error != null)
         model.addAttribute("logout", logout != null)
         model.addAttribute("registered", registered != null)
-        return "login"
+        return "page/login"
     }
 
     @GetMapping("/register")
     fun registerPage(model: Model): String {
         model.addAttribute("registrationForm", RegistrationForm())
         model.addAttribute("selfRegistrationEnabled", featureFlagService.isGloballyEnabled("SELF_REGISTRATION"))
-        return "register"
+        return "page/register"
     }
 
     @PostMapping("/register")
@@ -102,7 +102,8 @@ class AuthController(
         }
 
         if (bindingResult.hasErrors()) {
-            return "register"
+            model.addAttribute("errors", FormErrors(bindingResult))
+            return "page/register"
         }
 
         val role = if (userService.countEnabledUsers() == 0L) "ADMIN" else "USER"

@@ -1,0 +1,100 @@
+@import com.kernfolio.domain.InviteCode
+@import com.kernfolio.domain.User
+
+@param users: List<User>
+@param inviteCodes: List<InviteCode>
+@param generatedCode: String? = null
+@param nonce: String
+@param csrfToken: String
+@param csrfHeaderName: String
+
+@template.layout.base(
+    title = "Users - Admin - Kernfolio",
+    nonce = nonce,
+    csrfToken = csrfToken,
+    csrfHeaderName = csrfHeaderName,
+    content = @`
+    <main class="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+        <div class="flex items-center justify-between mb-6">
+            <h1 class="text-2xl font-semibold">User Management</h1>
+            <a href="/admin" class="text-sm font-medium text-blue-600 hover:text-blue-500">Back to admin</a>
+        </div>
+
+        <!-- Invite code generation -->
+        <div class="bg-white shadow rounded-lg p-6 mb-8">
+            <h2 class="text-lg font-medium mb-4">Generate Invite Code</h2>
+            <form action="/admin/users/invite" method="post" class="flex items-end gap-4">
+                <input type="hidden" name="_csrf" value="${csrfToken}">
+                <button type="submit"
+                        class="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700">
+                    Generate code
+                </button>
+            </form>
+            @if(generatedCode != null)
+                <div class="mt-4 rounded-md bg-green-50 p-4">
+                    <p class="text-sm text-green-700">
+                        Invite code: <code class="font-mono font-bold tracking-wider">${generatedCode}</code>
+                    </p>
+                </div>
+            @endif
+        </div>
+
+        <!-- Active invite codes -->
+        @if(inviteCodes.isNotEmpty())
+            <div class="bg-white shadow rounded-lg overflow-hidden mb-8">
+                <div class="px-6 py-4 border-b border-gray-200">
+                    <h2 class="text-lg font-medium">Unused Invite Codes</h2>
+                </div>
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Code</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Created</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Expires</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-200">
+                        @for(ic in inviteCodes)
+                            <tr>
+                                <td class="px-4 py-3 text-sm font-mono tracking-wider">${ic.code}</td>
+                                <td class="px-4 py-3 text-sm text-gray-500">${ic.createdAt?.toString()?.substring(0, 10) ?: ""}</td>
+                                @if(ic.expiresAt != null)
+                                    <td class="px-4 py-3 text-sm text-gray-500">${ic.expiresAt.toString().substring(0, 10)}</td>
+                                @else
+                                    <td class="px-4 py-3 text-sm text-gray-400">Never</td>
+                                @endif
+                            </tr>
+                        @endfor
+                    </tbody>
+                </table>
+            </div>
+        @endif
+
+        <!-- Users table -->
+        <div class="bg-white shadow rounded-lg overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-200">
+                <h2 class="text-lg font-medium">All Users</h2>
+            </div>
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Username</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Email</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Role</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Status</th>
+                        <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200">
+                    @for(user in users)
+                        @template.partial.admin-user-row(user = user)
+                    @endfor
+                </tbody>
+            </table>
+        </div>
+    </main>
+    `,
+    scripts = @`
+        <script src="/js/admin-users.js" nonce="${nonce}"></script>
+    `
+)

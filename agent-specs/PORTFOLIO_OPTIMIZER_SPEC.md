@@ -16,7 +16,7 @@
 5. [Database Schema](#5-database-schema)
 6. [Python Optimization Microservice](#6-python-optimization-microservice)
 7. [Spring Boot Application](#7-spring-boot-application)
-8. [Frontend (Thymeleaf + HTMX + Alpine.js + Chart.js)](#8-frontend)
+8. [Frontend (JTE + vanilla JS + Chart.js)](#8-frontend)
 9. [Market Data Pipeline](#9-market-data-pipeline)
 10. [Authentication & Authorization](#10-authentication--authorization)
 11. [Feature Flags](#11-feature-flags)
@@ -41,8 +41,8 @@ A self-hosted web application that helps individual investors optimize their sto
 
 - **Hybrid architecture**: Spring Boot (Kotlin) for the web app; thin Python FastAPI microservice for optimization math
 - **Python is stateless**: Fed all data in each REST request from Kotlin. No DB access from Python. Pure function: `(data) → (result)`
-- **Server-rendered UI**: Thymeleaf + HTMX + Alpine.js. No SPA, no npm, no build toolchain
-- **Security-first**: No inline scripts/styles. Self-hosted JS libraries. HTTP-only session cookies. Strict CSP headers
+- **Server-rendered UI**: JTE 3.2.3 (`.kte` Kotlin templates) + vanilla JS + Chart.js. No SPA, no npm, no build toolchain
+- **Security-first**: Nonce-based CSP (`CspNonceFilter`). No inline scripts/styles. Self-hosted JS libraries. HTTP-only session cookies
 - **Client-side portfolio values**: Absolute portfolio values (shares held, cash amounts, cost basis, total value) never leave the browser. Backend stores only tickers, position types (`EQUITY`/`CASH`), percentage weights, views, and confidences. Cash positions are modeled per currency (e.g., `CASH.USD`, `CASH.JPY`) with only their weight percentage stored server-side. Discrete allocation is computed in the browser. Stale weights are detected by reconciling localStorage share counts against current prices
 - **Multi-tenant**: PostgreSQL with row-level security. 10–50 concurrent users
 - **Phased rollout**: Feature flags control which optimization algorithms and UI features are available
@@ -64,12 +64,12 @@ A self-hosted web application that helps individual investors optimize their sto
 ```
 ┌──────────────┐     HTTPS      ┌─────────────────────────────────────┐
 │   Browser     │◄──────────────►│  Caddy (reverse proxy + TLS)        │
-│  (HTMX +      │                │  auto Let's Encrypt certificates    │
-│   Alpine.js + │                └──────┬──────────────────────────────┘
-│   Chart.js)   │                       │ mTLS :8080
-└──────────────┘                ┌───────▼──────────────────────────────┐
+│  (vanilla JS + │                │  auto Let's Encrypt certificates    │
+│   Chart.js)   │                └──────┬──────────────────────────────┘
+└──────────────┘                       │ mTLS :8080
+                                ┌───────▼──────────────────────────────┐
                                 │  Spring Boot (Kotlin)                │
-                                │  ─ Thymeleaf server-rendered HTML    │
+                                │  ─ JTE server-rendered HTML          │
                                 │  ─ REST JSON endpoints for charts    │
                                 │  ─ Spring Security (session-based)   │
                                 │  ─ Spring Cloud Vault integration    │
@@ -110,7 +110,7 @@ A self-hosted web application that helps individual investors optimize their sto
 
 ### 2.2 Communication Pattern
 
-1. User interacts with Thymeleaf-rendered HTML pages via HTMX
+1. User interacts with JTE-rendered HTML pages via vanilla JS fetch
 2. For chart data, separate `fetch()` calls hit `/api/**` JSON endpoints (session-authenticated, including `/api/prices/latest`)
 3. Both HTML and JSON endpoints authenticated via same Spring Security session cookie
 4. All inter-service communication uses mTLS with Vault PKI-issued certificates (24h TTL, auto-renewed by Vault Agent)
@@ -121,7 +121,7 @@ A self-hosted web application that helps individual investors optimize their sto
    d. Spring Boot POSTs JSON payload to `https://optimizer:8000/optimize` (mTLS)
    e. Python computes optimization, returns JSON result (optimal weights + metrics, no discrete allocation)
    f. Spring Boot stores result in `optimization_runs` table (weights and metrics only)
-   g. Spring Boot renders result page via Thymeleaf (weights, metrics, charts)
+   g. Spring Boot renders result page via JTE (weights, metrics, charts)
    h. Browser JS computes discrete allocation (integer share counts, trade list) using locally-held total portfolio value and current prices fetched from authenticated `/api/prices/latest`
 6. Market data refresh runs as a scheduled job (daily at 22:00 UTC) — calls Python service endpoints `/fetch-prices` and `/fetch-fx-rates` over mTLS
 
@@ -219,8 +219,7 @@ For any candidate allocation, compute **effective number of independent bets**: 
 |---|---|---|---|
 | Language | Kotlin | 2.3.20 | JVM 25 |
 | Framework | Spring Boot | 4.0.4 | Web, Security, Data JDBC, Actuator |
-| Template Engine | Thymeleaf | (bundled) | Server-side HTML rendering |
-| HTMX Integration | htmx-spring-boot-thymeleaf | latest | Wim Deblauwe's library (Maven Central) |
+| Template Engine | JTE (jte + jte-kotlin + jte-spring-boot-starter-3) | 3.2.3 | Server-side `.kte` HTML rendering |
 | Database Access | Spring Data JDBC | (bundled) | No ORM — plain SQL with Kotlin data class mapping |
 | HTTP Client | Spring WebClient (WebFlux) | (bundled) | For calling Python service |
 | Resilience | Resilience4j | latest | Circuit breaker for Python service calls |
@@ -245,8 +244,7 @@ For any candidate allocation, compute **effective number of independent bets**: 
 
 | Component | Choice | Version | Delivery |
 |---|---|---|---|
-| Server Interaction | HTMX | 2.0.4 | Self-hosted: `/static/vendor/htmx/htmx.min.js` |
-| Client-side UI State | Alpine.js | 3.15.8 | Self-hosted: `/static/vendor/alpinejs/alpine.min.js` |
+| Server Interaction | vanilla JS fetch | — | No framework; `csrf-fetch.js` handles CSRF tokens |
 | Charts | Chart.js | 4.5.1 | Self-hosted: `/static/vendor/chartjs/chart.umd.min.js` |
 | CSS Framework | Tailwind CSS (CDN-free) | 4.2.2 | Built via standalone CLI during Gradle build, output to `/static/css/tailwind.css` |
 | Icons (optional) | Lucide | 0.577.0 | Self-hosted SVG sprites |
@@ -755,61 +753,46 @@ No `unsafe-inline`, no `unsafe-eval`, no CDN origins.
 
 ## 8. Frontend
 
-### 8.1 Page Structure
+### 8.1 Template Engine & Architecture
+
+**JTE 3.2.3** with Kotlin `.kte` templates in `web/src/main/jte/`. No HTMX, no Alpine.js — vanilla JavaScript only.
+
+- **Full pages**: `page/*.kte` — use `@template.layout.base(...)` for layout wrapping
+- **Partials**: `partial/*.kte` — standalone HTML snippets returned by controllers for fetch-based DOM updates (position rows, admin rows, error fragments)
+- **Layout**: `layout/base.kte` — includes nav, footer, CSRF meta tags, nonce on all `<script>`/`<link>` tags
+- **CSP nonces**: `CspNonceFilter` generates per-request nonces. Every script/stylesheet tag must include `nonce="${nonce}"`
+- **CSRF**: `csrf-fetch.js` reads token from meta tags; all fetch POST/PUT/DELETE use `Csrf.headers()`
+
+### 8.2 Page Structure
 
 | Route | Template | Description |
 |---|---|---|
-| `GET /` | `landing.html` / `dashboard.html` | Public: landing page with login + about links. Authenticated: user's portfolios list, quick stats |
-| `GET /about` | `about.html` | Public information page about the service |
-| `GET /login` | `login.html` | Login form (public) |
-| `GET /register` | `register.html` | Register with invite code (public, feature-flagged) |
-| `GET /portfolios/new` | `portfolio-form.html` | Create new portfolio |
-| `GET /portfolios/{id}` | `portfolio-detail.html` | View portfolio positions, add/edit/remove |
-| `GET /portfolios/{id}/optimize` | `optimize.html` | Select algorithm, set constraints, run optimization |
-| `GET /portfolios/{id}/results/{runId}` | `results.html` | View optimization results, charts, trade list |
-| `GET /admin` | `admin/dashboard.html` | Admin panel: users, flags, system |
-| `GET /admin/users` | `admin/users.html` | User management |
-| `GET /admin/flags` | `admin/flags.html` | Feature flag management |
+| `GET /` | `page/index.kte` / redirect | Public: landing page. Authenticated: redirect to dashboard |
+| `GET /about` | `page/about.kte` | Public information page about the service |
+| `GET /login` | `page/login.kte` | Login form (public) |
+| `GET /register` | `page/register.kte` | Register with invite code (public, feature-flagged) |
+| `GET /dashboard` | `page/dashboard.kte` | User's portfolios list |
+| `GET /portfolios/new` | `page/portfolio-form.kte` | Create new portfolio |
+| `GET /portfolios/{id}` | `page/portfolio-detail.kte` | View portfolio positions, add/edit/remove |
+| `GET /portfolios/{id}/optimize` | `page/optimize.kte` | Select algorithm, set constraints, run optimization |
+| `GET /portfolios/{id}/results/{runId}` | `page/results.kte` | View optimization results, charts, trade list |
+| `GET /admin` | `page/admin/dashboard.kte` | Admin panel: users, flags, system |
+| `GET /admin/users` | `page/admin/users.kte` | User management |
+| `GET /admin/flags` | `page/admin/flags.kte` | Feature flag management |
 
-### 8.2 HTMX Patterns Used
+### 8.3 Fetch-Based Interaction Patterns
 
-- **Add position row**: Button with `hx-get="/portfolios/{id}/positions/new-row" hx-target="#positions-table tbody" hx-swap="beforeend"`
-- **Remove position row**: Button with `hx-delete="/portfolios/{id}/positions/{posId}" hx-target="closest tr" hx-swap="outerHTML"`
-- **Run optimization**: Form with `hx-post="/portfolios/{id}/optimize" hx-target="#results-container" hx-swap="innerHTML" hx-indicator="#spinner"`
-- **Loading spinner**: `<div id="spinner" class="htmx-indicator">Optimizing...</div>`
+All dynamic interactions use vanilla JS `fetch()` + DOM manipulation (replacing former HTMX patterns):
 
-### 8.3 Chart.js via REST API Pattern
+- **Add position row**: `fetch()` GET → `tbody.insertAdjacentHTML('beforeend', html)` — handled by `portfolio-positions.js`
+- **Save position**: `fetch()` POST → replace `<tr>` outerHTML — handled by `portfolio-positions.js`
+- **Remove position**: `confirm()` → `fetch()` DELETE → `tr.remove()` — handled by `portfolio-positions.js`
+- **Admin toggle/update**: `fetch()` POST → replace `<tr>` outerHTML — handled by `admin-users.js` / `admin-flags.js`
+- **Run optimization**: `fetch()` POST form → redirect on success, inject error fragment on failure — handled by `optimize.js`
 
-The chart canvas is rendered server-side. A separate self-hosted JS file loads data from a JSON API endpoint and initializes the chart. Example pattern:
+### 8.4 Chart.js via REST API Pattern
 
-**In Thymeleaf template** (`results.html`):
-```html
-<canvas id="allocation-pie" data-portfolio-id="[[${portfolio.id}]]" data-run-id="[[${run.id}]]"></canvas>
-<script src="/static/js/charts/allocation-pie.js"></script>
-```
-
-**In `/static/js/charts/allocation-pie.js`**:
-```javascript
-document.addEventListener('DOMContentLoaded', function() {
-    const canvas = document.getElementById('allocation-pie');
-    if (!canvas) return;
-    const portfolioId = canvas.dataset.portfolioId;
-    const runId = canvas.dataset.runId;
-
-    fetch(`/api/portfolios/${portfolioId}/runs/${runId}/allocation-data`)
-        .then(r => r.json())
-        .then(data => {
-            new Chart(canvas, {
-                type: 'pie',
-                data: {
-                    labels: data.labels,
-                    datasets: [{ data: data.values, backgroundColor: data.colors }]
-                },
-                options: { responsive: true, plugins: { legend: { position: 'right' } } }
-            });
-        });
-});
-```
+The chart canvas is rendered server-side. A separate self-hosted JS file loads data from a JSON API endpoint and initializes the chart. Chart JS files parse portfolio/run IDs from the URL path via `ChartUtils.getIdsFromUrl()`.
 
 **Spring Boot JSON endpoint** (`ChartDataController.kt`):
 ```kotlin
@@ -880,7 +863,7 @@ function discreteAllocation(weights, latestPrices, totalValue) {
 
 **Data flow on the results page**:
 
-1. Server renders weights, metrics, and charts via Thymeleaf
+1. Server renders weights, metrics, and charts via JTE
 2. Browser JS reads `totalValue` and `currentHoldings` from `localStorage`
 3. Browser fetches current EUR prices from `GET /api/prices/latest?tickers=GOOG,AMZN,...` (public data)
 4. Browser calls `discreteAllocation(optimizedWeights, latestPrices, totalValue)`
@@ -1013,7 +996,7 @@ Note: Some ETFs/ETCs may need different suffixes. The `TickerMapper` service mai
 - **Two roles**: `ROLE_USER` and `ROLE_ADMIN`
 - **Password storage**: bcrypt via Spring Security's `BCryptPasswordEncoder`
 - **Session timeout**: 30 minutes of inactivity
-- **CSRF protection**: Enabled (Spring Security default). Thymeleaf auto-injects CSRF tokens in forms. For HTMX AJAX requests, include CSRF token via meta tag + HTMX config.
+- **CSRF protection**: Enabled (Spring Security default). Forms include hidden `_csrf` field. For fetch AJAX requests, `csrf-fetch.js` reads token from `<meta>` tags and includes it via `Csrf.headers()`.
 
 ### 10.2 Route Protection
 
@@ -1043,28 +1026,32 @@ fun securityFilterChain(http: HttpSecurity): SecurityFilterChain = http
     .build()
 ```
 
-### 10.3 HTMX + CSRF Integration
+### 10.3 Fetch + CSRF Integration
 
-HTMX sends requests via XMLHttpRequest, which needs the CSRF token. Pattern:
+Vanilla JS `fetch()` requests need the CSRF token. Pattern:
 
-**In Thymeleaf `<head>`** (every page via a layout fragment):
+**In JTE layout `<head>`** (every page via `layout/base.kte`):
 ```html
-<meta name="csrf-token" th:content="${_csrf.token}">
-<meta name="csrf-header" th:content="${_csrf.headerName}">
+<meta name="csrf-token" content="${csrfToken}">
+<meta name="csrf-header" content="${csrfHeaderName}">
 ```
 
-**In a self-hosted JS file** (`/static/js/htmx-csrf.js`):
+**In `/static/js/csrf-fetch.js`** (loaded on every page):
 ```javascript
-document.addEventListener('DOMContentLoaded', function() {
-    const token = document.querySelector('meta[name="csrf-token"]')?.content;
-    const header = document.querySelector('meta[name="csrf-header"]')?.content;
-    if (token && header) {
-        document.body.addEventListener('htmx:configRequest', function(event) {
-            event.detail.headers[header] = token;
-        });
+var Csrf = (function () {
+    var token = document.querySelector('meta[name="csrf-token"]')?.content;
+    var header = document.querySelector('meta[name="csrf-header"]')?.content;
+    function headers(extra) {
+        var h = {};
+        if (token && header) h[header] = token;
+        if (extra) { for (var k in extra) h[k] = extra[k]; }
+        return h;
     }
-});
+    return { headers: headers, token: token, header: header };
+})();
 ```
+
+Usage: `fetch(url, { method: 'POST', headers: Csrf.headers(), body: formData })`
 
 ### 10.4 Admin Bootstrapping
 
@@ -1123,9 +1110,9 @@ class FeatureFlagService(private val repo: FeatureFlagRepository) {
 }
 ```
 
-### 11.3 Usage in Thymeleaf
+### 11.3 Usage in Templates
 
-Expose via `@ControllerAdvice` model attribute or custom Thymeleaf dialect:
+Expose via `@ControllerAdvice` model attribute (`FeatureFlagAdvice`):
 
 ```html
 <div th:if="${featureFlags.isEnabled('ALGO_CVAR')}">
@@ -1302,9 +1289,9 @@ Backup uses Vault-issued short-lived DB credentials:
 
 - [ ] **No inline scripts or styles** — all JS in self-hosted `.js` files, all CSS in self-hosted `.css` files
 - [ ] **Strict CSP header**: `script-src 'self'; style-src 'self'` — no `unsafe-inline`, no `unsafe-eval`
-- [ ] **Self-hosted JS libraries**: Chart.js, HTMX, Alpine.js under `/static/vendor/`
+- [ ] **Self-hosted JS libraries**: Chart.js via WebJar
 - [ ] **HTTP-only, Secure, SameSite=Lax session cookies**
-- [ ] **CSRF protection** on all state-changing requests (forms and HTMX AJAX)
+- [ ] **CSRF protection** on all state-changing requests (forms and fetch AJAX)
 - [ ] **bcrypt password hashing** (cost factor 10+)
 - [ ] **RLS on PostgreSQL** for defense-in-depth tenant isolation
 - [ ] **HTTPS only** (Caddy auto-TLS)
@@ -1472,7 +1459,7 @@ Each block specifies: scope, directories touched, dependencies (blocks that must
 
 #### Block 2c — Tailwind CSS + Layout + Vendor JS
 
-**Scope**: Tailwind standalone CLI Gradle task (§4.3). `input.css` with `@import "tailwindcss"`. Base Thymeleaf layout template with CSP-compliant structure, CSRF meta tags. Self-hosted vendor JS: HTMX 2.0.4, Alpine.js 3.15.8, Chart.js 4.5.1 under `/static/vendor/`. CSRF-HTMX integration (`htmx-csrf.js` per §10.3).
+**Scope**: Tailwind standalone CLI Gradle task (§4.3). `input.css` with `@import "tailwindcss"`. Base JTE layout template (`layout/base.kte`) with nonce-based CSP, CSRF meta tags. Chart.js 4.5.1 via WebJar. `csrf-fetch.js` for CSRF in fetch requests (§10.3).
 
 **Directories**: `web/build.gradle.kts`, `web/tools/`, `web/src/main/resources/static/`, `web/src/main/resources/templates/layout/`
 
@@ -1496,7 +1483,7 @@ Each block specifies: scope, directories touched, dependencies (blocks that must
 
 #### Block 3b — FeatureFlagService + Seeded Flags
 
-**Scope**: `FeatureFlagService.kt` with `isEnabled(flagName, userId)` per §11.2. `@ControllerAdvice` exposing flags to Thymeleaf. `002-seed-feature-flags.yaml` changeset inserting Phase 1 flags from §11.1 (ALGO_BLACK_LITTERMAN=ON, ALGO_MEAN_VARIANCE=ON, SHOW_EFFICIENT_FRONTIER=ON, all others OFF).
+**Scope**: `FeatureFlagService.kt` with `isEnabled(flagName, userId)` per §11.2. `@ControllerAdvice` exposing flags to JTE templates. `002-seed-feature-flags.yaml` changeset inserting Phase 1 flags from §11.1 (ALGO_BLACK_LITTERMAN=ON, ALGO_MEAN_VARIANCE=ON, SHOW_EFFICIENT_FRONTIER=ON, all others OFF).
 
 **Directories**: `web/src/main/kotlin/com/kernfolio/service/`, `web/src/main/kotlin/com/kernfolio/config/`, `web/src/main/resources/db/changelog/`
 
@@ -1520,7 +1507,7 @@ Each block specifies: scope, directories touched, dependencies (blocks that must
 
 #### Block 4a — Auth Pages (Login, Register, Invite Flow)
 
-**Scope**: `AuthController.kt` with login page, registration with invite code validation. Thymeleaf templates: `login.html`, `register.html`. `UserService.kt` (user creation with bcrypt). `InviteCodeService.kt` (generation, validation). Admin bootstrap logic (first-run: log invite code to stdout if no SMTP, per §10.4).
+**Scope**: `AuthController.kt` with login page, registration with invite code validation. JTE templates: `page/login.kte`, `page/register.kte`. `UserService.kt` (user creation with bcrypt). `InviteCodeService.kt` (generation, validation). Admin bootstrap logic (first-run: log invite code to stdout if no SMTP, per §10.4).
 
 **Directories**: `web/src/main/kotlin/com/kernfolio/controller/`, `web/src/main/kotlin/com/kernfolio/service/`, `web/src/main/resources/templates/`
 
@@ -1532,7 +1519,7 @@ Each block specifies: scope, directories touched, dependencies (blocks that must
 
 #### Block 4b — Admin Panel
 
-**Scope**: `AdminController.kt` — user management (list, create invite codes, enable/disable), feature flag management (list, toggle, edit rollout %). Thymeleaf templates: `admin/dashboard.html`, `admin/users.html`, `admin/flags.html`. HTMX for inline flag editing.
+**Scope**: `AdminController.kt` — user management (list, create invite codes, enable/disable), feature flag management (list, toggle, edit rollout %). JTE templates: `page/admin/dashboard.kte`, `page/admin/users.kte`, `page/admin/flags.kte`. Vanilla JS fetch for inline flag editing and user toggle.
 
 **Directories**: `web/src/main/kotlin/com/kernfolio/controller/`, `web/src/main/resources/templates/admin/`
 
@@ -1544,13 +1531,13 @@ Each block specifies: scope, directories touched, dependencies (blocks that must
 
 #### Block 4c — Portfolio CRUD
 
-**Scope**: `PortfolioService.kt` (CRUD for portfolios and positions). `DashboardController.kt` (portfolio list). `PortfolioController.kt` (detail view, add/edit/remove positions via HTMX). Templates: `dashboard.html`, `portfolio-form.html`, `portfolio-detail.html`. Backend receives only percentage weights — no absolute values.
+**Scope**: `PortfolioService.kt` (CRUD for portfolios and positions). `DashboardController.kt` (portfolio list). `PortfolioController.kt` (detail view, add/edit/remove positions via fetch). Templates: `page/dashboard.kte`, `page/portfolio-form.kte`, `page/portfolio-detail.kte`. Backend receives only percentage weights — no absolute values.
 
 **Directories**: `web/src/main/kotlin/com/kernfolio/service/`, `web/src/main/kotlin/com/kernfolio/controller/`, `web/src/main/resources/templates/`
 
 **Dependencies**: Block 3a, Block 2b, Block 2c, Block 3b.
 
-**Verification**: `@WebMvcTest` for portfolio CRUD and HTMX fragment responses. RLS integration test: user A cannot see user B's portfolios.
+**Verification**: `@WebMvcTest` for portfolio CRUD and partial template responses. RLS integration test: user A cannot see user B's portfolios.
 
 ---
 
@@ -1592,7 +1579,7 @@ Each block specifies: scope, directories touched, dependencies (blocks that must
 
 #### Block 6b — Client-Side Portfolio Entry (localStorage)
 
-**Scope**: `/static/js/portfolio-entry.js` (Alpine.js-powered). Handles client-side portfolio entry flow from §8.6: user enters share counts / cash amounts → JS computes `weight_pct` → sends only percentages to backend → stores shares, cost basis, cash in localStorage. Reconciliation logic to detect stale weights (price drift). localStorage schema per §8.6.
+**Scope**: `/static/js/portfolio-entry.js` (vanilla JS). Handles client-side portfolio entry flow from §8.6: user enters share counts / cash amounts → JS computes `weight_pct` → sends only percentages to backend → stores shares, cost basis, cash in localStorage. Reconciliation logic to detect stale weights (price drift). localStorage schema per §8.6.
 
 **Directories**: `web/src/main/resources/static/js/`, modify `portfolio-detail.html`
 
@@ -1661,7 +1648,7 @@ Each block specifies: scope, directories touched, dependencies (blocks that must
 
 - **Unit tests** (MockK): Services, DTO mapping, feature flag logic
 - **Integration tests** (Testcontainers): Repository tests against real PostgreSQL
-- **Web layer tests** (`@WebMvcTest`): Controller + Thymeleaf rendering, including HTMX fragment responses
+- **Web layer tests** (`@WebMvcTest`): Controller + JTE rendering, including partial template responses
 - **End-to-end tests**: Full Spring context with Testcontainers (PostgreSQL) and WireMock (mock Python service)
 
 ### 16.2 Python (FastAPI)

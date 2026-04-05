@@ -1,0 +1,139 @@
+@import com.kernfolio.domain.Portfolio
+@import com.kernfolio.domain.Position
+
+@param portfolio: Portfolio
+@param positions: List<Position>
+@param nonce: String
+@param csrfToken: String
+@param csrfHeaderName: String
+
+@template.layout.base(
+    title = portfolio.name + " - Kernfolio",
+    nonce = nonce,
+    csrfToken = csrfToken,
+    csrfHeaderName = csrfHeaderName,
+    content = @`
+    <main class="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8" id="portfolio-main"
+          data-portfolio-id="${portfolio.id}" data-base-currency="${portfolio.baseCurrency}">
+        <div class="flex items-center justify-between mb-6">
+            <div>
+                <h1 class="text-2xl font-semibold">${portfolio.name}</h1>
+                @if(portfolio.description != null)
+                    <p class="mt-1 text-sm text-gray-500">${portfolio.description}</p>
+                @endif
+                <p class="mt-1 text-sm text-gray-400">
+                    Base currency: <span class="font-mono">${portfolio.baseCurrency}</span>
+                </p>
+            </div>
+            <div class="flex gap-2">
+                <a href="/portfolios/${portfolio.id}/optimize"
+                   class="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700">
+                    Optimize
+                </a>
+                <a href="/portfolios/${portfolio.id}/edit"
+                   class="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50">
+                    Edit
+                </a>
+                <form action="/portfolios/${portfolio.id}/delete" method="post"
+                      onsubmit="return confirm('Delete this portfolio and all its positions?')">
+                    <input type="hidden" name="_csrf" value="${csrfToken}">
+                    <button type="submit"
+                            class="rounded-md border border-red-300 bg-white px-3 py-2 text-sm font-medium text-red-700 shadow-sm hover:bg-red-50">
+                        Delete
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Total portfolio value -->
+        <div class="bg-white shadow rounded-lg p-4 mb-4">
+            <div class="flex items-center gap-4">
+                <label class="text-sm font-medium text-gray-700 whitespace-nowrap">Total Portfolio Value</label>
+                <input type="number" step="0.01" min="0" id="total-value-input"
+                       class="w-48 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                       placeholder="e.g. 195000">
+                <span class="text-sm text-gray-500" id="base-currency-display">${portfolio.baseCurrency}</span>
+                <span class="text-xs text-gray-400">(stored locally, never sent to server)</span>
+            </div>
+        </div>
+
+        <!-- Reconciliation warning -->
+        <div id="drift-warning" class="hidden rounded-lg border border-amber-200 bg-amber-50 p-4 mb-4">
+            <div class="flex items-start">
+                <svg class="h-5 w-5 text-amber-400 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/>
+                </svg>
+                <div class="ml-3">
+                    <h3 class="text-sm font-medium text-amber-800">Weight drift detected</h3>
+                    <p class="mt-1 text-sm text-amber-700">
+                        Some position weights have drifted &gt;1% since last update due to price changes.
+                    </p>
+                    <ul class="mt-2 text-xs text-amber-600" id="drift-list"></ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recovery prompt -->
+        <div id="recovery-prompt" class="hidden rounded-lg border border-blue-200 bg-blue-50 p-4 mb-4">
+            <div class="flex items-center justify-between">
+                <p class="text-sm text-blue-700">
+                    No local share data found. Estimate share counts from current weights and prices?
+                </p>
+                <button id="recover-shares-btn"
+                        class="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700">
+                    Estimate
+                </button>
+            </div>
+        </div>
+
+        <div class="bg-white shadow rounded-lg overflow-hidden">
+            <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+                <h2 class="text-lg font-medium">Positions</h2>
+                <button type="button" id="add-position-btn"
+                        data-new-row-url="/portfolios/${portfolio.id}/positions/new-row"
+                        class="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-blue-700">
+                    Add position
+                </button>
+            </div>
+
+            <table id="positions-table" class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Type</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Ticker</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Name</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Currency</th>
+                        <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500">Shares / Amount</th>
+                        <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500">Weight %</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Sector</th>
+                        <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200">
+                    @for(pos in positions)
+                        @template.partial.position-saved-row(position = pos, portfolioId = portfolio.id!!)
+                    @endfor
+                    @if(positions.isEmpty())
+                        <tr id="empty-state">
+                            <td colspan="8" class="px-4 py-8 text-center text-sm text-gray-500">
+                                No positions yet. Click "Add position" to get started.
+                            </td>
+                        </tr>
+                    @endif
+                </tbody>
+            </table>
+        </div>
+
+        <div class="mt-4">
+            <a href="/dashboard" class="text-sm font-medium text-blue-600 hover:text-blue-500">
+                Back to dashboard
+            </a>
+        </div>
+    </main>
+    `,
+    scripts = @`
+        <script src="/js/portfolio-entry.js" nonce="${nonce}"></script>
+        <script src="/js/portfolio-positions.js" nonce="${nonce}"></script>
+    `
+)

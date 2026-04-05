@@ -1,34 +1,31 @@
-<!DOCTYPE html>
-<html lang="en" xmlns:th="http://www.thymeleaf.org">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="csrf-token" th:content="${_csrf.token}">
-    <meta name="csrf-header" th:content="${_csrf.headerName}">
-    <title th:text="'Optimize ' + ${portfolio.name} + ' - Kernfolio'">Optimize - Kernfolio</title>
-    <link rel="stylesheet" th:href="@{/css/tailwind.css}">
-</head>
-<body class="min-h-screen bg-gray-50 text-gray-900">
+@import com.kernfolio.domain.Portfolio
 
-    <nav th:replace="~{layout/base :: nav}"></nav>
+@param portfolio: Portfolio
+@param nonce: String
+@param csrfToken: String
+@param csrfHeaderName: String
 
+@template.layout.base(
+    title = "Optimize " + portfolio.name + " - Kernfolio",
+    nonce = nonce,
+    csrfToken = csrfToken,
+    csrfHeaderName = csrfHeaderName,
+    content = @`
     <main class="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
         <div class="mb-6">
-            <a th:href="@{/portfolios/{id}(id=${portfolio.id})}"
+            <a href="/portfolios/${portfolio.id}"
                class="text-sm font-medium text-blue-600 hover:text-blue-500">
-                &larr; Back to <span th:text="${portfolio.name}"></span>
+                &larr; Back to ${portfolio.name}
             </a>
             <h1 class="mt-2 text-2xl font-semibold">Optimize Portfolio</h1>
             <p class="mt-1 text-sm text-gray-500">
-                Base currency: <span class="font-mono" th:text="${portfolio.baseCurrency}"></span>
+                Base currency: <span class="font-mono">${portfolio.baseCurrency}</span>
             </p>
         </div>
 
         <div class="bg-white shadow rounded-lg p-6">
-            <form th:attr="hx-post=@{/portfolios/{id}/optimize(id=${portfolio.id})}"
-                  hx-target="#results-container"
-                  hx-swap="innerHTML"
-                  hx-indicator="#spinner">
+            <form id="optimize-form" action="/portfolios/${portfolio.id}/optimize" method="post">
+                <input type="hidden" name="_csrf" value="${csrfToken}">
 
                 <div class="grid grid-cols-1 gap-6 sm:grid-cols-2">
                     <div>
@@ -52,16 +49,16 @@
                     </div>
                 </div>
 
-                <div x-data="{ open: false }" class="mt-6">
-                    <button type="button" @click="open = !open"
+                <div class="mt-6">
+                    <button type="button" id="advanced-toggle"
                             class="flex items-center text-sm font-medium text-gray-700 hover:text-gray-900">
-                        <svg :class="open ? 'rotate-90' : ''" class="mr-1.5 h-4 w-4 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <svg id="advanced-icon" class="mr-1.5 h-4 w-4 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
                         </svg>
                         Advanced Parameters
                     </button>
 
-                    <div x-show="open" x-cloak class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+                    <div id="advanced-panel" class="hidden mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
                         <div>
                             <label for="riskFreeRate" class="block text-sm font-medium text-gray-700">Risk-Free Rate</label>
                             <input type="number" id="riskFreeRate" name="riskFreeRate" value="0.03"
@@ -107,7 +104,7 @@
                             class="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
                         Run Optimization
                     </button>
-                    <div id="spinner" class="htmx-indicator flex items-center gap-2 text-sm text-gray-500">
+                    <div id="spinner" class="hidden flex items-center gap-2 text-sm text-gray-500">
                         <svg class="h-4 w-4 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
@@ -120,11 +117,8 @@
 
         <div id="results-container" class="mt-6"></div>
     </main>
-
-    <footer th:replace="~{layout/base :: footer}"></footer>
-
-    <script th:src="@{/webjars/htmx.org/2.0.4/dist/htmx.min.js}"></script>
-    <script th:src="@{/webjars/alpinejs/3.15.8/dist/cdn.min.js}" defer></script>
-    <script th:src="@{/js/htmx-csrf.js}"></script>
-</body>
-</html>
+    `,
+    scripts = @`
+        <script src="/js/optimize.js" nonce="${nonce}"></script>
+    `
+)

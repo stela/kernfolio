@@ -1,0 +1,55 @@
+@import gg.jte.Content
+
+@param title: String
+@param nonce: String
+@param csrfToken: String
+@param csrfHeaderName: String
+@param content: Content
+@param scripts: Content = Content { }
+@param includeChartJs: Boolean = false
+@param authenticated: Boolean = true
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="${csrfToken}">
+    <meta name="csrf-header" content="${csrfHeaderName}">
+    <title>${title}</title>
+    <link rel="stylesheet" href="/css/tailwind.css" nonce="${nonce}">
+</head>
+<body class="min-h-screen bg-gray-50 text-gray-900">
+
+    <nav class="bg-white border-b border-gray-200">
+        <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <div class="flex h-16 items-center justify-between">
+                <a href="/" class="text-xl font-semibold text-gray-900">Kernfolio</a>
+                @if(authenticated)
+                    <a href="/about" class="text-sm font-medium text-gray-600 hover:text-gray-900">About</a>
+                @else
+                    <div class="flex items-center gap-4">
+                        <a href="/about" class="text-sm font-medium text-gray-600 hover:text-gray-900">About</a>
+                        <a href="/login" class="text-sm font-medium text-gray-600 hover:text-gray-900">Login</a>
+                        <a href="/register" class="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700">Register</a>
+                    </div>
+                @endif
+            </div>
+        </div>
+    </nav>
+
+    ${content}
+
+    <footer class="mt-auto border-t border-gray-200 bg-white">
+        <div class="mx-auto max-w-7xl px-4 py-4 text-center text-sm text-gray-500 sm:px-6 lg:px-8">
+            Kernfolio
+        </div>
+    </footer>
+
+    <script src="/js/csrf-fetch.js" nonce="${nonce}"></script>
+    @if(includeChartJs)
+        <script src="/webjars/chart.js/4.5.1/dist/chart.umd.min.js" nonce="${nonce}"></script>
+    @endif
+    ${scripts}
+</body>
+</html>
