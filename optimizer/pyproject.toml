@@ -14,6 +14,7 @@ dependencies = [
     "yfinance>=0.2.40",
     "httpx>=0.28",
     "hvac>=2.3",
+    "packaging>=24.0",
 ]
 
 [project.optional-dependencies]

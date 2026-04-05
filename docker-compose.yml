@@ -16,7 +16,7 @@ services:
       retries: 5
 
   vault-init:
-    image: hashicorp/vault:1.19
+    build: ./vault/init
     depends_on:
       vault:
         condition: service_healthy
@@ -39,13 +39,26 @@ services:
       - ./postgres/pg_hba_mtls.conf:/etc/postgresql/pg_hba.conf:ro
       - ./postgres/postgresql_ssl.conf:/etc/postgresql/conf.d/ssl.conf:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready"]
+      test: ["CMD-SHELL", "pg_isready -U kernfolio"]
       interval: 10s
       timeout: 5s
       retries: 5
     depends_on:
       vault-init:
         condition: service_completed_successfully
+
+  vault-db-init:
+    image: hashicorp/vault:1.19
+    depends_on:
+      vault:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./vault/init:/vault/init:ro
+    entrypoint: /vault/init/setup-db.sh
+    environment:
+      VAULT_ADDR: "http://vault:8200"
 
   optimizer:
     build: ./optimizer
@@ -77,7 +90,7 @@ services:
         condition: service_healthy
       optimizer:
         condition: service_healthy
-      vault-init:
+      vault-db-init:
         condition: service_completed_successfully
 
   caddy:

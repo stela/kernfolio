@@ -11,6 +11,12 @@ import org.springframework.http.client.reactive.ReactorClientHttpConnector
 import org.springframework.web.reactive.function.client.WebClient
 import reactor.netty.http.client.HttpClient
 import java.io.File
+import java.security.KeyFactory
+import java.security.PrivateKey
+import java.security.cert.CertificateFactory
+import java.security.cert.X509Certificate
+import java.security.spec.PKCS8EncodedKeySpec
+import java.util.Base64
 
 @Configuration
 class OptimizerClientConfig {
@@ -32,12 +38,12 @@ class OptimizerClientConfig {
         if (caPath.isNotBlank() && File(caPath).exists()) {
             log.info("Configuring mTLS for optimizer WebClient")
             val caFile = File(caPath)
-            val certFile = File(certPath)
-            val keyFile = File(keyPath)
+            val cert = loadCertificate(File(certPath))
+            val key = loadPrivateKey(File(keyPath))
 
             val sslContext = SslContextBuilder.forClient()
                 .trustManager(caFile)
-                .keyManager(certFile, keyFile)
+                .keyManager(key, cert)
                 .build()
 
             val httpClient = HttpClient.create()
@@ -49,5 +55,27 @@ class OptimizerClientConfig {
         }
 
         return builder.build()
+    }
+
+    private fun loadCertificate(file: File): X509Certificate =
+        file.inputStream().use {
+            CertificateFactory.getInstance("X.509").generateCertificate(it) as X509Certificate
+        }
+
+    private fun loadPrivateKey(file: File): PrivateKey {
+        val pem = file.readText()
+            .replace(Regex("-----BEGIN [A-Z ]+ KEY-----"), "")
+            .replace(Regex("-----END [A-Z ]+ KEY-----"), "")
+            .replace(Regex("\\s"), "")
+        val der = Base64.getDecoder().decode(pem)
+        val spec = PKCS8EncodedKeySpec(der)
+
+        // Try Ed25519 first, then EC, then RSA
+        for (algorithm in listOf("Ed25519", "EC", "RSA")) {
+            try {
+                return KeyFactory.getInstance(algorithm).generatePrivate(spec)
+            } catch (_: Exception) { }
+        }
+        throw IllegalArgumentException("Unable to load private key: unsupported algorithm")
     }
 }
