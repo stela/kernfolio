@@ -2,6 +2,10 @@ spring:
   application:
     name: kernfolio
 
+  cloud:
+    vault:
+      enabled: false
+
   datasource:
     url: jdbc:postgresql://localhost:5432/kernfolio
     username: ${DB_USER:kernfolio}

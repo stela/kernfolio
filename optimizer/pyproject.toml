@@ -13,6 +13,7 @@ dependencies = [
     "cvxpy>=1.8",
     "yfinance>=0.2.40",
     "httpx>=0.28",
+    "hvac>=2.3",
 ]
 
 [project.optional-dependencies]

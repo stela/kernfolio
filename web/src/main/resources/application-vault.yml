@@ -1,0 +1,27 @@
+spring:
+  cloud:
+    vault:
+      enabled: true
+      uri: ${VAULT_ADDR:http://localhost:8200}
+      authentication: token
+      token: ${SPRING_CLOUD_VAULT_TOKEN:dev-root-token}
+      kv:
+        enabled: true
+        backend: secret
+        default-context: kernfolio
+      database:
+        enabled: true
+        role: app
+        backend: database
+  config:
+    import: vault://
+
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:postgres}:5432/kernfolio
+
+# mTLS certificate paths (mounted by Vault Agent / docker volume)
+vault:
+  certs:
+    ca: /vault/certs/ca.pem
+    cert: /vault/certs/app-client.pem
+    key: /vault/certs/app-client-key.pem

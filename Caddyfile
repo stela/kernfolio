@@ -1,0 +1,16 @@
+{
+	auto_https disable_redirects
+}
+
+:443 {
+	reverse_proxy https://web:8080 {
+		transport http {
+			tls_client_auth /vault/certs/caddy-client.pem /vault/certs/caddy-client-key.pem
+			tls_trusted_ca_certs /vault/certs/ca.pem
+		}
+	}
+}
+
+:80 {
+	redir https://{host}{uri} permanent
+}

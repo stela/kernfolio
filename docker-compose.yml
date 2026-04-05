@@ -1,41 +1,84 @@
 services:
-  postgres:
-    image: postgres:16-alpine
+  vault:
+    image: hashicorp/vault:1.19
+    cap_add:
+      - IPC_LOCK
     environment:
-      POSTGRES_DB: kernfolio
-      POSTGRES_USER: ${DB_USER}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      VAULT_ADDR: "http://0.0.0.0:8200"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - vault_data:/vault/data
+      - ./vault/config:/vault/config:ro
+    command: vault server -config=/vault/config/vault.hcl
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]
+      test: ["CMD", "vault", "status"]
       interval: 10s
       timeout: 5s
       retries: 5
 
+  vault-init:
+    image: hashicorp/vault:1.19
+    depends_on:
+      vault:
+        condition: service_healthy
+    volumes:
+      - ./vault/init:/vault/init:ro
+      - vault_agent_certs:/vault/certs
+    entrypoint: /vault/init/setup.sh
+    environment:
+      VAULT_ADDR: "http://vault:8200"
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: kernfolio
+      POSTGRES_USER: kernfolio
+      POSTGRES_PASSWORD: kernfolio
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - vault_agent_certs:/vault/certs:ro
+      - ./postgres/pg_hba_mtls.conf:/etc/postgresql/pg_hba.conf:ro
+      - ./postgres/postgresql_ssl.conf:/etc/postgresql/conf.d/ssl.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      vault-init:
+        condition: service_completed_successfully
+
   optimizer:
     build: ./optimizer
     environment:
-      - PYTHONUNBUFFERED=1
+      VAULT_ADDR: "http://vault:8200"
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - vault_agent_certs:/vault/certs:ro
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "--cacert", "/vault/certs/ca.pem", "--cert", "/vault/certs/optimizer-client.pem", "--key", "/vault/certs/optimizer-client-key.pem", "-f", "https://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
+    depends_on:
+      vault-init:
+        condition: service_completed_successfully
 
   web:
     build: ./web
     environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/kernfolio
-      SPRING_DATASOURCE_USERNAME: ${DB_USER}
-      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
-      OPTIMIZER_BASE_URL: http://optimizer:8000
-      SPRING_PROFILES_ACTIVE: prod
+      VAULT_ADDR: "http://vault:8200"
+      SPRING_PROFILES_ACTIVE: prod,vault
+      SPRING_CLOUD_VAULT_TOKEN: "${VAULT_APP_TOKEN:-dev-root-token}"
+      OPTIMIZER_BASE_URL: "https://optimizer:8000"
+    volumes:
+      - vault_agent_certs:/vault/certs:ro
     depends_on:
       postgres:
         condition: service_healthy
       optimizer:
         condition: service_healthy
+      vault-init:
+        condition: service_completed_successfully
 
   caddy:
     image: caddy:2-alpine
@@ -43,9 +86,10 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
+      - vault_agent_certs:/vault/certs:ro
     depends_on:
       - web
 
@@ -53,3 +97,5 @@ volumes:
   pgdata:
   caddy_data:
   caddy_config:
+  vault_data:
+  vault_agent_certs:
