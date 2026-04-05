@@ -1,8 +1,10 @@
 package com.kernfolio.controller.api
 
 import com.kernfolio.dto.AllocationChartData
+import com.kernfolio.dto.DiscreteAllocationData
 import com.kernfolio.dto.FrontierChartData
 import com.kernfolio.dto.FrontierPointData
+import com.kernfolio.repository.InstrumentRepository
 import com.kernfolio.repository.OptimizationRunRepository
 import com.kernfolio.security.KernfolioUserDetails
 import com.kernfolio.service.PortfolioService
@@ -21,6 +23,7 @@ import java.util.UUID
 class ChartDataController(
     private val portfolioService: PortfolioService,
     private val optimizationRunRepository: OptimizationRunRepository,
+    private val instrumentRepository: InstrumentRepository,
 ) {
 
     @GetMapping("/allocation-data")
@@ -64,6 +67,37 @@ class ChartDataController(
         }
 
         return ResponseEntity.ok(FrontierChartData(frontier = frontier, optimized = optimized))
+    }
+
+    @GetMapping("/discrete-data")
+    fun discreteData(
+        @PathVariable portfolioId: UUID,
+        @PathVariable runId: UUID,
+        authentication: Authentication,
+    ): ResponseEntity<DiscreteAllocationData> {
+        val userId = currentUserId(authentication)
+        val (run, positions) = loadRunAndPositions(portfolioId, runId, userId)
+        val portfolio = portfolioService.findByIdAndUserId(portfolioId, userId)!!
+
+        val tickers = run.results.optimizedWeights.keys.toList().sorted()
+        val instruments = instrumentRepository.findByTickers(tickers)
+        val fractionalByTicker = instruments.associate { it.ticker to it.fractional }
+
+        // CASH positions are always fractional
+        val cashTickers = positions.filter { it.positionType == "CASH" }.map { it.ticker }.toSet()
+
+        val fractional = tickers.associateWith { ticker ->
+            cashTickers.contains(ticker) || (fractionalByTicker[ticker] ?: false)
+        }
+
+        return ResponseEntity.ok(
+            DiscreteAllocationData(
+                weights = run.results.optimizedWeights,
+                baseCurrency = portfolio.baseCurrency,
+                tickers = tickers,
+                fractional = fractional,
+            )
+        )
     }
 
     private fun loadRun(portfolioId: UUID, runId: UUID, userId: UUID): com.kernfolio.domain.OptimizationRun {

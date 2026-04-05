@@ -6,9 +6,11 @@ import com.kernfolio.domain.OptimizationParameters
 import com.kernfolio.domain.OptimizationResults
 import com.kernfolio.domain.OptimizationRun
 import com.kernfolio.domain.FrontierPoint
+import com.kernfolio.domain.Instrument
 import com.kernfolio.domain.Position
 import com.kernfolio.domain.User
 import com.kernfolio.mockUserDetails
+import com.kernfolio.repository.InstrumentRepository
 import com.kernfolio.repository.OptimizationRunRepository
 import com.kernfolio.repository.PositionRepository
 import com.kernfolio.repository.UserRepository
@@ -45,6 +47,7 @@ class ChartDataControllerTest {
     @Autowired lateinit var portfolioService: PortfolioService
     @Autowired lateinit var positionRepository: PositionRepository
     @Autowired lateinit var optimizationRunRepository: OptimizationRunRepository
+    @Autowired lateinit var instrumentRepository: InstrumentRepository
     @Autowired lateinit var passwordEncoder: PasswordEncoder
 
     lateinit var mockMvc: MockMvc
@@ -188,5 +191,46 @@ class ChartDataControllerTest {
             get("/api/portfolios/${UUID.randomUUID()}/runs/${UUID.randomUUID()}/allocation-data")
         )
             .andExpect(status().isUnauthorized)
+    }
+
+    @Test
+    fun `discrete-data returns weights, baseCurrency, and fractional flags`() {
+        val user = createUser("dave")
+        val portfolio = portfolioService.create(user.id!!, "Test", null, "USD")
+        val portfolioId = portfolio.id!!
+
+        instrumentRepository.save(Instrument(ticker = "GOOG", currency = "USD", fractional = false))
+        instrumentRepository.save(Instrument(ticker = "VFMF", currency = "USD", fractional = true))
+
+        positionRepository.save(
+            Position(portfolioId = portfolioId, ticker = "GOOG", currency = "USD", weightPct = BigDecimal("0.06"))
+        )
+        positionRepository.save(
+            Position(portfolioId = portfolioId, ticker = "CASH.USD", currency = "USD",
+                     weightPct = BigDecimal("0.02"), positionType = "CASH")
+        )
+
+        val run = optimizationRunRepository.save(
+            OptimizationRun(
+                portfolioId = portfolioId,
+                algorithm = "black_litterman",
+                parameters = OptimizationParameters(),
+                results = OptimizationResults(
+                    optimizedWeights = mapOf("GOOG" to 0.06, "VFMF" to 0.04, "CASH.USD" to 0.02),
+                ),
+            )
+        )
+
+        mockMvc.perform(
+            get("/api/portfolios/$portfolioId/runs/${run.id}/discrete-data")
+                .with(mockUserDetails(user))
+        )
+            .andExpect(status().isOk)
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+            .andExpect(jsonPath("$.baseCurrency").value("USD"))
+            .andExpect(jsonPath("$.weights.GOOG").value(closeTo(0.06, 0.001)))
+            .andExpect(jsonPath("$.fractional.GOOG").value(false))
+            .andExpect(jsonPath("$.fractional.VFMF").value(true))
+            .andExpect(jsonPath("$.fractional['CASH.USD']").value(true))
     }
 }

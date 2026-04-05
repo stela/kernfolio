@@ -1,10 +1,10 @@
 document.addEventListener('DOMContentLoaded', function () {
     var canvas = document.getElementById('efficient-frontier');
     if (!canvas) return;
-    var portfolioId = canvas.dataset.portfolioId;
-    var runId = canvas.dataset.runId;
+    var ids = ChartUtils.getIdsFromUrl();
+    if (!ids) return;
 
-    fetch('/api/portfolios/' + portfolioId + '/runs/' + runId + '/frontier-data')
+    fetch('/api/portfolios/' + ids.portfolioId + '/runs/' + ids.runId + '/frontier-data')
         .then(function (r) { return r.json(); })
         .then(function (data) {
             var datasets = [

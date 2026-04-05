@@ -15,6 +15,7 @@ class Instrument(
     val currency: String? = null,
     val sector: String? = null,
     val marketCapUsd: BigDecimal? = null,
+    val fractional: Boolean = false,
     val lastRefreshedAt: Instant? = null,
 ) : Persistable<String> {
 

@@ -67,6 +67,14 @@ class FxRateService(
         return cachedFxRateRepository.findLatestByCurrencyPair(pair)?.rate
     }
 
+    fun getLatestCrossRate(base: String, target: String): BigDecimal? {
+        if (base == target) return BigDecimal.ONE
+        val eurBase = getLatestRate(base) ?: return null
+        val eurTarget = getLatestRate(target) ?: return null
+        // EUR/base and EUR/target are stored. Cross rate = EUR/target ÷ EUR/base
+        return eurTarget.divide(eurBase, 8, java.math.RoundingMode.HALF_UP)
+    }
+
     fun getRatesForDateRange(
         currency: String,
         startDate: LocalDate,

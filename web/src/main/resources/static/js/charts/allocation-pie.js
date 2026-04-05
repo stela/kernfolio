@@ -1,10 +1,10 @@
 document.addEventListener('DOMContentLoaded', function () {
     var canvas = document.getElementById('allocation-pie');
     if (!canvas) return;
-    var portfolioId = canvas.dataset.portfolioId;
-    var runId = canvas.dataset.runId;
+    var ids = ChartUtils.getIdsFromUrl();
+    if (!ids) return;
 
-    fetch('/api/portfolios/' + portfolioId + '/runs/' + runId + '/allocation-data')
+    fetch('/api/portfolios/' + ids.portfolioId + '/runs/' + ids.runId + '/allocation-data')
         .then(function (r) { return r.json(); })
         .then(function (data) {
             var colors = generateColors(data.labels.length);

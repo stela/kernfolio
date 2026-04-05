@@ -15,3 +15,10 @@ data class FrontierChartData(
     val frontier: List<FrontierPointData>,
     val optimized: FrontierPointData?,
 )
+
+data class DiscreteAllocationData(
+    val weights: Map<String, Double>,
+    val baseCurrency: String,
+    val tickers: List<String>,
+    val fractional: Map<String, Boolean>,
+)

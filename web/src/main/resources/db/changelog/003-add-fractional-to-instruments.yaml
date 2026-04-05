@@ -1,0 +1,12 @@
+databaseChangeLog:
+  - changeSet:
+      id: 003-add-fractional-to-instruments
+      author: kernfolio
+      changes:
+        - sql:
+            sql: |
+              ALTER TABLE instruments
+              ADD COLUMN IF NOT EXISTS fractional BOOLEAN NOT NULL DEFAULT false
+      rollback:
+        - sql:
+            sql: ALTER TABLE instruments DROP COLUMN IF EXISTS fractional
