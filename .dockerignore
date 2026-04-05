@@ -1,0 +1,8 @@
+.git
+.gradle
+.idea
+**/build
+**/node_modules
+**/__pycache__
+optimizer/.venv
+vault/data
