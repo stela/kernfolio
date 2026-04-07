@@ -122,6 +122,10 @@ class BrowserFlowTest {
         wait.until(ExpectedConditions.urlContains(containsPath))
     }
 
+    private fun waitForPortfolioDetail() {
+        wait.until { driver.currentUrl?.matches(Regex(".*/portfolios/[0-9a-f-]{36}$")) == true }
+    }
+
     private fun assertPageContains(text: String) {
         assertThat(driver.pageSource).contains(text)
     }
@@ -216,7 +220,7 @@ class BrowserFlowTest {
         fillField("baseCurrency", "EUR")
         driver.findElement(By.cssSelector("button[type='submit']")).click()
 
-        waitForUrl("/portfolios/")
+        waitForPortfolioDetail()
         portfolioPath = driver.currentUrl!!.replace(baseUrl(), "")
         assertPageContains("Browser Portfolio")
     }
@@ -509,7 +513,7 @@ class BrowserFlowTest {
         fillField("name", xssPayload)
         fillField("baseCurrency", "EUR")
         driver.findElement(By.cssSelector("button[type='submit']")).click()
-        waitForUrl("/portfolios/")
+        waitForPortfolioDetail()
 
         val xssPortfolioPath = driver.currentUrl!!.replace(baseUrl(), "")
 
@@ -537,7 +541,7 @@ class BrowserFlowTest {
         driver.findElement(By.id("description")).sendKeys(xssPayload)
         fillField("baseCurrency", "EUR")
         driver.findElement(By.cssSelector("button[type='submit']")).click()
-        waitForUrl("/portfolios/")
+        waitForPortfolioDetail()
 
         // Body should still be visible (style injection failed)
         val bodyVisible = driver.executeScript(
@@ -562,7 +566,7 @@ class BrowserFlowTest {
         fillField("name", "XSS Position Test")
         fillField("baseCurrency", "EUR")
         driver.findElement(By.cssSelector("button[type='submit']")).click()
-        waitForUrl("/portfolios/")
+        waitForPortfolioDetail()
         val xssPfPath = driver.currentUrl!!.replace(baseUrl(), "")
 
         // Add position with XSS payloads
@@ -641,7 +645,8 @@ class BrowserFlowTest {
         fillField("inviteCode", "<script>alert('xss')</script>")
         driver.findElement(By.cssSelector("button[type='submit']")).click()
 
-        // Should show error page (invalid invite code)
+        // Should show error page (invalid invite code) — wait for re-render since URL stays /register
+        wait.until { driver.pageSource?.contains("Invalid or expired") == true }
         assertPageContains("Invalid or expired")
         assertThat(driver.pageSource).doesNotContain("<script>alert('xss')</script>")
     }
@@ -653,7 +658,7 @@ class BrowserFlowTest {
         fillField("name", "{{7*7}} \${7*7}")
         fillField("baseCurrency", "EUR")
         driver.findElement(By.cssSelector("button[type='submit']")).click()
-        waitForUrl("/portfolios/")
+        waitForPortfolioDetail()
 
         // Should see the literal text, not "49"
         assertPageContains("{{7*7}}")
