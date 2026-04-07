@@ -163,3 +163,12 @@
         updateVisibility();
     }
 })();
+
+// Confirm dialogs for forms with data-confirm attribute (CSP-safe replacement for inline onsubmit)
+document.querySelectorAll('form[data-confirm]').forEach(function (form) {
+    form.addEventListener('submit', function (e) {
+        if (!confirm(form.dataset.confirm)) {
+            e.preventDefault();
+        }
+    });
+});

@@ -42,10 +42,11 @@ dependencies {
     testImplementation("org.springframework.security:spring-security-test")
     testImplementation("io.mockk:mockk:1.14.9")
     testImplementation("org.wiremock:wiremock-standalone:3.13.0")
-    testImplementation(platform("org.testcontainers:testcontainers-bom:1.20.6"))
-    testImplementation("org.testcontainers:junit-jupiter")
-    testImplementation("org.testcontainers:postgresql")
+    testImplementation("org.testcontainers:testcontainers-junit-jupiter")
+    testImplementation("org.testcontainers:testcontainers-postgresql")
     testImplementation("org.springframework.boot:spring-boot-testcontainers")
+    testImplementation("org.seleniumhq.selenium:selenium-java:4.33.0")
+    testImplementation("org.testcontainers:testcontainers-selenium")
     testRuntimeOnly("com.h2database:h2")
 }
 
