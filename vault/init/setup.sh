@@ -11,17 +11,13 @@ until vault status >/dev/null 2>&1; do sleep 1; done
 echo "=== Enabling KV v2 ==="
 vault secrets enable -path=secret -version=2 kv 2>/dev/null || true
 
-vault kv put secret/kernfolio/smtp \
-  host="smtp.example.com" \
-  port="587" \
-  username="kernfolio@example.com" \
-  password="smtp-dev-password"
-
-vault kv put secret/kernfolio/session \
-  signing-key="dev-session-signing-key-change-in-prod"
-
-vault kv put secret/kernfolio/admin \
-  email="admin@kernfolio.dev"
+vault kv put secret/kernfolio \
+  spring.mail.host="smtp.example.com" \
+  spring.mail.port="587" \
+  spring.mail.username="kernfolio@example.com" \
+  spring.mail.password="smtp-dev-password" \
+  session.signing-key="dev-session-signing-key-change-in-prod" \
+  admin.email="admin@kernfolio.dev"
 
 # ── PKI secrets engine ───────────────────────────────────────────────
 echo "=== Enabling PKI engine ==="

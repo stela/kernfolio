@@ -4,6 +4,7 @@
 @param users: List<User>
 @param inviteCodes: List<InviteCode>
 @param generatedCode: String? = null
+@param emailSent: String? = null
 @param nonce: String
 @param csrfToken: String
 @param csrfHeaderName: String
@@ -25,6 +26,8 @@
             <h2 class="text-lg font-medium mb-4">Generate Invite Code</h2>
             <form action="/admin/users/invite" method="post" class="flex items-end gap-4">
                 <input type="hidden" name="_csrf" value="${csrfToken}">
+                <input type="email" name="email" placeholder="Recipient email (optional)"
+                       class="rounded-md border-gray-300 shadow-sm text-sm focus:border-blue-500 focus:ring-blue-500">
                 <button type="submit"
                         class="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700">
                     Generate code
@@ -35,6 +38,9 @@
                     <p class="text-sm text-green-700">
                         Invite code: <code class="font-mono font-bold tracking-wider">${generatedCode}</code>
                     </p>
+                    @if(emailSent != null)
+                        <p class="text-sm text-green-600 mt-1">Invite sent to ${emailSent}</p>
+                    @endif
                 </div>
             @endif
         </div>

@@ -1,9 +1,11 @@
 package com.kernfolio.controller
 
 import com.kernfolio.security.KernfolioUserDetails
+import com.kernfolio.service.EmailService
 import com.kernfolio.service.FeatureFlagService
 import com.kernfolio.service.InviteCodeService
 import com.kernfolio.service.UserService
+import jakarta.servlet.http.HttpServletRequest
 import org.springframework.security.core.Authentication
 import org.springframework.stereotype.Controller
 import org.springframework.transaction.annotation.Transactional
@@ -23,6 +25,7 @@ class AdminController(
     private val userService: UserService,
     private val inviteCodeService: InviteCodeService,
     private val featureFlagService: FeatureFlagService,
+    private val emailService: EmailService? = null,
 ) {
 
     @GetMapping
@@ -43,10 +46,22 @@ class AdminController(
 
     @PostMapping("/users/invite")
     @Transactional
-    fun generateInviteCode(authentication: Authentication, redirectAttributes: RedirectAttributes): String {
+    fun generateInviteCode(
+        @RequestParam(required = false) email: String?,
+        authentication: Authentication,
+        redirectAttributes: RedirectAttributes,
+        request: HttpServletRequest,
+    ): String {
         val adminId = (authentication.principal as KernfolioUserDetails).id
         val invite = inviteCodeService.generateCode(adminId)
         redirectAttributes.addFlashAttribute("generatedCode", invite.code)
+
+        if (!email.isNullOrBlank() && emailService != null) {
+            val baseUrl = request.requestURL.toString().substringBefore("/admin")
+            emailService.sendInviteCode(email, invite.code, baseUrl)
+            redirectAttributes.addFlashAttribute("emailSent", email)
+        }
+
         return "redirect:/admin/users"
     }
 

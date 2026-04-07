@@ -21,6 +21,7 @@ vault write database/config/kernfolio \
 vault write database/roles/app \
   db_name=kernfolio \
   creation_statements="CREATE ROLE \"{{name}}\" WITH LOGIN PASSWORD '{{password}}' VALID UNTIL '{{expiration}}'; \
+    GRANT ALL ON SCHEMA public TO \"{{name}}\"; \
     GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO \"{{name}}\"; \
     GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO \"{{name}}\";" \
   revocation_statements="DROP ROLE IF EXISTS \"{{name}}\";" \

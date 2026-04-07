@@ -35,6 +35,7 @@ dependencies {
     implementation("gg.jte:jte-spring-boot-starter-4:3.2.3")
     implementation("org.webjars.npm:chart.js:4.5.1")
     implementation("org.postgresql:postgresql")
+    implementation("org.springframework.boot:spring-boot-starter-mail")
 
     developmentOnly("org.springframework.boot:spring-boot-devtools")
 
@@ -47,6 +48,8 @@ dependencies {
     testImplementation("org.springframework.boot:spring-boot-testcontainers")
     testImplementation("org.seleniumhq.selenium:selenium-java:4.33.0")
     testImplementation("org.testcontainers:testcontainers-selenium")
+    testImplementation("org.testcontainers:testcontainers-vault")
+    testImplementation("com.icegreen:greenmail-junit5:2.1.3")
     testRuntimeOnly("com.h2database:h2")
 }
 
