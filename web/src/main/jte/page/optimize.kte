@@ -13,7 +13,7 @@
     content = @`
     <main class="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
         <div class="mb-6">
-            <a href="/portfolios/${portfolio.id}"
+            <a href="/portfolios/${portfolio.id.toString()}"
                class="text-sm font-medium text-blue-600 hover:text-blue-500">
                 &larr; Back to ${portfolio.name}
             </a>
@@ -24,7 +24,7 @@
         </div>
 
         <div class="bg-white shadow rounded-lg p-6">
-            <form id="optimize-form" action="/portfolios/${portfolio.id}/optimize" method="post">
+            <form id="optimize-form" action="/portfolios/${portfolio.id.toString()}/optimize" method="post">
                 <input type="hidden" name="_csrf" value="${csrfToken}">
 
                 <div class="grid grid-cols-1 gap-6 sm:grid-cols-2">

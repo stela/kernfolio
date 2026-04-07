@@ -1,6 +1,7 @@
 package com.kernfolio.security
 
 import com.kernfolio.TestcontainersConfiguration
+import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
@@ -114,12 +115,18 @@ class SecurityConfigTest {
 
         @Test
         fun `response includes CSP header`() {
-            mockMvc.perform(get("/login"))
+            val result = mockMvc.perform(get("/login"))
                 .andExpect(header().exists("Content-Security-Policy"))
-                .andExpect(header().string("Content-Security-Policy",
-                    "default-src 'self'; script-src 'self'; style-src 'self'; " +
-                        "img-src 'self' data:; font-src 'self'; connect-src 'self'; " +
-                        "frame-ancestors 'none'; form-action 'self'"))
+                .andReturn()
+            val csp = result.response.getHeader("Content-Security-Policy")!!
+            assertThat(csp).contains("default-src 'self'")
+            assertThat(csp).contains("script-src 'self' 'nonce-")
+            assertThat(csp).contains("style-src 'self' 'nonce-")
+            assertThat(csp).contains("img-src 'self' data:")
+            assertThat(csp).contains("font-src 'self'")
+            assertThat(csp).contains("connect-src 'self'")
+            assertThat(csp).contains("frame-ancestors 'none'")
+            assertThat(csp).contains("form-action 'self'")
         }
 
         @Test

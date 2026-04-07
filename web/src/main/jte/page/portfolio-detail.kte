@@ -14,7 +14,7 @@
     csrfHeaderName = csrfHeaderName,
     content = @`
     <main class="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8" id="portfolio-main"
-          data-portfolio-id="${portfolio.id}" data-base-currency="${portfolio.baseCurrency}">
+          data-portfolio-id="${portfolio.id.toString()}" data-base-currency="${portfolio.baseCurrency}">
         <div class="flex items-center justify-between mb-6">
             <div>
                 <h1 class="text-2xl font-semibold">${portfolio.name}</h1>
@@ -26,15 +26,15 @@
                 </p>
             </div>
             <div class="flex gap-2">
-                <a href="/portfolios/${portfolio.id}/optimize"
+                <a href="/portfolios/${portfolio.id.toString()}/optimize"
                    class="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700">
                     Optimize
                 </a>
-                <a href="/portfolios/${portfolio.id}/edit"
+                <a href="/portfolios/${portfolio.id.toString()}/edit"
                    class="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50">
                     Edit
                 </a>
-                <form action="/portfolios/${portfolio.id}/delete" method="post"
+                <form action="/portfolios/${portfolio.id.toString()}/delete" method="post"
                       onsubmit="return confirm('Delete this portfolio and all its positions?')">
                     <input type="hidden" name="_csrf" value="${csrfToken}">
                     <button type="submit"
@@ -91,7 +91,7 @@
             <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200">
                 <h2 class="text-lg font-medium">Positions</h2>
                 <button type="button" id="add-position-btn"
-                        data-new-row-url="/portfolios/${portfolio.id}/positions/new-row"
+                        data-new-row-url="/portfolios/${portfolio.id.toString()}/positions/new-row"
                         class="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-blue-700">
                     Add position
                 </button>

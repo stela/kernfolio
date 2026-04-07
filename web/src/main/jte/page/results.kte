@@ -25,7 +25,7 @@
     content = @`
     <main class="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
         <div class="mb-6">
-            <a href="/portfolios/${portfolio.id}"
+            <a href="/portfolios/${portfolio.id.toString()}"
                class="text-sm font-medium text-blue-600 hover:text-blue-500">
                 &larr; Back to ${portfolio.name}
             </a>
@@ -118,11 +118,11 @@
         <div id="discrete-allocation" class="bg-white shadow rounded-lg p-6 mb-8"></div>
 
         <div class="flex gap-4">
-            <a href="/portfolios/${portfolio.id}/optimize"
+            <a href="/portfolios/${portfolio.id.toString()}/optimize"
                class="text-sm font-medium text-blue-600 hover:text-blue-500">
                 Run another optimization
             </a>
-            <a href="/portfolios/${portfolio.id}"
+            <a href="/portfolios/${portfolio.id.toString()}"
                class="text-sm font-medium text-gray-600 hover:text-gray-500">
                 Back to portfolio
             </a>

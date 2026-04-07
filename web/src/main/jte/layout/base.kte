@@ -5,7 +5,7 @@
 @param csrfToken: String
 @param csrfHeaderName: String
 @param content: Content
-@param scripts: Content = Content { }
+@param scripts: gg.jte.Content = gg.jte.Content { }
 @param includeChartJs: Boolean = false
 @param authenticated: Boolean = true
 

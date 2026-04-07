@@ -19,15 +19,15 @@
     content = @`
     <main class="mx-auto max-w-lg px-4 py-8 sm:px-6">
         <div class="bg-white shadow rounded-lg p-8">
-            <h1 class="text-2xl font-semibold mb-6">${isEdit ? "Edit Portfolio" : "New Portfolio"}</h1>
+            <h1 class="text-2xl font-semibold mb-6">${if (isEdit) "Edit Portfolio" else "New Portfolio"}</h1>
 
-            <form action="${isEdit ? "/portfolios/" + portfolioId : "/portfolios"}" method="post" class="space-y-5">
+            <form action="${if (isEdit) "/portfolios/" + portfolioId else "/portfolios"}" method="post" class="space-y-5">
                 <input type="hidden" name="_csrf" value="${csrfToken}">
 
                 <div>
                     <label for="name" class="block text-sm font-medium text-gray-700 mb-1">Name</label>
                     <input type="text" id="name" name="name" value="${portfolioForm.name}" required
-                           class="block w-full rounded-md border ${errors.has("name") ? "border-red-300" : "border-gray-300"} px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500">
+                           class="block w-full rounded-md border ${if (errors.has("name")) "border-red-300" else "border-gray-300"} px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500">
                     @if(errors.has("name"))
                         <p class="mt-1 text-sm text-red-600">${errors.get("name")}</p>
                     @endif
@@ -42,7 +42,7 @@
                 <div>
                     <label for="baseCurrency" class="block text-sm font-medium text-gray-700 mb-1">Base currency</label>
                     <input type="text" id="baseCurrency" name="baseCurrency" value="${portfolioForm.baseCurrency}" required maxlength="3"
-                           class="block w-20 rounded-md border ${errors.has("baseCurrency") ? "border-red-300" : "border-gray-300"} px-3 py-2 text-sm font-mono uppercase shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500">
+                           class="block w-20 rounded-md border ${if (errors.has("baseCurrency")) "border-red-300" else "border-gray-300"} px-3 py-2 text-sm font-mono uppercase shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500">
                     @if(errors.has("baseCurrency"))
                         <p class="mt-1 text-sm text-red-600">${errors.get("baseCurrency")}</p>
                     @endif
@@ -51,9 +51,9 @@
                 <div class="flex gap-3">
                     <button type="submit"
                             class="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
-                        ${isEdit ? "Save changes" : "Create portfolio"}
+                        ${if (isEdit) "Save changes" else "Create portfolio"}
                     </button>
-                    <a href="${isEdit ? "/portfolios/" + portfolioId : "/dashboard"}"
+                    <a href="${if (isEdit) "/portfolios/" + portfolioId else "/dashboard"}"
                        class="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50">
                         Cancel
                     </a>

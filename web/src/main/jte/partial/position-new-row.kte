@@ -2,7 +2,7 @@
 
 @param portfolioId: UUID
 
-<tr data-new-row data-submit-url="/portfolios/${portfolioId}/positions">
+<tr data-new-row data-submit-url="/portfolios/${portfolioId.toString()}/positions">
     <td class="px-4 py-2">
         <select name="positionType" class="js-pos-type rounded-md border border-gray-300 px-2 py-1 text-sm">
             <option value="EQUITY" selected>EQUITY</option>
