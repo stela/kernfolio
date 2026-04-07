@@ -22,13 +22,13 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import javax.sql.DataSource
 
+private const val VAULT_TOKEN = "test-root-token"
+
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @ActiveProfiles("vault")
 class VaultProfileIntegrationTest {
 
     companion object {
-        private const val VAULT_TOKEN = "test-root-token"
-
         private val network = Network.newNetwork()
 
         private val postgres = PostgreSQLContainer("postgres:16-alpine")
@@ -39,24 +39,45 @@ class VaultProfileIntegrationTest {
             .withNetworkAliases("postgres")
             .withInitScript("vault-test-init.sql")
 
+        private val greenMail = GreenMail(ServerSetup(0, null, ServerSetup.PROTOCOL_SMTP))
+
+        // VaultContainer with init commands — uses the vault CLI inside the container
+        // to configure the database secrets engine (mirrors setup-db.sh)
         private val vault = VaultContainer("hashicorp/vault:1.18")
             .withVaultToken(VAULT_TOKEN)
             .withNetwork(network)
             .withNetworkAliases("vault")
-
-        private val greenMail = GreenMail(ServerSetup(0, null, ServerSetup.PROTOCOL_SMTP))
+            .withInitCommand(
+                "secrets enable database",
+                """write database/config/kernfolio \
+                    plugin_name=postgresql-database-plugin \
+                    allowed_roles=app \
+                    connection_url="postgresql://{{username}}:{{password}}@postgres:5432/kernfolio?sslmode=disable" \
+                    username=kernfolio \
+                    password=kernfolio""",
+                """write database/roles/app \
+                    db_name=kernfolio \
+                    creation_statements="CREATE ROLE \"{{name}}\" WITH LOGIN PASSWORD '{{password}}' VALID UNTIL '{{expiration}}'; GRANT ALL ON SCHEMA public TO \"{{name}}\"; GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO \"{{name}}\"; GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO \"{{name}}\";" \
+                    revocation_statements="DROP ROLE IF EXISTS \"{{name}}\";" \
+                    default_ttl=1h max_ttl=24h""",
+            )
 
         init {
             postgres.start()
-            vault.start()
             greenMail.start()
+            vault.start()
 
             // Set Vault connection properties as system properties — must be available
             // before spring.config.import: vault:// triggers in the early bootstrap phase
             System.setProperty("spring.cloud.vault.uri", "http://${vault.host}:${vault.firstMappedPort}")
             System.setProperty("spring.cloud.vault.token", VAULT_TOKEN)
 
-            configureVault()
+            // Generate dynamic DB credentials from Vault's database engine, then
+            // write them (along with other secrets) into KV for Spring to consume.
+            // spring.config.import: vault:// reads KV but not the database backend
+            // directly, so we bridge the two.
+            val (dbUsername, dbPassword) = generateDatabaseCredentials()
+            writeKvSecrets(dbUsername, dbPassword)
         }
 
         @JvmStatic
@@ -81,97 +102,47 @@ class VaultProfileIntegrationTest {
             registry.add("optimizer.base-url") { "http://localhost:9999" }
         }
 
-        private fun configureVault() {
-            val http = HttpClient.newHttpClient()
+        private fun generateDatabaseCredentials(): Pair<String, String> {
             val vaultAddr = "http://${vault.host}:${vault.firstMappedPort}"
-
-            // Enable database secrets engine
-            vaultRequest(http, vaultAddr, "POST", "/v1/sys/mounts/database", """{"type":"database"}""")
-
-            // Write database config pointing to PostgreSQL container via Docker network
-            vaultRequest(
-                http, vaultAddr, "POST", "/v1/database/config/kernfolio",
-                """
-                {
-                  "plugin_name": "postgresql-database-plugin",
-                  "allowed_roles": "app",
-                  "connection_url": "postgresql://{{username}}:{{password}}@postgres:5432/kernfolio?sslmode=disable",
-                  "username": "kernfolio",
-                  "password": "kernfolio"
-                }
-                """.trimIndent()
-            )
-
-            // Create database role matching setup-db.sh
-            vaultRequest(
-                http, vaultAddr, "POST", "/v1/database/roles/app",
-                """
-                {
-                  "db_name": "kernfolio",
-                  "creation_statements": [
-                    "CREATE ROLE \"{{name}}\" WITH LOGIN PASSWORD '{{password}}' VALID UNTIL '{{expiration}}'; GRANT ALL ON SCHEMA public TO \"{{name}}\"; GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO \"{{name}}\"; GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO \"{{name}}\";"
-                  ],
-                  "revocation_statements": ["DROP ROLE IF EXISTS \"{{name}}\";"],
-                  "default_ttl": "1h",
-                  "max_ttl": "24h"
-                }
-                """.trimIndent()
-            )
-
-            // Generate dynamic DB credentials from Vault database engine
-            val credsRequest = HttpRequest.newBuilder()
+            val request = HttpRequest.newBuilder()
                 .uri(URI.create("$vaultAddr/v1/database/creds/app"))
                 .header("X-Vault-Token", VAULT_TOKEN)
                 .GET()
                 .build()
-            val credsResponse = http.send(credsRequest, HttpResponse.BodyHandlers.ofString())
-            check(credsResponse.statusCode() == 200) {
-                "Failed to generate DB credentials: ${credsResponse.body()}"
-            }
+            val response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString())
+            check(response.statusCode() == 200) { "Failed to generate DB credentials: ${response.body()}" }
 
-            // Parse the generated credentials
-            val credsBody = credsResponse.body()
-            val dbUsername = credsBody.substringAfter("\"username\":\"").substringBefore("\"")
-            val dbPassword = credsBody.substringAfter("\"password\":\"").substringBefore("\"")
-
-            // Write KV v2 secrets including Vault-generated DB credentials
-            // spring.config.import: vault:// reads KV but not the database backend directly,
-            // so we deliver dynamic DB credentials through KV
-            val smtpPort = greenMail.smtp.port
-            vaultRequest(
-                http, vaultAddr, "POST", "/v1/secret/data/kernfolio",
-                """
-                {
-                  "data": {
-                    "spring.datasource.username": "$dbUsername",
-                    "spring.datasource.password": "$dbPassword",
-                    "spring.mail.host": "localhost",
-                    "spring.mail.port": "$smtpPort",
-                    "session.signing-key": "test-session-signing-key",
-                    "admin.email": "admin@kernfolio.dev"
-                  }
-                }
-                """.trimIndent()
-            )
+            val body = response.body()
+            return body.substringAfter("\"username\":\"").substringBefore("\"") to
+                body.substringAfter("\"password\":\"").substringBefore("\"")
         }
 
-        private fun vaultRequest(
-            http: HttpClient,
-            vaultAddr: String,
-            method: String,
-            path: String,
-            body: String,
-        ) {
+        private fun writeKvSecrets(dbUsername: String, dbPassword: String) {
+            val vaultAddr = "http://${vault.host}:${vault.firstMappedPort}"
+            val smtpPort = greenMail.smtp.port
             val request = HttpRequest.newBuilder()
-                .uri(URI.create("$vaultAddr$path"))
+                .uri(URI.create("$vaultAddr/v1/secret/data/kernfolio"))
                 .header("X-Vault-Token", VAULT_TOKEN)
                 .header("Content-Type", "application/json")
-                .method(method, HttpRequest.BodyPublishers.ofString(body))
+                .POST(
+                    HttpRequest.BodyPublishers.ofString(
+                        """
+                        {
+                          "data": {
+                            "spring.datasource.username": "$dbUsername",
+                            "spring.datasource.password": "$dbPassword",
+                            "spring.mail.host": "localhost",
+                            "spring.mail.port": "$smtpPort",
+                            "session.signing-key": "test-session-signing-key",
+                            "admin.email": "admin@kernfolio.dev"
+                          }
+                        }
+                        """.trimIndent()
+                    )
+                )
                 .build()
-            val response = http.send(request, HttpResponse.BodyHandlers.ofString())
-            check(response.statusCode() in 200..299) {
-                "Vault API call failed: ${response.statusCode()} ${response.body()} for $path"
-            }
+            val response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString())
+            check(response.statusCode() in 200..299) { "Failed to write KV secrets: ${response.body()}" }
         }
     }
 
