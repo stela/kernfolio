@@ -27,7 +27,7 @@ class SecurityConfig {
     @Bean
     fun securityFilterChain(http: HttpSecurity): SecurityFilterChain = http
         .authorizeHttpRequests { auth ->
-            auth.requestMatchers("/", "/login", "/register", "/about", "/static/**", "/webjars/**").permitAll()
+            auth.requestMatchers("/", "/login", "/register", "/about", "/css/**", "/js/**", "/webjars/**").permitAll()
             auth.requestMatchers("/admin/**").hasRole("ADMIN")
             auth.requestMatchers("/api/**").authenticated()
             auth.anyRequest().authenticated()

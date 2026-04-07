@@ -65,9 +65,36 @@ class SecurityConfigTest {
         }
 
         @Test
-        fun `static assets are accessible without authentication`() {
-            mockMvc.perform(get("/static/test.css"))
-                .andExpect(status().isNotFound) // 404 not 401/302 — path is permitted
+        fun `CSS is accessible without authentication`() {
+            mockMvc.perform(get("/css/tailwind.css"))
+                .andExpect(status().isOk)
+        }
+
+        @Test
+        fun `JS is accessible without authentication`() {
+            mockMvc.perform(get("/js/csrf-fetch.js"))
+                .andExpect(status().isOk)
+        }
+    }
+
+    @Nested
+    inner class RedirectLoopPrevention {
+
+        @Test
+        fun `GET login returns 200 not redirect`() {
+            mockMvc.perform(get("/login"))
+                .andExpect(status().isOk)
+        }
+
+        @Test
+        fun `unauthenticated request to protected page redirects to login which returns 200`() {
+            val result = mockMvc.perform(get("/dashboard"))
+                .andExpect(status().is3xxRedirection)
+                .andReturn()
+            val location = result.response.redirectedUrl!!
+            assertThat(location).isEqualTo("/login")
+            mockMvc.perform(get(location))
+                .andExpect(status().isOk)
         }
     }
 

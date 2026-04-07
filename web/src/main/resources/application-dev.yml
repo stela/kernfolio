@@ -1,0 +1,8 @@
+gg:
+  jte:
+    developmentMode: false
+    usePrecompiledTemplates: true
+
+market-data:
+  scheduler:
+    enabled: false

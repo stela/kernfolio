@@ -3,6 +3,7 @@ plugins {
     kotlin("plugin.spring")
     id("org.springframework.boot")
     id("io.spring.dependency-management")
+    id("gg.jte.gradle") version "3.2.3"
 }
 
 // Override Jackson version ahead of next Spring Boot release
@@ -31,7 +32,7 @@ dependencies {
     implementation("org.liquibase:liquibase-core")
     implementation("gg.jte:jte:3.2.3")
     implementation("gg.jte:jte-kotlin:3.2.3")
-    implementation("gg.jte:jte-spring-boot-starter-3:3.2.3")
+    implementation("gg.jte:jte-spring-boot-starter-4:3.2.3")
     implementation("org.webjars.npm:chart.js:4.5.1")
     implementation("org.postgresql:postgresql")
 
@@ -60,6 +61,12 @@ val tailwindBuild by tasks.registering(Exec::class) {
 
 tasks.named("processResources") {
     dependsOn(tailwindBuild)
+}
+
+jte {
+    sourceDirectory.set(file("src/main/jte").toPath())
+    contentType.set(gg.jte.ContentType.Html)
+    generate()
 }
 
 tasks.withType<Test> {
