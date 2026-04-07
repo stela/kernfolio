@@ -40,6 +40,9 @@ venv/
 # Generated CSS
 web/src/main/resources/static/css/tailwind.css
 
+# JTE generated classes
+web/jte-classes/
+
 # OS
 .DS_Store
 Thumbs.db

@@ -5,10 +5,8 @@ plugins {
     id("io.spring.dependency-management")
 }
 
-// Override BOM versions ahead of next Spring Boot release (fix for CVE-2026-29062)
-// See: https://github.com/spring-projects/spring-boot/issues/49383
+// Override Jackson version ahead of next Spring Boot release
 extra["jackson.version"] = "3.1.0"
-extra["spring-framework.version"] = "7.0.6"
 
 configurations.all {
     resolutionStrategy.eachDependency {
