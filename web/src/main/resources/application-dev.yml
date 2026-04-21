@@ -1,3 +1,15 @@
+spring:
+  config:
+    import:
+      - vault://secret/kernfolio
+      - vault://database/creds/app?prefix=spring.datasource.
+
+  datasource:
+    # Default to localhost for developer runs (./gradlew :web:bootRun against a
+    # docker-exposed postgres). The docker-compose web service sets DB_HOST=postgres
+    # so containerized runs reach the database on the compose network.
+    url: jdbc:postgresql://${DB_HOST:localhost}:5432/kernfolio
+
 gg:
   jte:
     developmentMode: false

@@ -1,3 +1,13 @@
+spring:
+  config:
+    import:
+      - vault://secret/kernfolio
+      - vault://database/creds/app?prefix=spring.datasource.
+
+  datasource:
+    # Production always runs in docker-compose; hostname is the compose service.
+    url: jdbc:postgresql://${DB_HOST:postgres}:5432/kernfolio
+
 gg:
   jte:
     developmentMode: false

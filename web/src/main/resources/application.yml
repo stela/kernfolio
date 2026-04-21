@@ -16,11 +16,6 @@ spring:
         enabled: true
         role: app
         backend: database
-  config:
-    import: optional:vault://
-
-  datasource:
-    url: jdbc:postgresql://${DB_HOST:postgres}:5432/kernfolio
 
   liquibase:
     change-log: classpath:db/changelog/db.changelog-master.yaml

@@ -28,9 +28,13 @@ private const val VAULT_TOKEN = "test-root-token"
     properties = [
         "spring.cloud.vault.enabled=true",
         "spring.cloud.vault.config.lifecycle.enabled=true",
+        "spring.config.import=vault://",
     ],
 )
 class VaultProfileIntegrationTest {
+    // Vault is off by default for tests (see web/build.gradle.kts). This test
+    // is the one that exercises the real Vault integration, so it re-enables
+    // Vault and adds the vault:// config import that dev/prod profiles declare.
 
     companion object {
         private val network = Network.newNetwork()
