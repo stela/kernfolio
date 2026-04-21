@@ -4,10 +4,17 @@ set -e
 export VAULT_ADDR="${VAULT_ADDR:-http://vault:8200}"
 export VAULT_TOKEN="${VAULT_TOKEN:-dev-root-token}"
 
-# Postgres superuser password. Must match POSTGRES_PASSWORD on the postgres
-# service in docker-compose.yml (both come from the DB_ROOT_PASSWORD env var
-# with the same dev fallback).
-DB_ROOT_PASSWORD="${DB_ROOT_PASSWORD:-kernfolio}"
+# Postgres superuser password, mounted by docker-compose as a Docker Compose
+# secret at /run/secrets/pg_root_password. The same secret is attached to the
+# postgres service via POSTGRES_PASSWORD_FILE, guaranteeing both sides see the
+# same value without it ever landing in env vars or `docker inspect` output.
+PG_ROOT_PASSWORD_FILE="${PG_ROOT_PASSWORD_FILE:-/run/secrets/pg_root_password}"
+if [ ! -s "${PG_ROOT_PASSWORD_FILE}" ]; then
+    echo "ERROR: ${PG_ROOT_PASSWORD_FILE} missing or empty" >&2
+    echo "Run ./scripts/init-secrets.sh before 'docker compose up'." >&2
+    exit 1
+fi
+DB_ROOT_PASSWORD="$(cat "${PG_ROOT_PASSWORD_FILE}")"
 
 echo "=== Vault DB init: waiting for Vault ==="
 until vault status >/dev/null 2>&1; do sleep 1; done

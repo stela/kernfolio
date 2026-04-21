@@ -35,17 +35,18 @@ services:
     environment:
       POSTGRES_DB: kernfolio
       POSTGRES_USER: kernfolio
-      # DB_ROOT_PASSWORD is the postgres superuser password used only during
-      # initdb and by Vault's database engine to rotate the 'app' role. The
-      # 'kernfolio' fallback is for the dev stack; production deployments must
-      # set this in .env (see .env.example).
-      POSTGRES_PASSWORD: ${DB_ROOT_PASSWORD:-kernfolio}
+      # Superuser password is read from a Docker Compose secret so it never
+      # appears in `docker inspect` env output or the process table. The file
+      # is generated on first run by ./scripts/init-secrets.sh (gitignored).
+      POSTGRES_PASSWORD_FILE: /run/secrets/pg_root_password
     volumes:
       - pgdata:/var/lib/postgresql/data
       - vault_agent_certs:/vault/certs:ro
       - ./postgres/pg_hba_mtls.conf:/etc/postgresql/pg_hba.conf:ro
       - ./postgres/postgresql_ssl.conf:/etc/postgresql/conf.d/ssl.conf:ro
       - ./postgres/init-extensions.sql:/docker-entrypoint-initdb.d/init-extensions.sql:ro
+    secrets:
+      - pg_root_password
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U kernfolio"]
       interval: 10s
@@ -68,7 +69,8 @@ services:
     entrypoint: /vault/init/setup-db.sh
     environment:
       VAULT_ADDR: "http://vault:8200"
-      DB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-kernfolio}
+    secrets:
+      - pg_root_password
 
   optimizer:
     build: ./optimizer
@@ -135,3 +137,7 @@ volumes:
   caddy_config:
   vault_data:
   vault_agent_certs:
+
+secrets:
+  pg_root_password:
+    file: ./secrets/pg_root_password
