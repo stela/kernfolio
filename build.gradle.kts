@@ -16,21 +16,48 @@ allprojects {
     }
 }
 
-// The JAR builds happen inside the Dockerfiles (multi-stage), so these tasks
-// are just thin wrappers around the `docker compose build` invocations.
-val dockerBuild by tasks.registering(Exec::class) {
-    description = "Build production Docker images (web, optimizer)"
-    group = "docker"
-    commandLine("docker", "compose", "build", "web", "optimizer")
+// JVM images (web, digital twins) are produced via Spring Boot's
+// bootBuildImage task (Paketo buildpacks; see each module's build.gradle.kts
+// for the image tag). Non-JVM images (optimizer, vault-init) are still built
+// from Dockerfiles via `docker compose build`. The aggregate tasks below tie
+// both paths together so the user never has to remember the right sequence.
+// Gradle daemons started via IDEs or system services often have a minimal
+// PATH that doesn't include /usr/local/bin or /opt/homebrew/bin, so resolve
+// the docker binary explicitly once at configuration time.
+val dockerExecutable: String = listOf(
+    "/usr/local/bin/docker",
+    "/opt/homebrew/bin/docker",
+    "/usr/bin/docker",
+).firstOrNull { java.io.File(it).canExecute() } ?: "docker"
+
+val dockerComposeBuildProd by tasks.registering(Exec::class) {
+    description = "Build Dockerfile-based compose services for production"
+    commandLine(dockerExecutable, "compose", "build", "optimizer", "vault-init")
 }
 
-val dockerBuildDev by tasks.registering(Exec::class) {
-    description = "Build all Docker images including digital twins"
-    group = "docker"
+val dockerComposeBuildDev by tasks.registering(Exec::class) {
+    description = "Build Dockerfile-based compose services for dev"
     commandLine(
-        "docker", "compose",
+        dockerExecutable, "compose",
         "-f", "docker-compose.yml", "-f", "docker-compose.dev.yml",
-        "build", "web", "optimizer", "yfinance-twin", "frankfurter-twin"
+        "build", "optimizer", "vault-init",
+    )
+}
+
+val dockerBuild by tasks.registering {
+    description = "Build production Docker images (web JVM image + optimizer + vault-init)"
+    group = "docker"
+    dependsOn(":web:bootBuildImage", dockerComposeBuildProd)
+}
+
+val dockerBuildDev by tasks.registering {
+    description = "Build every Docker image used by the dev stack"
+    group = "docker"
+    dependsOn(
+        ":web:bootBuildImage",
+        ":digital-twins:yfinance-fake:bootBuildImage",
+        ":digital-twins:frankfurter-fake:bootBuildImage",
+        dockerComposeBuildDev,
     )
 }
 

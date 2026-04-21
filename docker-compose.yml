@@ -83,9 +83,7 @@ services:
         condition: service_completed_successfully
 
   web:
-    build:
-      context: .
-      dockerfile: web/Dockerfile
+    image: kernfolio-web:latest
     mem_limit: 512m
     environment:
       VAULT_ADDR: "http://vault:8200"
@@ -93,15 +91,17 @@ services:
       SPRING_CLOUD_VAULT_TOKEN: "${VAULT_APP_TOKEN:-dev-root-token}"
       DB_HOST: postgres
       OPTIMIZER_BASE_URL: "https://optimizer:8000"
-      JAVA_TOOL_OPTIONS: "-Xmx384m"
+      # Fully specified memory sizes override Paketo's memory calculator so
+      # its chunky defaults (240M code cache, ~190M metaspace, 250*1M stacks)
+      # don't apply. 50 threads + 512k stacks keeps stack reservation ~25M.
+      BPL_JVM_THREAD_COUNT: 50
+      JAVA_TOOL_OPTIONS: "-Xmx192m -Xss512k -XX:MaxMetaspaceSize=128m -XX:ReservedCodeCacheSize=48m -XX:MaxDirectMemorySize=10m"
     volumes:
       - vault_agent_certs:/vault/certs:ro
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO /dev/null http://localhost:8080/actuator/health || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 20s
+    # No HEALTHCHECK: Paketo's default tiny runtime has no shell/wget/curl.
+    # Nothing in the compose DAG waits on web being "healthy" (caddy uses a
+    # plain depends_on, not service_healthy), so we accept Docker's default
+    # "Up" liveness from process status.
     depends_on:
       postgres:
         condition: service_healthy

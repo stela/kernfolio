@@ -1,3 +1,5 @@
+import org.springframework.boot.gradle.tasks.bundling.BootBuildImage
+
 plugins {
     kotlin("jvm")
     kotlin("plugin.spring")
@@ -71,6 +73,15 @@ jte {
     sourceDirectory.set(file("src/main/jte").toPath())
     contentType.set(gg.jte.ContentType.Html)
     generate()
+}
+
+tasks.named<BootBuildImage>("bootBuildImage") {
+    imageName.set("kernfolio-web:latest")
+    // Default Paketo builder (noble-java-tiny) — a distroless-style runtime
+    // with only the JRE and app. No shell, wget, curl, or nc, which is why
+    // the compose service for this image has no HEALTHCHECK. See docker-
+    // compose.yml for the explanation.
+    environment.put("BP_JVM_VERSION", "25")
 }
 
 tasks.withType<Test> {

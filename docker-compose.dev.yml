@@ -35,38 +35,26 @@ services:
     environment:
       SPRING_PROFILES_ACTIVE: dev
       SPRING_CLOUD_VAULT_TOKEN: "dev-root-token"
-      JAVA_TOOL_OPTIONS: "-Xmx384m"
+      BPL_JVM_THREAD_COUNT: 50
+      JAVA_TOOL_OPTIONS: "-Xmx192m -Xss512k -XX:MaxMetaspaceSize=128m -XX:ReservedCodeCacheSize=48m -XX:MaxDirectMemorySize=10m"
     ports:
       - "8080:8080"
 
   yfinance-twin:
-    build:
-      context: .
-      dockerfile: digital-twins/yfinance-fake/Dockerfile
+    image: kernfolio-yfinance-twin:latest
     mem_limit: 256m
     environment:
-      JAVA_TOOL_OPTIONS: "-Xmx192m"
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO /dev/null http://localhost:8081/health || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 15s
+      BPL_JVM_THREAD_COUNT: 50
+      JAVA_TOOL_OPTIONS: "-Xmx64m -Xss512k -XX:MaxMetaspaceSize=96m -XX:ReservedCodeCacheSize=32m -XX:MaxDirectMemorySize=8m"
+    # See docker-compose.yml web service for why buildpack images skip HEALTHCHECK.
     ports:
       - "8081:8081"
 
   frankfurter-twin:
-    build:
-      context: .
-      dockerfile: digital-twins/frankfurter-fake/Dockerfile
+    image: kernfolio-frankfurter-twin:latest
     mem_limit: 256m
     environment:
-      JAVA_TOOL_OPTIONS: "-Xmx192m"
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO /dev/null http://localhost:8082/health || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 15s
+      BPL_JVM_THREAD_COUNT: 50
+      JAVA_TOOL_OPTIONS: "-Xmx64m -Xss512k -XX:MaxMetaspaceSize=96m -XX:ReservedCodeCacheSize=32m -XX:MaxDirectMemorySize=8m"
     ports:
       - "8082:8082"

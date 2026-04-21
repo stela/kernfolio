@@ -1,3 +1,5 @@
+import org.springframework.boot.gradle.tasks.bundling.BootBuildImage
+
 plugins {
     kotlin("jvm")
     kotlin("plugin.spring")
@@ -12,6 +14,11 @@ dependencies {
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+}
+
+tasks.named<BootBuildImage>("bootBuildImage") {
+    imageName.set("kernfolio-yfinance-twin:latest")
+    environment.put("BP_JVM_VERSION", "25")
 }
 
 tasks.withType<Test> {
