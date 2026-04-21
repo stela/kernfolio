@@ -35,7 +35,11 @@ services:
     environment:
       POSTGRES_DB: kernfolio
       POSTGRES_USER: kernfolio
-      POSTGRES_PASSWORD: kernfolio
+      # DB_ROOT_PASSWORD is the postgres superuser password used only during
+      # initdb and by Vault's database engine to rotate the 'app' role. The
+      # 'kernfolio' fallback is for the dev stack; production deployments must
+      # set this in .env (see .env.example).
+      POSTGRES_PASSWORD: ${DB_ROOT_PASSWORD:-kernfolio}
     volumes:
       - pgdata:/var/lib/postgresql/data
       - vault_agent_certs:/vault/certs:ro
@@ -64,6 +68,7 @@ services:
     entrypoint: /vault/init/setup-db.sh
     environment:
       VAULT_ADDR: "http://vault:8200"
+      DB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-kernfolio}
 
   optimizer:
     build: ./optimizer

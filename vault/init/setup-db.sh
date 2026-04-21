@@ -4,6 +4,11 @@ set -e
 export VAULT_ADDR="${VAULT_ADDR:-http://vault:8200}"
 export VAULT_TOKEN="${VAULT_TOKEN:-dev-root-token}"
 
+# Postgres superuser password. Must match POSTGRES_PASSWORD on the postgres
+# service in docker-compose.yml (both come from the DB_ROOT_PASSWORD env var
+# with the same dev fallback).
+DB_ROOT_PASSWORD="${DB_ROOT_PASSWORD:-kernfolio}"
+
 echo "=== Vault DB init: waiting for Vault ==="
 until vault status >/dev/null 2>&1; do sleep 1; done
 
@@ -16,7 +21,7 @@ vault write database/config/kernfolio \
   allowed_roles="app" \
   connection_url="postgresql://{{username}}:{{password}}@postgres:5432/kernfolio?sslmode=disable" \
   username="kernfolio" \
-  password="kernfolio"
+  password="${DB_ROOT_PASSWORD}"
 
 vault write database/roles/app \
   db_name=kernfolio \
