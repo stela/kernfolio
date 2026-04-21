@@ -16,17 +16,17 @@ allprojects {
     }
 }
 
+// The JAR builds happen inside the Dockerfiles (multi-stage), so these tasks
+// are just thin wrappers around the `docker compose build` invocations.
 val dockerBuild by tasks.registering(Exec::class) {
     description = "Build production Docker images (web, optimizer)"
     group = "docker"
-    dependsOn(":web:bootJar")
     commandLine("docker", "compose", "build", "web", "optimizer")
 }
 
 val dockerBuildDev by tasks.registering(Exec::class) {
     description = "Build all Docker images including digital twins"
     group = "docker"
-    dependsOn(":web:bootJar", ":digital-twins:yfinance-fake:bootJar", ":digital-twins:frankfurter-fake:bootJar")
     commandLine(
         "docker", "compose",
         "-f", "docker-compose.yml", "-f", "docker-compose.dev.yml",

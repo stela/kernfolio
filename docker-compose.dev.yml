@@ -40,7 +40,9 @@ services:
       - "8080:8080"
 
   yfinance-twin:
-    build: ./digital-twins/yfinance-fake
+    build:
+      context: .
+      dockerfile: digital-twins/yfinance-fake/Dockerfile
     mem_limit: 256m
     environment:
       JAVA_TOOL_OPTIONS: "-Xmx192m"
@@ -54,7 +56,9 @@ services:
       - "8081:8081"
 
   frankfurter-twin:
-    build: ./digital-twins/frankfurter-fake
+    build:
+      context: .
+      dockerfile: digital-twins/frankfurter-fake/Dockerfile
     mem_limit: 256m
     environment:
       JAVA_TOOL_OPTIONS: "-Xmx192m"

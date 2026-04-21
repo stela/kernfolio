@@ -41,6 +41,7 @@ services:
       - vault_agent_certs:/vault/certs:ro
       - ./postgres/pg_hba_mtls.conf:/etc/postgresql/pg_hba.conf:ro
       - ./postgres/postgresql_ssl.conf:/etc/postgresql/conf.d/ssl.conf:ro
+      - ./postgres/init-extensions.sql:/docker-entrypoint-initdb.d/init-extensions.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U kernfolio"]
       interval: 10s
@@ -82,12 +83,15 @@ services:
         condition: service_completed_successfully
 
   web:
-    build: ./web
+    build:
+      context: .
+      dockerfile: web/Dockerfile
     mem_limit: 512m
     environment:
       VAULT_ADDR: "http://vault:8200"
       SPRING_PROFILES_ACTIVE: prod
       SPRING_CLOUD_VAULT_TOKEN: "${VAULT_APP_TOKEN:-dev-root-token}"
+      DB_HOST: postgres
       OPTIMIZER_BASE_URL: "https://optimizer:8000"
       JAVA_TOOL_OPTIONS: "-Xmx384m"
     volumes:
