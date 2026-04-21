@@ -53,7 +53,7 @@ cd optimizer && uv run pytest tests/test_optimize.py  # Single test file
 - **Nonce-based CSP**: `CspNonceFilter` generates a per-request nonce. Every `<script>` and `<link rel="stylesheet">` tag must include `nonce="${nonce}"`. CSP header: `script-src 'self' 'nonce-...'`. No `unsafe-eval` or `unsafe-inline`. All client-side JS must be in static `.js` files, never inline. Do not use JS frameworks that require `eval()` / `new Function()`.
 - **No dynamic data in HTML**: Never embed server data in HTML `data-*` attributes for JavaScript consumption. Use JSON API endpoints instead (XSS prevention). Chart JS files parse IDs from URL path via `ChartUtils.getIdsFromUrl()`.
 - **Privacy**: Backend never sees total portfolio value, share counts, or cash amounts. Only percentage weights.
-- **Vault** (optional `vault` profile): `spring-cloud-starter-vault-config:5.0.1` for dynamic DB credentials and KV secrets. Disabled by default (`spring.cloud.vault.enabled=false`).
+- **Vault** (mandatory): `spring-cloud-starter-vault-config:5.0.1` is always active via the default `vault` profile. Provides dynamic PostgreSQL credentials (Vault database engine, `app` role), KV v2 secrets under `secret/kernfolio`, and PKI-issued mTLS certificates for inter-service traffic. Dev stack uses `vault server -dev`; production uses file storage and requires operator init/unseal.
 
 ### Testing
 - **Unit tests**: MockK for mocking, no Spring context
@@ -68,33 +68,27 @@ cd optimizer && uv run pytest tests/test_optimize.py  # Single test file
 
 ### Running the Application
 
-**Without Vault (simplest, for local dev):**
-```bash
-# Start just PostgreSQL and optimizer (plain HTTP, env-var credentials)
-docker compose up postgres optimizer
-# In another terminal, run the web app directly
-DB_USER=kernfolio DB_PASSWORD=kernfolio ./gradlew :web:bootRun
-# Browse to http://localhost:8080
-```
-Vault is disabled by default (`spring.cloud.vault.enabled=false` in `application.yml`). Database credentials come from `DB_USER`/`DB_PASSWORD` env vars (default: `kernfolio`/`kernfolio`).
+Vault is always on. Vault connection, KV import, database engine, and mTLS cert paths are declared directly in `application.yml` — there is no separate `vault` profile; the previous split into `application-vault.yml` was folded back into the main config once Vault became mandatory. Tests disable Vault via a Gradle `systemProperty` in `web/build.gradle.kts`; `VaultProfileIntegrationTest` opts back in via `@SpringBootTest(properties = ...)`.
 
-**Development with Vault (full stack):**
+**Development (full stack):**
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up
 # Browse to http://localhost:8080
 ```
-Starts: Vault (dev mode, token `dev-root-token`, port 8200), vault-init (seeds secrets + PKI certs), PostgreSQL (5432), optimizer (8000), web (8080), digital twins (8081, 8082). The `vault` profile is activated via `SPRING_PROFILES_ACTIVE=dev,vault` in docker-compose.dev.yml. Dynamic DB credentials come from Vault's database engine; mTLS certs are issued by Vault PKI and shared via the `vault_agent_certs` volume.
+Starts: Vault (dev mode, token `dev-root-token`, port 8200), vault-init (seeds secrets + PKI certs), PostgreSQL (5432), optimizer (8000), web (8080), digital twins (8081, 8082). Spring profile: `dev` (via `SPRING_PROFILES_ACTIVE` in `docker-compose.dev.yml`). Dynamic DB credentials come from Vault's database engine; mTLS certs are issued by Vault PKI and shared via the `vault_agent_certs` volume.
 
 **Production:**
 ```bash
 VAULT_APP_TOKEN=<real-token> docker compose up -d
 # Browse to https://localhost (Caddy TLS on ports 80/443)
 ```
-Uses `docker-compose.yml` only. Vault runs with file storage (persistent). Caddy handles TLS termination (ports 80/443) and reverse-proxies to web via mTLS. All inter-service communication is mTLS with Vault PKI-issued certificates. The `vault` Spring profile enables `spring-cloud-starter-vault-config:5.0.1` for automatic DB credential rotation and KV v2 secret injection.
+Uses `docker-compose.yml` only. Vault runs with file storage (persistent); the operator is responsible for initializing and unsealing it on first boot. Caddy terminates TLS (ports 80/443) and reverse-proxies to web via mTLS. All inter-service communication is mTLS with Vault PKI-issued certificates. Spring profile: `prod`.
 
 **Profile summary:**
-| Profile | Vault | DB Credentials | Optimizer URL | mTLS |
-|---------|-------|----------------|---------------|------|
-| (none) | Disabled | Env vars `DB_USER`/`DB_PASSWORD` | `http://localhost:8000` | No |
-| `vault` | Enabled | Dynamic from Vault database engine | `https://optimizer:8000` | Yes (if certs exist) |
-| `dev` | — | — | Uses digital twins for market data | — |
+| Profile | Purpose | Notes |
+|---------|---------|-------|
+| `dev` | Local dev stack with digital twins for market data. | Disables the scheduled market-data job; precompiled JTE templates. |
+| `prod` | Production runtime. | Precompiled JTE templates. |
+| `test` | `@SpringBootTest` with H2. | Disables Liquibase, scheduler; only used by `KernfolioApplicationTest`. |
+
+(Vault is not a profile — it's on by default in `application.yml`.)

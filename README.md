@@ -17,37 +17,36 @@ Privacy is built in: share counts, cash amounts, and total portfolio value never
 | `digital-twins/` | Spring Boot | Fake yfinance & Frankfurter APIs for local development |
 | `vault/`, `postgres/`, `scripts/` | HashiCorp Vault 1.19 + Postgres 18 config | Dynamic DB credentials, mTLS PKI, ops scripts |
 
-## Quickstart (no Vault)
+## Quickstart
 
-The fastest way to try it locally. Needs Docker and a JDK 25 toolchain.
-
-```
-docker compose up postgres optimizer
-DB_USER=kernfolio DB_PASSWORD=kernfolio ./gradlew :web:bootRun
-```
-
-Open http://localhost:8080.
-
-`.env.example` lists the three environment variables the app reads directly (`DB_USER`, `DB_PASSWORD`, `OPTIMIZER_BASE_URL`); everything else lives in Vault when that profile is enabled.
-
-## Full dev stack (Vault + digital twins)
+Vault is always in the critical path — it provisions database credentials, KV secrets, and PKI certificates for mTLS. The dev stack runs Vault in `-dev` mode so there's nothing to initialize manually.
 
 ```
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up
 ```
 
+Open http://localhost:8080.
+
 Services and ports:
 
-| Service | Port |
-| --- | --- |
-| web | 8080 |
-| optimizer | 8000 |
-| postgres | 5432 |
-| vault (dev mode, token `dev-root-token`) | 8200 |
-| yfinance-twin | 8081 |
-| frankfurter-twin | 8082 |
+| Service | Port | Notes |
+| --- | --- | --- |
+| web | 8080 | Spring Boot UI |
+| optimizer | 8000 | FastAPI math microservice |
+| postgres | 5432 | Credentials come from Vault's database engine; no static DB user/password |
+| vault | 8200 | Dev mode, root token `dev-root-token` |
+| yfinance-twin | 8081 | Fake market data |
+| frankfurter-twin | 8082 | Fake FX rates |
 
-All inter-service traffic is mTLS, using certificates issued by Vault's PKI engine. Dynamic database credentials come from Vault's database secrets engine.
+All inter-service traffic is mTLS with certificates issued by Vault's PKI engine.
+
+## Production
+
+```
+VAULT_APP_TOKEN=<your-vault-token> docker compose up -d
+```
+
+Uses `docker-compose.yml` only. Vault runs with file storage and must be initialized and unsealed by an operator on first boot. Caddy terminates TLS on ports 80/443 and reverse-proxies to the web service over mTLS. Copy `.env.example` to `.env` and set `VAULT_APP_TOKEN` before `docker compose up`.
 
 ## Build & test
 

@@ -10,7 +10,6 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.core.env.Environment
 import org.springframework.mail.javamail.JavaMailSender
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import org.testcontainers.containers.Network
@@ -24,8 +23,13 @@ import javax.sql.DataSource
 
 private const val VAULT_TOKEN = "test-root-token"
 
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
-@ActiveProfiles("vault")
+@SpringBootTest(
+    webEnvironment = SpringBootTest.WebEnvironment.NONE,
+    properties = [
+        "spring.cloud.vault.enabled=true",
+        "spring.cloud.vault.config.lifecycle.enabled=true",
+    ],
+)
 class VaultProfileIntegrationTest {
 
     companion object {
@@ -159,8 +163,9 @@ class VaultProfileIntegrationTest {
     lateinit var emailService: EmailService
 
     @Test
-    fun `application context loads with vault profile`() {
-        assertThat(environment.activeProfiles).contains("vault")
+    fun `application context loads with vault enabled`() {
+        assertThat(environment.getProperty("spring.cloud.vault.enabled"))
+            .isEqualTo("true")
     }
 
     @Test

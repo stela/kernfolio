@@ -75,4 +75,9 @@ jte {
 
 tasks.withType<Test> {
     useJUnitPlatform()
+    // Vault is always enabled in production runtime config (application.yml).
+    // Disable it for tests by default; VaultProfileIntegrationTest opts back in
+    // via @SpringBootTest(properties = ...).
+    systemProperty("spring.cloud.vault.enabled", "false")
+    systemProperty("spring.cloud.vault.config.lifecycle.enabled", "false")
 }

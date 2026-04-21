@@ -4,15 +4,35 @@ spring:
 
   cloud:
     vault:
-      enabled: false
+      enabled: true
+      uri: ${VAULT_ADDR:http://localhost:8200}
+      authentication: token
+      token: ${SPRING_CLOUD_VAULT_TOKEN:dev-root-token}
+      kv:
+        enabled: true
+        backend: secret
+        default-context: kernfolio
+      database:
+        enabled: true
+        role: app
+        backend: database
+  config:
+    import: optional:vault://
 
   datasource:
-    url: jdbc:postgresql://localhost:5432/kernfolio
-    username: ${DB_USER:kernfolio}
-    password: ${DB_PASSWORD:kernfolio}
+    url: jdbc:postgresql://${DB_HOST:postgres}:5432/kernfolio
 
   liquibase:
     change-log: classpath:db/changelog/db.changelog-master.yaml
+
+# mTLS certificate paths (issued by Vault PKI, shared via the
+# vault_agent_certs docker volume). OptimizerClientConfig treats
+# missing files as "no mTLS" and falls back to plain HTTP.
+vault:
+  certs:
+    ca: /vault/certs/ca.pem
+    cert: /vault/certs/app-client.pem
+    key: /vault/certs/app-client-key.pem
 
 gg:
   jte:
