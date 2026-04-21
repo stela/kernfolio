@@ -12,8 +12,8 @@ Privacy is built in: share counts, cash amounts, and total portfolio value never
 
 | Module | Stack | Purpose |
 | --- | --- | --- |
-| `web/` | Kotlin 2.3.10 / Spring Boot 4.0.5 / Java 25, JTE + vanilla JS + Chart.js | Server-rendered UI, PostgreSQL persistence, auth, feature flags |
-| `optimizer/` | Python 3.11+ / FastAPI | Stateless math microservice (`/optimize`, `/fetch-prices`, `/fetch-fx-rates`) |
+| `web/` | Kotlin 2.3.20 / Spring Boot 4.0.5 / Java 25, JTE + vanilla JS + Chart.js | Server-rendered UI, PostgreSQL persistence, auth, feature flags |
+| `optimizer/` | Python 3.14+ / FastAPI | Stateless math microservice (`/optimize`, `/fetch-prices`, `/fetch-fx-rates`) |
 | `digital-twins/` | Spring Boot | Fake yfinance & Frankfurter APIs for local development |
 | `vault/`, `postgres/`, `scripts/` | HashiCorp Vault 1.19 + Postgres 18 config | Dynamic DB credentials, mTLS PKI, ops scripts |
 

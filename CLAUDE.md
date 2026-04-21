@@ -29,8 +29,8 @@ cd optimizer && uv run pytest tests/test_optimize.py  # Single test file
 **Hybrid multi-module app**: Kotlin Spring Boot web server + Python FastAPI optimization microservice + PostgreSQL.
 
 ### Modules
-- **`web/`** — Spring Boot 4.0.5, Kotlin 2.3.10, Java 25. Server-rendered UI (JTE 3.2.3 `.kte` templates + vanilla JS). Spring Data JDBC (not JPA/Hibernate).
-- **`optimizer/`** — FastAPI, Python 3.11+. Stateless: receives all data in request body, no DB access. Endpoints: `/optimize`, `/fetch-prices`, `/fetch-fx-rates`, `/health`.
+- **`web/`** — Spring Boot 4.0.5, Kotlin 2.3.20, Java 25. Server-rendered UI (JTE 3.2.3 `.kte` templates + vanilla JS). Spring Data JDBC (not JPA/Hibernate).
+- **`optimizer/`** — FastAPI, Python 3.14+. Stateless: receives all data in request body, no DB access. Endpoints: `/optimize`, `/fetch-prices`, `/fetch-fx-rates`, `/health`.
 - **`digital-twins/`** — Mock yfinance and Frankfurter APIs for local dev.
 
 ### Data Flow
