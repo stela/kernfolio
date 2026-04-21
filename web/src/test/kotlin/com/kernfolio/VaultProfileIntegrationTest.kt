@@ -31,7 +31,7 @@ class VaultProfileIntegrationTest {
     companion object {
         private val network = Network.newNetwork()
 
-        private val postgres = PostgreSQLContainer("postgres:16-alpine")
+        private val postgres = PostgreSQLContainer("postgres:18-alpine")
             .withDatabaseName("kernfolio")
             .withUsername("kernfolio")
             .withPassword("kernfolio")

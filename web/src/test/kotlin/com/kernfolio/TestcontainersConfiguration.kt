@@ -11,6 +11,6 @@ class TestcontainersConfiguration {
     @Bean
     @ServiceConnection
     fun postgresContainer(): PostgreSQLContainer<*> {
-        return PostgreSQLContainer("postgres:16-alpine")
+        return PostgreSQLContainer("postgres:18-alpine")
     }
 }

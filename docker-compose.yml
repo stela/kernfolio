@@ -30,7 +30,7 @@ services:
       VAULT_ADDR: "http://vault:8200"
 
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     mem_limit: 256m
     environment:
       POSTGRES_DB: kernfolio

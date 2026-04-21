@@ -62,7 +62,7 @@ cd optimizer && uv run pytest tests/test_optimize.py  # Single test file
 - **Controller tests**: MockMvc with `mockUserDetails(user)` helper from `TestSecurityUtils.kt`
 
 ### Database
-- PostgreSQL 16, Liquibase migrations in `web/src/main/resources/db/changelog/`
+- PostgreSQL 18, Liquibase migrations in `web/src/main/resources/db/changelog/`
 - Spring Data JDBC repositories (not JPA). UUIDs for PKs, `NUMERIC` for financial values, `JSONB` for nested structures.
 - `Instrument` entity uses `Persistable<String>` with manual `isNew` flag for upserts.
 

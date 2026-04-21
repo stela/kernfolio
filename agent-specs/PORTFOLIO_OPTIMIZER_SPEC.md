@@ -276,7 +276,7 @@ The `input.css` file contains `@import "tailwindcss"` and any custom CSS. Templa
 
 | Component | Choice | Notes |
 |---|---|---|
-| Database | PostgreSQL 16 | Docker container |
+| Database | PostgreSQL 18 | Docker container |
 | Reverse Proxy | Caddy 2 | Auto TLS via Let's Encrypt |
 | Secrets Management | HashiCorp Vault 1.19 | Dynamic DB credentials, mTLS PKI, KV for static secrets |
 | Container Runtime | Docker Compose | 6 services: vault, vault-init, app, optimizer, postgres, caddy |
@@ -1186,7 +1186,7 @@ services:
       VAULT_ADDR: "http://vault:8200"
 
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     environment:
       POSTGRES_DB: portfolio_optimizer
     volumes:
