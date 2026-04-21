@@ -20,6 +20,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 cd optimizer && uv run pytest              # Direct pytest
 cd optimizer && uv run pytest tests/test_optimize.py  # Single test file
 
+# Docker images (JVM images via bootBuildImage/Paketo; optimizer + vault-init via Dockerfile)
+./gradlew :web:bootBuildImage              # just the web image (kernfolio-web:latest)
+./gradlew dockerBuild                      # production set: web + optimizer + vault-init
+./gradlew dockerBuildDev                   # dev set: above + yfinance-twin + frankfurter-twin
+
 # Tailwind CSS is built automatically during :web:processResources
 # Requires `tailwindcss` CLI on PATH
 ```
@@ -70,8 +75,11 @@ cd optimizer && uv run pytest tests/test_optimize.py  # Single test file
 
 Vault is always on. Vault connection, KV import, database engine, and mTLS cert paths are declared directly in `application.yml` — there is no separate `vault` profile; the previous split into `application-vault.yml` was folded back into the main config once Vault became mandatory. Tests disable Vault via a Gradle `systemProperty` in `web/build.gradle.kts`; `VaultProfileIntegrationTest` opts back in via `@SpringBootTest(properties = ...)`.
 
+JVM images (`kernfolio-web`, `kernfolio-yfinance-twin`, `kernfolio-frankfurter-twin`) are produced by Spring Boot's `bootBuildImage` task (Paketo buildpacks) — the compose files reference them by tag, not by `build:` stanza. Non-JVM images (`optimizer`, `vault-init`) are still built from Dockerfiles via `docker compose build`. `./gradlew dockerBuild(Dev)` orchestrates both paths. `docker compose up` will *not* build missing JVM images; run the Gradle task first.
+
 **Development (full stack):**
 ```bash
+./gradlew dockerBuildDev
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up
 # Browse to http://localhost:8080
 ```
@@ -79,10 +87,15 @@ Starts: Vault (dev mode, token `dev-root-token`, port 8200), vault-init (seeds s
 
 **Production:**
 ```bash
+./gradlew dockerBuild
 VAULT_APP_TOKEN=<real-token> docker compose up -d
 # Browse to https://localhost (Caddy TLS on ports 80/443)
 ```
 Uses `docker-compose.yml` only. Vault runs with file storage (persistent); the operator is responsible for initializing and unsealing it on first boot. Caddy terminates TLS (ports 80/443) and reverse-proxies to web via mTLS. All inter-service communication is mTLS with Vault PKI-issued certificates. Spring profile: `prod`.
+
+**Runtime resource budget:** full dev stack runs in ~1.1 GiB steady-state RSS against ~2.4 GiB of `mem_limit`. The JVM services (web, twins) use explicit `JAVA_TOOL_OPTIONS` (e.g. `-Xmx192m -Xss512k -XX:MaxMetaspaceSize=128m -XX:ReservedCodeCacheSize=48m -XX:MaxDirectMemorySize=10m` for web) to suppress Paketo's chunky default reservations. See the README Quickstart table for per-service sizing.
+
+**No HEALTHCHECK on JVM services:** Paketo's default tiny runtime (`run-noble-java-tiny`) is distroless-style — no shell, no wget/curl/nc. The compose DAG doesn't require those services to report healthy (caddy uses a plain `depends_on`). Postgres, Vault, and optimizer keep their working healthchecks.
 
 **Profile summary:**
 | Profile | Purpose | Notes |

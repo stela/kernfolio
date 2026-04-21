@@ -21,28 +21,35 @@ Privacy is built in: share counts, cash amounts, and total portfolio value never
 
 Vault is always in the critical path — it provisions database credentials, KV secrets, and PKI certificates for mTLS. The dev stack runs Vault in `-dev` mode so there's nothing to initialize manually.
 
+Two steps, because the JVM images are produced by Gradle (Spring Boot's `bootBuildImage` / Paketo buildpacks) before Compose runs them:
+
 ```
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+./gradlew dockerBuildDev                                          # build images
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up # run stack
 ```
 
 Open http://localhost:8080.
 
-Services and ports:
+Services, ports, and resource footprint:
 
-| Service | Port | Notes |
-| --- | --- | --- |
-| web | 8080 | Spring Boot UI |
-| optimizer | 8000 | FastAPI math microservice |
-| postgres | 5432 | Credentials come from Vault's database engine; no static DB user/password |
-| vault | 8200 | Dev mode, root token `dev-root-token` |
-| yfinance-twin | 8081 | Fake market data |
-| frankfurter-twin | 8082 | Fake FX rates |
+| Service | Port | `mem_limit` | Typical RSS | Image | Image size |
+| --- | --- | --- | --- | --- | --- |
+| web | 8080 | 512 MiB | ~345 MiB | `kernfolio-web:latest` (buildpack) | ~472 MB |
+| optimizer | 8000 | 512 MiB | ~370 MiB | `kernfolio-optimizer:latest` (python:3.14-slim) | ~505 MB |
+| postgres | 5432 | 256 MiB | ~48 MiB | `postgres:18-alpine` | ~281 MB |
+| vault | 8200 | 512 MiB | ~70 MiB | `hashicorp/vault:1.19` | ~488 MB |
+| yfinance-twin | 8081 | 256 MiB | ~140 MiB | `kernfolio-yfinance-twin:latest` (buildpack) | ~353 MB |
+| frankfurter-twin | 8082 | 256 MiB | ~125 MiB | `kernfolio-frankfurter-twin:latest` (buildpack) | ~352 MB |
+| caddy | 80, 443 | 64 MiB | ~15 MiB | `caddy:2-alpine` | ~60 MB |
+
+Full dev stack budget: ~2.4 GiB of container memory, observed steady-state ~1.1 GiB. JVM services size their heap + metaspace + code cache explicitly through `JAVA_TOOL_OPTIONS` (see `docker-compose.yml` / `docker-compose.dev.yml`) so Paketo's memory calculator defers to the explicit values.
 
 All inter-service traffic is mTLS with certificates issued by Vault's PKI engine.
 
 ## Production
 
 ```
+./gradlew dockerBuild                            # build web + optimizer + vault-init
 VAULT_APP_TOKEN=<your-vault-token> docker compose up -d
 ```
 
@@ -53,8 +60,10 @@ Uses `docker-compose.yml` only. Vault runs with file storage and must be initial
 Single command covers every submodule — Kotlin units + Testcontainers integration tests in `web` and the Kotlin digital twins, plus `pytest` in `optimizer`:
 
 ```
-./gradlew test            # run every test in every module
-./gradlew build            # compile + test + package everything
+./gradlew test                    # run every test in every module
+./gradlew build                   # compile + test + package everything
+./gradlew dockerBuild             # production Docker images (web + optimizer + vault-init)
+./gradlew dockerBuildDev          # dev-stack images (above + both digital twins)
 ```
 
 `:web:test` needs Docker running (Testcontainers spins up PostgreSQL). `:optimizer:test` shells out to `uv run pytest` — `uv` must be on your `PATH`.
