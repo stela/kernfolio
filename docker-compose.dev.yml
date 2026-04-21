@@ -16,9 +16,6 @@ services:
       VAULT_TOKEN: "dev-root-token"
 
   postgres:
-    environment:
-      POSTGRES_USER: kernfolio
-      POSTGRES_PASSWORD: kernfolio
     ports:
       - "5432:5432"
 
