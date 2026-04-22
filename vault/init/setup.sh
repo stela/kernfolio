@@ -19,6 +19,29 @@ vault kv put secret/kernfolio \
   session.signing-key="dev-session-signing-key-change-in-prod" \
   admin.email="admin@kernfolio.dev"
 
+# ── PostgreSQL superuser password ────────────────────────────────────
+# Vault is the origin of this secret. It gets materialized onto the
+# vault_agent_certs volume at /vault/certs/pg_root_password so that (a)
+# the postgres image can consume it via POSTGRES_PASSWORD_FILE at initdb
+# time and (b) vault-db-init can read it when wiring up the database
+# engine. The file itself is the durable source of truth (persists across
+# Vault dev-mode restarts, which wipe Vault's in-memory KV); we also
+# mirror the value into Vault KV so it's visible via `vault kv get`.
+PG_ROOT_PASSWORD_FILE=/vault/certs/pg_root_password
+if [ -s "$PG_ROOT_PASSWORD_FILE" ]; then
+    echo "=== Reusing existing pg_root_password ==="
+    pg_root_password="$(cat "$PG_ROOT_PASSWORD_FILE")"
+else
+    echo "=== Generating pg_root_password ==="
+    # Vault's sys/tools/random endpoint is the idiomatic way to source
+    # random bytes when you're already talking to Vault; format=hex avoids
+    # base64 post-processing. 16 bytes = 32 hex chars = 128 bits of entropy.
+    pg_root_password="$(vault write -field=random_bytes sys/tools/random/16 format=hex)"
+    printf '%s' "$pg_root_password" > "$PG_ROOT_PASSWORD_FILE"
+    chmod 644 "$PG_ROOT_PASSWORD_FILE"
+fi
+vault kv put secret/kernfolio/pg-root password="$pg_root_password" >/dev/null
+
 # ── PKI secrets engine ───────────────────────────────────────────────
 echo "=== Enabling PKI engine ==="
 vault secrets enable pki 2>/dev/null || true

@@ -33,7 +33,6 @@ venv/
 
 # Docker
 .env
-secrets/
 
 # Claude Code
 .claude/
