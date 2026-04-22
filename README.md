@@ -46,6 +46,21 @@ Full dev stack budget: ~2.4 GiB of container memory, observed steady-state ~1.1 
 
 All inter-service traffic is mTLS with certificates issued by Vault's PKI engine.
 
+### First login and inviting users
+
+Kernfolio is invite-only by default. On the very first startup (no users in the database) the web app logs a single-use admin invite code at WARN level. Retrieve it from the container logs:
+
+```
+docker logs kernfolio-web-1 2>&1 | grep "Admin invite code"
+```
+
+Visit http://localhost:8080/register with that code to create the first admin account. If you've already created an admin and lost access, `docker compose down -v` wipes `pgdata` and triggers a fresh bootstrap with a new code on next startup.
+
+Once signed in as admin:
+
+- **Invite further users** at http://localhost:8080/admin/users. The form takes an optional email address: leave it empty to generate a code you hand to the invitee out of band, or fill it in to have the app email the code via the SMTP settings in Vault KV (`secret/kernfolio`). Invitees redeem the code at `/register`, same flow as the initial admin.
+- **Open self-registration** (no invite required) by enabling the `SELF_REGISTRATION` feature flag at http://localhost:8080/admin/flags. While the flag is on, `/register` accepts registrations with or without an invite code.
+
 ## Production
 
 ```
