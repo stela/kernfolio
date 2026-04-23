@@ -20,7 +20,9 @@ class FxRateController(
         @RequestParam currencies: List<String>,
     ): ResponseEntity<Map<String, LatestFxRateDto?>> {
         val rates = currencies.associateWith { target ->
-            fxRateService.getLatestCrossRate(base, target)?.let { LatestFxRateDto(rate = it) }
+            fxRateService.getLatestCrossRateInfoOrFetch(base, target)?.let {
+                LatestFxRateDto(rate = it.rate, asOf = it.asOf, fetchedAt = it.fetchedAt)
+            }
         }
         return ResponseEntity.ok(rates)
     }

@@ -4,6 +4,7 @@ import com.kernfolio.config.MarketDataProperties
 import com.kernfolio.domain.CachedFxRate
 import com.kernfolio.domain.Position
 import com.kernfolio.marketdata.FrankfurterClient
+import com.kernfolio.marketdata.MarketDataException
 import com.kernfolio.marketdata.dto.FetchFxRatesResponse
 import com.kernfolio.repository.CachedFxRateRepository
 import com.kernfolio.repository.PositionRepository
@@ -14,6 +15,7 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
+import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 
@@ -117,5 +119,77 @@ class FxRateServiceTest {
     fun `getRatesForDateRange returns empty for EUR`() {
         val result = service.getRatesForDateRange("EUR", LocalDate.now().minusDays(5), LocalDate.now())
         assertEquals(emptyList<CachedFxRate>(), result)
+    }
+
+    @Test
+    fun `getLatestCrossRateInfoOrFetch returns cached rate with timestamps and without fetching`() {
+        val rateDate = LocalDate.of(2026, 4, 20)
+        val fetched = Instant.parse("2026-04-20T14:23:00Z")
+        every { cachedFxRateRepository.findLatestByCurrencyPair("EURUSD") } returns
+            CachedFxRate("EURUSD", rateDate, BigDecimal("1.08"), fetched)
+
+        val info = service.getLatestCrossRateInfoOrFetch("EUR", "USD")!!
+
+        assertEquals(BigDecimal("1.08000000"), info.rate)
+        assertEquals(rateDate, info.asOf)
+        assertEquals(fetched, info.fetchedAt)
+        verify(exactly = 0) { frankfurterClient.fetchFxRates(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `getLatestCrossRateInfoOrFetch fetches from Frankfurter on cache miss and returns info`() {
+        val date = LocalDate.of(2026, 4, 18)
+        every { cachedFxRateRepository.findLatestByCurrencyPair("EURUSD") } returnsMany listOf(
+            null,
+            CachedFxRate("EURUSD", date, BigDecimal("1.08"), Instant.parse("2026-04-20T10:00:00Z")),
+        )
+        every { frankfurterClient.fetchFxRates("EUR", listOf("USD"), any(), any()) } returns
+            FetchFxRatesResponse(rates = mapOf(date to mapOf("USD" to BigDecimal("1.08"))))
+
+        val info = service.getLatestCrossRateInfoOrFetch("EUR", "USD")!!
+
+        assertEquals(BigDecimal("1.08000000"), info.rate)
+        assertEquals(date, info.asOf)
+        verify { cachedFxRateRepository.upsert("EURUSD", date, BigDecimal("1.08")) }
+    }
+
+    @Test
+    fun `getLatestCrossRateInfoOrFetch returns null and swallows MarketDataException on fetch failure`() {
+        every { cachedFxRateRepository.findLatestByCurrencyPair("EURUSD") } returns null
+        every { frankfurterClient.fetchFxRates(any(), any(), any(), any()) } throws
+            MarketDataException("frankfurter unreachable")
+
+        assertNull(service.getLatestCrossRateInfoOrFetch("EUR", "USD"))
+    }
+
+    @Test
+    fun `getLatestCrossRateInfoOrFetch picks oldest timestamps across two-leg cross`() {
+        val usdDate = LocalDate.of(2026, 4, 18)
+        val jpyDate = LocalDate.of(2026, 4, 20)
+        val usdFetched = Instant.parse("2026-04-20T08:00:00Z")
+        val jpyFetched = Instant.parse("2026-04-20T12:00:00Z")
+        every { cachedFxRateRepository.findLatestByCurrencyPair("EURUSD") } returns
+            CachedFxRate("EURUSD", usdDate, BigDecimal("1.08"), usdFetched)
+        every { cachedFxRateRepository.findLatestByCurrencyPair("EURJPY") } returns
+            CachedFxRate("EURJPY", jpyDate, BigDecimal("162.50"), jpyFetched)
+
+        val info = service.getLatestCrossRateInfoOrFetch("USD", "JPY")!!
+
+        // USD→JPY cross = EUR/JPY ÷ EUR/USD = 162.50 / 1.08 ≈ 150.46
+        assertEquals(BigDecimal("150.46296296"), info.rate)
+        // Oldest asOf and oldest fetchedAt win (conservative "as of").
+        assertEquals(usdDate, info.asOf)
+        assertEquals(usdFetched, info.fetchedAt)
+    }
+
+    @Test
+    fun `getLatestCrossRateInfoOrFetch treats null fetchedAt as epoch`() {
+        val date = LocalDate.of(2026, 4, 18)
+        every { cachedFxRateRepository.findLatestByCurrencyPair("EURUSD") } returns
+            CachedFxRate("EURUSD", date, BigDecimal("1.08"), fetchedAt = null)
+
+        val info = service.getLatestCrossRateInfoOrFetch("EUR", "USD")!!
+
+        assertEquals(Instant.EPOCH, info.fetchedAt)
     }
 }

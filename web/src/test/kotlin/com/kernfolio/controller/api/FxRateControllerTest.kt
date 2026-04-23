@@ -14,6 +14,8 @@ import org.springframework.context.annotation.Import
 import org.springframework.http.MediaType
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity
+import org.springframework.test.context.DynamicPropertyRegistry
+import org.springframework.test.context.DynamicPropertySource
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
@@ -30,6 +32,17 @@ import java.time.LocalDate
 @Import(TestcontainersConfiguration::class)
 @Transactional
 class FxRateControllerTest {
+
+    companion object {
+        // Point optimizer base-url at a closed port so the on-demand FX fetch
+        // in getLatestCrossRateInfoOrFetch fails fast (MarketDataException →
+        // caught → null) instead of dialing a real optimizer.
+        @JvmStatic
+        @DynamicPropertySource
+        fun optimizerProps(registry: DynamicPropertyRegistry) {
+            registry.add("optimizer.base-url") { "http://localhost:9999" }
+        }
+    }
 
     @Autowired lateinit var context: WebApplicationContext
     @Autowired lateinit var userRepository: UserRepository
@@ -54,7 +67,7 @@ class FxRateControllerTest {
     )
 
     @Test
-    fun `returns EUR-based rates when base is EUR`() {
+    fun `returns EUR-based rates with timestamps when base is EUR`() {
         val user = createUser()
         mockMvc.perform(
             get("/api/fx/latest")
@@ -65,7 +78,11 @@ class FxRateControllerTest {
             .andExpect(status().isOk)
             .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andExpect(jsonPath("$.USD.rate").value(closeTo(1.085, 0.001)))
+            .andExpect(jsonPath("$.USD.asOf").isString)
+            .andExpect(jsonPath("$.USD.fetchedAt").isString)
             .andExpect(jsonPath("$.JPY.rate").value(closeTo(162.5, 0.1)))
+            .andExpect(jsonPath("$.JPY.asOf").isString)
+            .andExpect(jsonPath("$.JPY.fetchedAt").isString)
     }
 
     @Test

@@ -54,54 +54,60 @@
         var posType = tr.querySelector('[name="positionType"]').value;
         var currency = tr.querySelector('.js-currency').value;
 
-        // Prepare hidden fields before submit
-        if (typeof PortfolioEntry !== 'undefined') {
-            var ticker;
-            if (posType === 'CASH') {
-                ticker = 'CASH.' + currency;
-                var amountInput = tr.querySelector('.js-cash-amount');
-                if (amountInput) PortfolioEntry.updateCashAmount(currency, amountInput.value);
-            } else {
-                ticker = tr.querySelector('.js-ticker-input').value;
-                var sharesInput = tr.querySelector('.js-shares');
-                if (sharesInput && ticker) PortfolioEntry.updateShares(ticker, sharesInput.value, currency);
+        // Ensure the FX rate for this currency is loaded before we compute the
+        // weight — otherwise we'd persist 0% for a non-base-currency position.
+        var ready = typeof PortfolioEntry !== 'undefined' && PortfolioEntry.ensureFxRate
+            ? PortfolioEntry.ensureFxRate(currency)
+            : Promise.resolve();
+
+        ready.then(function () {
+            if (typeof PortfolioEntry !== 'undefined') {
+                var ticker;
+                if (posType === 'CASH') {
+                    ticker = 'CASH.' + currency;
+                    var amountInput = tr.querySelector('.js-cash-amount');
+                    if (amountInput) PortfolioEntry.updateCashAmount(currency, amountInput.value);
+                } else {
+                    ticker = tr.querySelector('.js-ticker-input').value;
+                    var sharesInput = tr.querySelector('.js-shares');
+                    if (sharesInput && ticker) PortfolioEntry.updateShares(ticker, sharesInput.value, currency);
+                }
+                var weightPct = PortfolioEntry.computeWeightPct(ticker, posType, currency);
+                var costBasisPct = PortfolioEntry.computeCostBasisPct(ticker, currency);
+                var wpField = tr.querySelector('[name="weightPct"]');
+                var cbField = tr.querySelector('[name="costBasisPct"]');
+                if (wpField) wpField.value = weightPct.toFixed(6);
+                if (cbField) cbField.value = costBasisPct > 0 ? costBasisPct.toFixed(6) : '';
             }
-            var weightPct = PortfolioEntry.computeWeightPct(ticker, posType, currency);
-            var costBasisPct = PortfolioEntry.computeCostBasisPct(ticker, currency);
-            var wpField = tr.querySelector('[name="weightPct"]');
-            var cbField = tr.querySelector('[name="costBasisPct"]');
-            if (wpField) wpField.value = weightPct.toFixed(6);
-            if (cbField) cbField.value = costBasisPct > 0 ? costBasisPct.toFixed(6) : '';
-        }
 
-        var formData = new FormData();
-        formData.append('positionType', posType);
-        formData.append('currency', currency);
-        formData.append('weightPct', tr.querySelector('[name="weightPct"]').value);
+            var formData = new FormData();
+            formData.append('positionType', posType);
+            formData.append('currency', currency);
+            formData.append('weightPct', tr.querySelector('[name="weightPct"]').value);
 
-        var cbVal = tr.querySelector('[name="costBasisPct"]').value;
-        if (cbVal) formData.append('costBasisPct', cbVal);
+            var cbVal = tr.querySelector('[name="costBasisPct"]').value;
+            if (cbVal) formData.append('costBasisPct', cbVal);
 
-        if (posType === 'CASH') {
-            formData.append('ticker', 'CASH.' + currency);
-            formData.append('name', currency + ' Cash');
-        } else {
-            formData.append('ticker', tr.querySelector('.js-ticker-input').value);
-            var nameInput = tr.querySelector('[name="name"]');
-            if (nameInput && nameInput.value) formData.append('name', nameInput.value);
-            var sectorInput = tr.querySelector('[name="sector"]');
-            if (sectorInput && sectorInput.value) formData.append('sector', sectorInput.value);
-        }
+            if (posType === 'CASH') {
+                formData.append('ticker', 'CASH.' + currency);
+                formData.append('name', currency + ' Cash');
+            } else {
+                formData.append('ticker', tr.querySelector('.js-ticker-input').value);
+                var nameInput = tr.querySelector('[name="name"]');
+                if (nameInput && nameInput.value) formData.append('name', nameInput.value);
+                var sectorInput = tr.querySelector('[name="sector"]');
+                if (sectorInput && sectorInput.value) formData.append('sector', sectorInput.value);
+            }
 
-        fetch(url, {
-            method: 'POST',
-            headers: Csrf.headers(),
-            body: formData,
+            return fetch(url, {
+                method: 'POST',
+                headers: Csrf.headers(),
+                body: formData,
+            });
         })
             .then(function (r) { return r.text(); })
             .then(function (html) {
                 tr.outerHTML = html;
-                // Update data displays after save
                 if (typeof PortfolioEntry !== 'undefined') PortfolioEntry.updateDisplays();
             });
     }
@@ -110,6 +116,7 @@
         if (!tr) return;
         var typeSelect = tr.querySelector('.js-pos-type');
         var currencyInput = tr.querySelector('.js-currency');
+        var fxFetchTimer = null;
 
         function updateVisibility() {
             var isCash = typeSelect.value === 'CASH';
@@ -133,8 +140,21 @@
             if (nameHidden) nameHidden.value = cur + ' Cash';
         }
 
+        function scheduleFxFetch() {
+            if (typeof PortfolioEntry === 'undefined' || !PortfolioEntry.ensureFxRate) return;
+            var cur = currencyInput.value;
+            if (!cur || cur.length !== 3) return;
+            if (fxFetchTimer) clearTimeout(fxFetchTimer);
+            fxFetchTimer = setTimeout(function () {
+                PortfolioEntry.ensureFxRate(cur.toUpperCase()).then(updateWeight);
+            }, 300);
+        }
+
         typeSelect.addEventListener('change', updateVisibility);
-        currencyInput.addEventListener('input', updateCashTicker);
+        currencyInput.addEventListener('input', function () {
+            updateCashTicker();
+            scheduleFxFetch();
+        });
 
         // Wire up weight display
         var sharesInput = tr.querySelector('.js-shares');
@@ -161,6 +181,10 @@
         if (cashInput) cashInput.addEventListener('input', updateWeight);
 
         updateVisibility();
+        // Prime FX for the row's default currency (e.g. "USD") so the weight
+        // display becomes correct as soon as the user starts typing an amount,
+        // without waiting for the save click.
+        scheduleFxFetch();
     }
 })();
 

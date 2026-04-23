@@ -43,37 +43,52 @@ fi
 vault kv put secret/kernfolio/pg-root password="$pg_root_password" >/dev/null
 
 # ── PKI secrets engine ───────────────────────────────────────────────
+# Idempotent: if vault-init re-runs against a surviving (dev) Vault, we
+# must NOT regenerate the root. Re-generating appends another issuer, but
+# `default` stays pinned to the first one, so the next sign-intermediate
+# signs with the OLD root while ca.pem gets overwritten with the NEW root
+# — PKIX path-building breaks across the stack.
 echo "=== Enabling PKI engine ==="
 vault secrets enable pki 2>/dev/null || true
 vault secrets tune -max-lease-ttl=87600h pki
 
-# Generate root CA (Ed25519)
-vault write -field=certificate pki/root/generate/internal \
-  common_name="Kernfolio Dev CA" \
-  key_type=ed25519 \
-  ttl=87600h > /vault/certs/ca.pem
+if vault read -field=certificate pki/cert/ca >/vault/certs/ca.pem 2>/dev/null \
+   && [ -s /vault/certs/ca.pem ]; then
+    echo "=== Reusing existing root CA ==="
+else
+    echo "=== Generating root CA ==="
+    vault write -field=certificate pki/root/generate/internal \
+      common_name="Kernfolio Dev CA" \
+      key_type=ed25519 \
+      ttl=87600h > /vault/certs/ca.pem
 
-vault write pki/config/urls \
-  issuing_certificates="${VAULT_ADDR}/v1/pki/ca" \
-  crl_distribution_points="${VAULT_ADDR}/v1/pki/crl"
+    vault write pki/config/urls \
+      issuing_certificates="${VAULT_ADDR}/v1/pki/ca" \
+      crl_distribution_points="${VAULT_ADDR}/v1/pki/crl"
+fi
 
 # Enable intermediate PKI for issuing certs
 vault secrets enable -path=pki_int pki 2>/dev/null || true
 vault secrets tune -max-lease-ttl=43800h pki_int
 
-# Generate intermediate CSR and sign it (Ed25519)
-vault write -format=json pki_int/intermediate/generate/internal \
-  common_name="Kernfolio Dev Intermediate CA" \
-  key_type=ed25519 | \
-  jq -r '.data.csr' > /tmp/pki_int.csr
+# Generate intermediate only if pki_int has no signed CA cert yet.
+if ! vault read pki_int/cert/ca 2>/dev/null | grep -q "BEGIN CERTIFICATE"; then
+    echo "=== Generating intermediate CA ==="
+    vault write -format=json pki_int/intermediate/generate/internal \
+      common_name="Kernfolio Dev Intermediate CA" \
+      key_type=ed25519 | \
+      jq -r '.data.csr' > /tmp/pki_int.csr
 
-vault write -format=json pki/root/sign-intermediate \
-  csr=@/tmp/pki_int.csr \
-  format=pem_bundle \
-  ttl=43800h | \
-  jq -r '.data.certificate' > /tmp/intermediate.pem
+    vault write -format=json pki/root/sign-intermediate \
+      csr=@/tmp/pki_int.csr \
+      format=pem_bundle \
+      ttl=43800h | \
+      jq -r '.data.certificate' > /tmp/intermediate.pem
 
-vault write pki_int/intermediate/set-signed certificate=@/tmp/intermediate.pem
+    vault write pki_int/intermediate/set-signed certificate=@/tmp/intermediate.pem
+else
+    echo "=== Reusing existing intermediate CA ==="
+fi
 
 # Ed25519 role — used by all non-Java services
 vault write pki_int/roles/kernfolio-service \
@@ -88,13 +103,16 @@ vault write pki_int/roles/kernfolio-service \
 # ── Issue service certificates ───────────────────────────────────────
 echo "=== Issuing service certificates ==="
 
-# Helper: issue a cert and extract both cert and key from a single issuance
+# Helper: issue a cert and extract both cert and key from a single issuance.
+# The cert file is leaf + issuing intermediate so servers present a full
+# chain. ca.pem holds only the root — without the intermediate in the
+# server's cert, clients get PKIX path-building failures at handshake.
 issue_cert() {
   local role="$1" cn="$2" alt="$3" cert_file="$4" key_file="$5"
   local args="common_name=${cn} ttl=720h"
   [ -n "$alt" ] && args="${args} alt_names=${alt}"
   vault write -format=json "pki_int/issue/${role}" private_key_format=pkcs8 $args > /tmp/cert.json
-  jq -r '.data.certificate' /tmp/cert.json > "$cert_file"
+  jq -r '.data.certificate, .data.issuing_ca' /tmp/cert.json > "$cert_file"
   jq -r '.data.private_key' /tmp/cert.json > "$key_file"
 }
 

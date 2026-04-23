@@ -21,8 +21,12 @@ FROM python:3.14-slim
 WORKDIR /opt/optimizer
 COPY --from=build /opt/optimizer/.venv /opt/optimizer/.venv
 COPY app/ app/
+COPY run_mtls.py ./
 ENV PATH="/opt/optimizer/.venv/bin:$PATH"
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+# run_mtls.py enables TLS when Vault-issued certs are mounted at /vault/certs
+# (always the case in this stack). Plain `uvicorn …` would leave the server
+# on HTTP while the web client dials https://optimizer:8000.
+CMD ["python", "run_mtls.py"]

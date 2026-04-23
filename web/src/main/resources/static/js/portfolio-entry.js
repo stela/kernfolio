@@ -13,7 +13,13 @@ var PortfolioEntry = (function () {
     var cash = {};
     var positions = [];
     var prices = {};
-    var fxRates = {};
+    // fxTable pins the reference base currency. rates[target] is the full
+    // server entry { rate, asOf, fetchedAt } — rate is target-currency units
+    // per 1 base unit (e.g. base='EUR', rate=1.08 ⇔ 1 EUR = 1.08 USD); asOf is
+    // the calendar date the rate is effective; fetchedAt is the UTC instant we
+    // cached it (ISO-8601 with Z suffix, rendered in browser-local time).
+    var fxTable = { base: null, rates: {} };
+    var pendingFxFetches = {};
     var loaded = false;
 
     function init() {
@@ -129,7 +135,12 @@ var PortfolioEntry = (function () {
                             '&currencies=' + encodeURIComponent(currencies.join(',')))
                             .then(function (r) { return r.json(); })
                             .then(function (fxData) {
-                                fxRates = fxData;
+                                resetFxTable(baseCurrency);
+                                Object.keys(fxData).forEach(function (cur) {
+                                    if (fxData[cur] && fxData[cur].rate) {
+                                        fxTable.rates[cur] = fxData[cur];
+                                    }
+                                });
                                 loaded = true;
                                 checkReconciliation();
                                 updateDisplays();
@@ -138,21 +149,65 @@ var PortfolioEntry = (function () {
             });
     }
 
+    function resetFxTable(newBase) {
+        if (fxTable.base !== newBase) {
+            fxTable = { base: newBase, rates: {} };
+            pendingFxFetches = {};
+        }
+    }
+
+    function getFxRateAgainstBase(currency) {
+        if (currency === fxTable.base) return 1;
+        var entry = fxTable.rates[currency];
+        return entry && entry.rate ? parseFloat(entry.rate) : null;
+    }
+
+    function ensureFxRate(currency) {
+        resetFxTable(baseCurrency);
+        if (!currency || currency === fxTable.base) return Promise.resolve();
+        if (fxTable.rates[currency]) return Promise.resolve();
+        if (pendingFxFetches[currency]) return pendingFxFetches[currency];
+
+        var base = fxTable.base;
+        var url = '/api/fx/latest?base=' + encodeURIComponent(base) +
+            '&currencies=' + encodeURIComponent(currency);
+        var p = fetch(url)
+            .then(function (r) {
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                return r.json();
+            })
+            .then(function (data) {
+                if (fxTable.base !== base) return;
+                var entry = data[currency];
+                if (entry && entry.rate) {
+                    fxTable.rates[currency] = entry;
+                    updateDisplays();
+                } else {
+                    Flash.error('Could not fetch ' + base + '/' + currency +
+                        ' exchange rate. ' + currency + ' positions will show 0% until the rate is available.');
+                }
+            })
+            .catch(function (err) {
+                Flash.error('Failed to fetch ' + base + '/' + currency + ' exchange rate: ' + err.message);
+            })
+            .finally(function () { delete pendingFxFetches[currency]; });
+        pendingFxFetches[currency] = p;
+        return p;
+    }
+
     function priceInBaseCurrency(ticker) {
         var pd = prices[ticker];
         if (!pd || !pd.close) return 0;
         var nativePrice = parseFloat(pd.close);
-        if (pd.currency === baseCurrency) return nativePrice;
-        var fx = fxRates[pd.currency];
-        if (!fx || !fx.rate) return 0;
-        return nativePrice / parseFloat(fx.rate);
+        var rate = getFxRateAgainstBase(pd.currency);
+        if (rate === null) return 0;
+        return nativePrice / rate;
     }
 
     function cashInBaseCurrency(currency, amount) {
-        if (currency === baseCurrency) return amount;
-        var fx = fxRates[currency];
-        if (!fx || !fx.rate) return 0;
-        return amount / parseFloat(fx.rate);
+        var rate = getFxRateAgainstBase(currency);
+        if (rate === null) return 0;
+        return amount / rate;
     }
 
     function computeWeightPct(ticker, positionType, currency) {
@@ -215,6 +270,8 @@ var PortfolioEntry = (function () {
             el.textContent = getCashAmount(el.dataset.cashCurrency);
         });
 
+        updateFreshnessIndicator();
+
         // Show/hide recovery prompt
         var recoveryPrompt = document.getElementById('recovery-prompt');
         if (recoveryPrompt) {
@@ -222,6 +279,43 @@ var PortfolioEntry = (function () {
             var show = loaded && !hasLocal && positions.length > 0 && totalValue > 0;
             recoveryPrompt.classList.toggle('hidden', !show);
         }
+    }
+
+    function updateFreshnessIndicator() {
+        var container = document.getElementById('fx-freshness');
+        if (!container) return;
+        var asOfEl = document.getElementById('fx-freshness-asof');
+        var fetchedEl = document.getElementById('fx-freshness-fetched');
+
+        // Pick the oldest entry across all loaded rates so the "as of" we show
+        // is never optimistic.
+        var oldest = null;
+        Object.keys(fxTable.rates).forEach(function (cur) {
+            var e = fxTable.rates[cur];
+            if (!e || !e.fetchedAt) return;
+            if (!oldest || e.fetchedAt < oldest.fetchedAt) oldest = e;
+        });
+
+        if (!oldest) {
+            container.classList.add('hidden');
+            return;
+        }
+
+        // asOf is a date-only string like "2026-04-20" — parse as UTC midnight
+        // so it renders the same calendar date regardless of local zone.
+        if (asOfEl) {
+            var asOfDate = new Date(oldest.asOf + 'T00:00:00Z');
+            asOfEl.textContent = asOfDate.toLocaleDateString(undefined, {
+                year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC',
+            });
+        }
+        // fetchedAt is an ISO instant (Z suffix) — Date renders it in the
+        // browser's local timezone.
+        if (fetchedEl) {
+            var fetchedDate = new Date(oldest.fetchedAt);
+            fetchedEl.textContent = fetchedDate.toLocaleString();
+        }
+        container.classList.remove('hidden');
     }
 
     function checkReconciliation() {
@@ -305,5 +399,6 @@ var PortfolioEntry = (function () {
         updateShares: updateShares,
         updateCashAmount: updateCashAmount,
         updateDisplays: updateDisplays,
+        ensureFxRate: ensureFxRate,
     };
 })();

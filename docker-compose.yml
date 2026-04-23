@@ -41,6 +41,12 @@ services:
       # suffix pattern so the plaintext value never appears in env vars or
       # `docker inspect` output.
       POSTGRES_PASSWORD_FILE: /vault/certs/pg_root_password
+      # Force Postgres 18 to use the path our named volume is mounted at.
+      # The official postgres:18-alpine image defaults PGDATA to
+      # /var/lib/postgresql/18/docker — outside our `pgdata` mount — so the
+      # cluster ends up in Docker's VOLUME-declared anonymous volume and is
+      # silently discarded on every `docker compose down && up` cycle.
+      PGDATA: /var/lib/postgresql/data
     volumes:
       - pgdata:/var/lib/postgresql/data
       - vault_agent_certs:/vault/certs:ro

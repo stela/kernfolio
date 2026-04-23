@@ -70,6 +70,7 @@ cd optimizer && uv run pytest tests/test_optimize.py  # Single test file
 - PostgreSQL 18, Liquibase migrations in `web/src/main/resources/db/changelog/`
 - Spring Data JDBC repositories (not JPA). UUIDs for PKs, `NUMERIC` for financial values, `JSONB` for nested structures.
 - `Instrument` entity uses `Persistable<String>` with manual `isNew` flag for upserts.
+- **`PGDATA` is set explicitly to `/var/lib/postgresql/data`** in `docker-compose.yml`. The official `postgres:18-alpine` image defaults `PGDATA` to `/var/lib/postgresql/18/docker`, which is outside our named `pgdata` volume mount — without the override, the cluster lands in Docker's anonymous VOLUME at `/var/lib/postgresql` and gets silently orphaned (and replaced with a fresh initdb) on every `docker compose down && up` cycle, leaving dangling volumes behind and re-triggering `AdminBootstrapRunner`. Don't remove the `PGDATA:` env line.
 
 ### Running the Application
 
@@ -105,3 +106,35 @@ Uses `docker-compose.yml` only. Vault runs with file storage (persistent); the o
 | `test` | `@SpringBootTest` with H2. | Disables Liquibase, scheduler; only used by `KernfolioApplicationTest`. |
 
 (Vault is not a profile — it's on by default in `application.yml`.)
+
+### Vault, PKI & database credentials
+
+Vault is the origin for three separate classes of secret material, all seeded by the one-shot `vault-init` container running `vault/init/setup.sh`:
+
+**PKI (two-tier chain):** root CA (`CN=Kernfolio Dev CA`) → intermediate CA (`CN=Kernfolio Dev Intermediate CA`) → leaf certs for each service (`app`, `optimizer`, `caddy`, `postgres`). Leaf files on the volume are written as **leaf + intermediate bundled** so servers present a full chain at handshake; trust anchors only need `ca.pem` (root). Trying to trust only `ca.pem` without the intermediate bundled in the leaf file gives `PKIX path building failed: unable to find valid certification path to requested target`.
+
+`setup.sh` is **idempotent** about root and intermediate: it reads the existing cert first and only generates if absent. Regenerating unconditionally is a trap because Vault's `pki/root/generate/internal` **appends** a new issuer rather than overwriting, and `default` stays pinned to the first-ever root. Subsequent `sign-intermediate` calls then sign with the stale default while `ca.pem` on disk gets overwritten by the newer root — the chain fragments silently, and services see `PKIX path validation failed: Path does not chain with any of the trust anchors`. Leaf certs are re-issued every run (short-lived, cheap).
+
+**KV v2 secrets:** `secret/kernfolio` holds app-wide settings (SMTP, session signing key, admin email). Fetched at boot by Spring Cloud Vault. Values are hardcoded in `setup.sh` for dev; in prod they're operator-managed.
+
+**Database credentials (two-stage):**
+1. **Superuser password** is bootstrapped by vault-init into `/vault/certs/pg_root_password` on the `vault_agent_certs` volume. Postgres reads it via `POSTGRES_PASSWORD_FILE` at initdb time, and `vault-db-init` reads the same file to authenticate as superuser when wiring up the database engine. `setup.sh` **reuses** the existing password file if non-empty — critical for restart safety.
+2. **Dynamic app roles** are issued on demand by Vault's database engine (`database/roles/app`). Each role is a real Postgres role with a Vault-generated name (`v-token-app-<id>`) and a lease of `default_ttl=1h` / `max_ttl=24h`. Spring Cloud Vault renews until `max_ttl`, then must rotate to a new role. **Laptop sleep** crossing `max_ttl` kills rotation (JVM scheduler frozen while wall-clock advances past the revoke window) — symptom is `FATAL: password authentication failed for user "v-token-app-..."`; fix is `docker compose restart web`.
+
+**Volumes and what lives where:**
+- `vault_data`: Vault's storage (file-backed in prod; in dev mode this volume exists but Vault ignores it — state is in-memory).
+- `vault_agent_certs`: `ca.pem`, all issued leaf certs, and `pg_root_password`.
+- `pgdata`: Postgres data directory, including the superuser password baked into the catalog at initdb time.
+
+**`vault_agent_certs` and `pgdata` are coupled**: the superuser password in `pgdata`'s catalog must equal the bytes in `pg_root_password`. Wiping one without wiping the other desyncs them — postgres boots with the old password while vault-init generates a fresh one, and `vault-db-init` then fails to authenticate as superuser so no dynamic app roles can ever be issued. If you must wipe one, wipe both, or reset the postgres superuser password in-place (start postgres alone, `docker exec -u postgres psql` via the `trust`-auth local socket in `pg_hba_mtls.conf`, `ALTER USER kernfolio PASSWORD '<same as the file>'`).
+
+**Dev vs. production differences:**
+- Dev (`docker-compose.dev.yml` overlay, `vault server -dev`): Vault state lives in memory, auto-unsealed, root token is `dev-root-token`. Any `docker compose restart vault` or `docker compose down` wipes PKI + KV + database engine config. Vault-init re-runs on next boot and re-seeds everything; because `setup.sh` is idempotent and reuses `pg_root_password` from the volume, a clean cycle is safe. Certs in `vault_agent_certs` persist across restarts and are reused.
+- Production (`docker-compose.yml` only, `vault server -config=/vault/config/vault.hcl`): Vault uses file storage (`vault_data` volume), persists across restarts, requires operator `vault operator init` + `vault operator unseal` on first boot. PKI + KV + database engine config survive restarts, so vault-init's idempotency guard short-circuits cleanly on re-runs.
+
+**Triaging a cert-related error after deploy:** compare container start times to volume file mtimes — any service started *before* the latest vault-init cert write is serving or trusting stale material.
+```bash
+docker inspect kernfolio-<svc>-1 --format '{{.State.StartedAt}}'
+docker run --rm -v kernfolio_vault_agent_certs:/v alpine stat -c '%y %n' /v/ca.pem /v/optimizer.pem
+```
+If timestamps disagree, `docker compose restart <svc>` fixes it.

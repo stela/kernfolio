@@ -89,7 +89,13 @@
 
         <div class="bg-white shadow rounded-lg overflow-hidden">
             <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-                <h2 class="text-lg font-medium">Positions</h2>
+                <div>
+                    <h2 class="text-lg font-medium">Positions</h2>
+                    <p id="fx-freshness" class="hidden mt-1 text-xs text-gray-500">
+                        FX rates as of <span id="fx-freshness-asof"></span>,
+                        cached <span id="fx-freshness-fetched"></span>
+                    </p>
+                </div>
                 <button type="button" id="add-position-btn"
                         data-new-row-url="/portfolios/${portfolio.id.toString()}/positions/new-row"
                         class="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-blue-700">

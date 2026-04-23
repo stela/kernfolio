@@ -23,7 +23,10 @@ services:
     ports:
       - "8000:8000"
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      # Server speaks TLS (see run_mtls.py). The cert's SAN is `optimizer`,
+      # not `localhost`, and client auth is not required, so we skip
+      # verification for the local health probe.
+      test: ["CMD-SHELL", "python -c \"import ssl, urllib.request; urllib.request.urlopen('https://localhost:8000/health', context=ssl._create_unverified_context())\""]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -34,6 +37,10 @@ services:
       SPRING_CLOUD_VAULT_TOKEN: "dev-root-token"
       BPL_JVM_THREAD_COUNT: 50
       JAVA_TOOL_OPTIONS: "-Xmx192m -Xss512k -XX:MaxMetaspaceSize=128m -XX:ReservedCodeCacheSize=48m -XX:MaxDirectMemorySize=10m"
+      # Diagnostics: surface Spring Security authentication decisions (bad
+      # credentials, missing user, etc.) which default to DEBUG level and are
+      # otherwise swallowed by the INFO root logger.
+      LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_SECURITY: DEBUG
     ports:
       - "8080:8080"
 

@@ -38,6 +38,17 @@
         </div>
     </nav>
 
+    <div id="global-error-banner" class="hidden mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 mt-4" role="alert" aria-live="polite">
+        <div class="rounded-lg border border-red-200 bg-red-50 p-4 flex items-start">
+            <svg class="h-5 w-5 text-red-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/>
+            </svg>
+            <p id="global-error-message" class="ml-3 text-sm text-red-800 flex-1"></p>
+            <button type="button" id="global-error-dismiss" class="ml-3 text-red-600 hover:text-red-800" aria-label="Dismiss">&times;</button>
+        </div>
+    </div>
+
     ${content}
 
     <footer class="mt-auto border-t border-gray-200 bg-white">
@@ -47,6 +58,7 @@
     </footer>
 
     <script src="/js/csrf-fetch.js" nonce="${nonce}"></script>
+    <script src="/js/flash.js" nonce="${nonce}"></script>
     @if(includeChartJs)
         <script src="/webjars/chart.js/4.5.1/dist/chart.umd.min.js" nonce="${nonce}"></script>
     @endif
