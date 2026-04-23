@@ -25,6 +25,7 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delet
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.model
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrlPattern
@@ -101,7 +102,7 @@ class PortfolioControllerTest {
         }
 
         @Test
-        fun `POST portfolios without CSRF returns 403`() {
+        fun `POST portfolios without CSRF redirects with sessionExpired flag`() {
             val testUser = createUser("alice")
             mockMvc.perform(
                 post("/portfolios")
@@ -109,7 +110,8 @@ class PortfolioControllerTest {
                     .param("name", "Test")
                     .param("baseCurrency", "EUR")
             )
-                .andExpect(status().isForbidden)
+                .andExpect(status().is3xxRedirection)
+                .andExpect(header().string("Location", org.hamcrest.Matchers.containsString("sessionExpired=1")))
         }
     }
 

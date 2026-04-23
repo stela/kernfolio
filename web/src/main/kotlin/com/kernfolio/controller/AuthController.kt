@@ -49,18 +49,24 @@ class AuthController(
         @RequestParam(required = false) error: String?,
         @RequestParam(required = false) logout: String?,
         @RequestParam(required = false) registered: String?,
+        @RequestParam(required = false) sessionExpired: String?,
         model: Model,
     ): String {
         model.addAttribute("error", error != null)
         model.addAttribute("logout", logout != null)
         model.addAttribute("registered", registered != null)
+        model.addAttribute("sessionExpired", sessionExpired != null)
         return "page/login"
     }
 
     @GetMapping("/register")
-    fun registerPage(model: Model): String {
+    fun registerPage(
+        @RequestParam(required = false) sessionExpired: String?,
+        model: Model,
+    ): String {
         model.addAttribute("registrationForm", RegistrationForm())
         model.addAttribute("selfRegistrationEnabled", featureFlagService.isGloballyEnabled("SELF_REGISTRATION"))
+        model.addAttribute("sessionExpired", sessionExpired != null)
         return "page/register"
     }
 

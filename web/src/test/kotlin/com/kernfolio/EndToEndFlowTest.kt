@@ -36,6 +36,7 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post 
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrlPattern
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.test.web.servlet.setup.DefaultMockMvcBuilder
 import org.springframework.test.web.servlet.setup.MockMvcBuilders
@@ -571,13 +572,17 @@ class EndToEndFlowTest {
     @Test
     @Order(27)
     fun `CSRF-less POST requests are rejected`() {
+        // CSRF-blocked HTML form POSTs redirect back to the form with
+        // ?sessionExpired=1 (see FormAccessDeniedHandler), so the page
+        // can show an inline banner instead of a raw 403 error.
         mockMvc.perform(
             mvcPost("/portfolios")
                 .session(userSession!!)
                 .param("name", "No CSRF")
                 .param("baseCurrency", "EUR")
         )
-            .andExpect(status().isForbidden)
+            .andExpect(status().is3xxRedirection)
+            .andExpect(header().string("Location", org.hamcrest.Matchers.containsString("sessionExpired=1")))
 
         mockMvc.perform(
             mvcPost("/portfolios/$portfolioId/positions")
@@ -587,14 +592,16 @@ class EndToEndFlowTest {
                 .param("currency", "USD")
                 .param("weightPct", "0.10")
         )
-            .andExpect(status().isForbidden)
+            .andExpect(status().is3xxRedirection)
+            .andExpect(header().string("Location", org.hamcrest.Matchers.containsString("sessionExpired=1")))
 
         mockMvc.perform(
             mvcPost("/portfolios/$portfolioId/optimize")
                 .session(userSession!!)
                 .param("algorithm", "black_litterman")
         )
-            .andExpect(status().isForbidden)
+            .andExpect(status().is3xxRedirection)
+            .andExpect(header().string("Location", org.hamcrest.Matchers.containsString("sessionExpired=1")))
 
         mockMvc.perform(
             delete("/portfolios/$portfolioId/positions/$lastPositionId")
@@ -606,7 +613,8 @@ class EndToEndFlowTest {
             mvcPost("/admin/users/invite")
                 .session(adminSession!!)
         )
-            .andExpect(status().isForbidden)
+            .andExpect(status().is3xxRedirection)
+            .andExpect(header().string("Location", org.hamcrest.Matchers.containsString("sessionExpired=1")))
     }
 
     @Test

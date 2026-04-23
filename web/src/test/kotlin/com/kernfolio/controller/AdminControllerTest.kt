@@ -23,6 +23,7 @@ import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.test.web.servlet.setup.DefaultMockMvcBuilder
@@ -196,13 +197,14 @@ class AdminControllerTest {
     inner class CsrfProtection {
 
         @Test
-        fun `POST invite without CSRF returns 403`() {
+        fun `POST invite without CSRF redirects with sessionExpired flag`() {
             val admin = createAdmin("admin8")
             mockMvc.perform(
                 post("/admin/users/invite")
                     .with(mockUserDetails(admin))
             )
-                .andExpect(status().isForbidden)
+                .andExpect(status().is3xxRedirection)
+                .andExpect(header().string("Location", org.hamcrest.Matchers.containsString("sessionExpired=1")))
         }
     }
 

@@ -22,6 +22,7 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.model
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.test.web.servlet.setup.DefaultMockMvcBuilder
 import org.springframework.test.web.servlet.setup.MockMvcBuilders
@@ -278,7 +279,8 @@ class AuthControllerTest {
                     .param("confirmPassword", "password123")
                     .param("inviteCode", "CODE")
             )
-                .andExpect(status().isForbidden)
+                .andExpect(status().is3xxRedirection)
+                .andExpect(header().string("Location", org.hamcrest.Matchers.containsString("sessionExpired=1")))
         }
     }
 

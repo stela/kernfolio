@@ -40,6 +40,7 @@ class SecurityConfig {
         }
         .exceptionHandling { exceptions ->
             exceptions.authenticationEntryPoint(ApiAwareAuthenticationEntryPoint())
+            exceptions.accessDeniedHandler(FormAccessDeniedHandler())
         }
         .headers { headers ->
             headers.referrerPolicy { it.policy(org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter.ReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN) }

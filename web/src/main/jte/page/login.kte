@@ -1,6 +1,7 @@
 @param error: Boolean
 @param logout: Boolean
 @param registered: Boolean
+@param sessionExpired: Boolean = false
 @param nonce: String
 @param csrfToken: String
 @param csrfHeaderName: String
@@ -30,6 +31,12 @@
             @if(registered)
                 <div class="mb-4 rounded-md bg-green-50 p-4">
                     <p class="text-sm text-green-700">Registration successful. Please sign in.</p>
+                </div>
+            @endif
+
+            @if(sessionExpired)
+                <div class="mb-4 rounded-md bg-amber-50 p-4">
+                    <p class="text-sm text-amber-700">Your session expired before the form was submitted. Please sign in again.</p>
                 </div>
             @endif
 
