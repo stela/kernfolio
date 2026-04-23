@@ -6,11 +6,9 @@ document.addEventListener('click', function (e) {
     var enabled = btn.dataset.enabled;
     var tr = btn.closest('tr');
 
-    fetch('/admin/users/' + userId + '/toggle', {
+    Http.text('/admin/users/' + userId + '/toggle', {
         method: 'POST',
-        headers: Csrf.headers({ 'Content-Type': 'application/x-www-form-urlencoded' }),
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: 'enabled=' + encodeURIComponent(enabled),
-    })
-        .then(function (r) { return r.text(); })
-        .then(function (html) { tr.outerHTML = html; });
+    }).then(function (html) { tr.outerHTML = html; });
 });

@@ -20,13 +20,16 @@ document.addEventListener('DOMContentLoaded', function () {
         e.preventDefault();
         if (spinner) spinner.classList.remove('hidden');
 
-        fetch(form.action, {
+        Http.fetch(form.action, {
             method: 'POST',
-            headers: Csrf.headers(),
             body: new FormData(form),
             redirect: 'follow',
         })
             .then(function (r) {
+                // On successful optimization, the server 302s to the run's
+                // results page; fetch auto-follows and we navigate the
+                // browser there. Session-expiry 401 is already handled by
+                // Http.fetch (reloads the page).
                 if (r.redirected) {
                     window.location.href = r.url;
                     return null;

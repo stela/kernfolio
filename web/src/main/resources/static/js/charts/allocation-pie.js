@@ -4,8 +4,7 @@ document.addEventListener('DOMContentLoaded', function () {
     var ids = ChartUtils.getIdsFromUrl();
     if (!ids) return;
 
-    fetch('/api/portfolios/' + ids.portfolioId + '/runs/' + ids.runId + '/allocation-data')
-        .then(function (r) { return r.json(); })
+    Http.json('/api/portfolios/' + ids.portfolioId + '/runs/' + ids.runId + '/allocation-data')
         .then(function (data) {
             var colors = generateColors(data.labels.length);
             new Chart(canvas, {

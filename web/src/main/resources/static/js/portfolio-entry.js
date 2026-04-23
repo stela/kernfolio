@@ -90,66 +90,59 @@ var PortfolioEntry = (function () {
     }
 
     function fetchEntryData() {
-        fetch('/api/portfolios/' + portfolioId + '/entry-data')
-            .then(FetchSession.assertNotExpired)
-            .then(function (r) { return r.json(); })
-            .then(function (data) {
-                baseCurrency = data.baseCurrency;
-                positions = data.positions;
+        Http.json('/api/portfolios/' + portfolioId + '/entry-data').then(function (data) {
+            baseCurrency = data.baseCurrency;
+            positions = data.positions;
 
-                var tickers = data.positions
-                    .filter(function (p) { return p.positionType === 'EQUITY'; })
-                    .map(function (p) { return p.ticker; });
+            var tickers = data.positions
+                .filter(function (p) { return p.positionType === 'EQUITY'; })
+                .map(function (p) { return p.ticker; });
 
-                if (tickers.length === 0) {
-                    loaded = true;
-                    updateDisplays();
-                    return;
-                }
+            if (tickers.length === 0) {
+                loaded = true;
+                updateDisplays();
+                return;
+            }
 
-                return fetch('/api/prices/latest?tickers=' + encodeURIComponent(tickers.join(',')))
-                    .then(FetchSession.assertNotExpired)
-                    .then(function (r) { return r.json(); })
-                    .then(function (priceData) {
-                        prices = priceData;
+            return Http.json('/api/prices/latest?tickers=' + encodeURIComponent(tickers.join(',')))
+                .then(function (priceData) {
+                    prices = priceData;
 
-                        var currencies = [];
-                        for (var i = 0; i < tickers.length; i++) {
-                            var t = tickers[i];
-                            if (priceData[t] && priceData[t].currency && priceData[t].currency !== baseCurrency) {
-                                if (currencies.indexOf(priceData[t].currency) === -1) currencies.push(priceData[t].currency);
-                            }
+                    var currencies = [];
+                    for (var i = 0; i < tickers.length; i++) {
+                        var t = tickers[i];
+                        if (priceData[t] && priceData[t].currency && priceData[t].currency !== baseCurrency) {
+                            if (currencies.indexOf(priceData[t].currency) === -1) currencies.push(priceData[t].currency);
                         }
-                        data.positions.forEach(function (p) {
-                            if (p.positionType === 'CASH' && p.currency !== baseCurrency) {
-                                if (currencies.indexOf(p.currency) === -1) currencies.push(p.currency);
-                            }
-                        });
+                    }
+                    data.positions.forEach(function (p) {
+                        if (p.positionType === 'CASH' && p.currency !== baseCurrency) {
+                            if (currencies.indexOf(p.currency) === -1) currencies.push(p.currency);
+                        }
+                    });
 
-                        if (currencies.length === 0) {
+                    if (currencies.length === 0) {
+                        loaded = true;
+                        checkReconciliation();
+                        updateDisplays();
+                        return;
+                    }
+
+                    return Http.json('/api/fx/latest?base=' + encodeURIComponent(baseCurrency) +
+                        '&currencies=' + encodeURIComponent(currencies.join(',')))
+                        .then(function (fxData) {
+                            resetFxTable(baseCurrency);
+                            Object.keys(fxData).forEach(function (cur) {
+                                if (fxData[cur] && fxData[cur].rate) {
+                                    fxTable.rates[cur] = fxData[cur];
+                                }
+                            });
                             loaded = true;
                             checkReconciliation();
                             updateDisplays();
-                            return;
-                        }
-
-                        return fetch('/api/fx/latest?base=' + encodeURIComponent(baseCurrency) +
-                            '&currencies=' + encodeURIComponent(currencies.join(',')))
-                            .then(FetchSession.assertNotExpired)
-                            .then(function (r) { return r.json(); })
-                            .then(function (fxData) {
-                                resetFxTable(baseCurrency);
-                                Object.keys(fxData).forEach(function (cur) {
-                                    if (fxData[cur] && fxData[cur].rate) {
-                                        fxTable.rates[cur] = fxData[cur];
-                                    }
-                                });
-                                loaded = true;
-                                checkReconciliation();
-                                updateDisplays();
-                            });
-                    });
-            });
+                        });
+                });
+        });
     }
 
     function resetFxTable(newBase) {
@@ -178,12 +171,7 @@ var PortfolioEntry = (function () {
         var base = fxTable.base;
         var url = '/api/fx/latest?base=' + encodeURIComponent(base) +
             '&currencies=' + encodeURIComponent(currency);
-        var p = fetch(url)
-            .then(FetchSession.assertNotExpired)
-            .then(function (r) {
-                if (!r.ok) throw new Error('HTTP ' + r.status);
-                return r.json();
-            })
+        var p = Http.json(url)
             .then(function (data) {
                 if (fxTable.base !== base) return;
                 var entry = data[currency];

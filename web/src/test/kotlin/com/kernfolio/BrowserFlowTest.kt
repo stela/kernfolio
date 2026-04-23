@@ -232,6 +232,11 @@ class BrowserFlowTest {
     fun `add positions via JS AJAX`() {
         navigateTo(portfolioPath!!)
 
+        // Save is blocked when the total portfolio value isn't set — weight_pct
+        // would be undefined and we'd persist 0%. Enter a total first.
+        val totalInput = driver.findElement(By.id("total-value-input"))
+        totalInput.sendKeys("100000")
+
         data class Pos(val ticker: String, val currency: String, val sector: String)
         val positions = listOf(
             Pos("GOOG", "USD", "Technology"),
@@ -568,6 +573,9 @@ class BrowserFlowTest {
         driver.findElement(By.cssSelector("button[type='submit']")).click()
         waitForPortfolioDetail()
         val xssPfPath = driver.currentUrl!!.replace(baseUrl(), "")
+
+        // Save is blocked without a total portfolio value set.
+        driver.findElement(By.id("total-value-input")).sendKeys("100000")
 
         // Add position with XSS payloads
         driver.findElement(By.id("add-position-btn")).click()

@@ -10,17 +10,12 @@
     var addBtn = document.getElementById('add-position-btn');
     if (addBtn) {
         addBtn.addEventListener('click', function () {
-            var url = addBtn.dataset.newRowUrl;
-            fetch(url, { headers: Csrf.headers() })
-                .then(FetchSession.assertNotExpired)
-                .then(function (r) { return r.text(); })
-                .then(function (html) {
-                    var empty = document.getElementById('empty-state');
-                    if (empty) empty.remove();
-                    tbody.insertAdjacentHTML('beforeend', html);
-                    initNewRow(tbody.lastElementChild);
-                })
-                .catch(function (e) { if (e.message !== 'session-expired') throw e; });
+            Http.text(addBtn.dataset.newRowUrl).then(function (html) {
+                var empty = document.getElementById('empty-state');
+                if (empty) empty.remove();
+                tbody.insertAdjacentHTML('beforeend', html);
+                initNewRow(tbody.lastElementChild);
+            });
         });
     }
 
@@ -46,10 +41,7 @@
             if (!confirm('Remove this position?')) return;
             var url = deleteBtn.dataset.deletePosition;
             var tr = deleteBtn.closest('tr');
-            fetch(url, { method: 'DELETE', headers: Csrf.headers() })
-                .then(FetchSession.assertNotExpired)
-                .then(function () { tr.remove(); })
-                .catch(function (e) { if (e.message !== 'session-expired') throw e; });
+            Http.fetch(url, { method: 'DELETE' }).then(function () { tr.remove(); });
         }
     });
 
@@ -121,19 +113,11 @@
                 if (sectorInput && sectorInput.value) formData.append('sector', sectorInput.value);
             }
 
-            return fetch(url, {
-                method: 'POST',
-                headers: Csrf.headers(),
-                body: formData,
-            });
-        })
-            .then(FetchSession.assertNotExpired)
-            .then(function (r) { return r.text(); })
-            .then(function (html) {
-                tr.outerHTML = html;
-                if (typeof PortfolioEntry !== 'undefined') PortfolioEntry.updateDisplays();
-            })
-            .catch(function (e) { if (e.message !== 'session-expired') throw e; });
+            return Http.text(url, { method: 'POST', body: formData });
+        }).then(function (html) {
+            tr.outerHTML = html;
+            if (typeof PortfolioEntry !== 'undefined') PortfolioEntry.updateDisplays();
+        });
     }
 
     function initNewRow(tr) {

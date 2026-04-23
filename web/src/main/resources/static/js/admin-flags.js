@@ -9,11 +9,9 @@ document.addEventListener('click', function (e) {
     var enabled = form.querySelector('input[name="enabled"]').checked;
     var rolloutPct = form.querySelector('input[name="rolloutPct"]').value;
 
-    fetch('/admin/flags/' + flagId, {
+    Http.text('/admin/flags/' + flagId, {
         method: 'POST',
-        headers: Csrf.headers({ 'Content-Type': 'application/x-www-form-urlencoded' }),
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: 'enabled=' + encodeURIComponent(enabled) + '&rolloutPct=' + encodeURIComponent(rolloutPct),
-    })
-        .then(function (r) { return r.text(); })
-        .then(function (html) { tr.outerHTML = html; });
+    }).then(function (html) { tr.outerHTML = html; });
 });

@@ -59,7 +59,13 @@ private class ApiAwareAuthenticationEntryPoint : AuthenticationEntryPoint {
         response: HttpServletResponse,
         authException: AuthenticationException,
     ) {
-        if (request.requestURI.startsWith("/api/")) {
+        // /api/* is the explicit JSON surface. X-Requested-With is what the
+        // client's Http wrapper stamps on every fetch — including the HTML
+        // partial endpoints (new-row, save, delete). Without this, fetch
+        // would follow the 302 to /login and splice the login page's HTML
+        // into wherever the caller inserted the response body.
+        val isAjax = "XMLHttpRequest" == request.getHeader("X-Requested-With")
+        if (isAjax || request.requestURI.startsWith("/api/")) {
             response.sendError(HttpServletResponse.SC_UNAUTHORIZED)
         } else {
             loginEntryPoint.commence(request, response, authException)

@@ -31,15 +31,13 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     // Step 1: Fetch discrete-data (weights, baseCurrency, tickers, fractional flags)
-    fetch('/api/portfolios/' + ids.portfolioId + '/runs/' + ids.runId + '/discrete-data')
-        .then(function (r) { return r.json(); })
+    Http.json('/api/portfolios/' + ids.portfolioId + '/runs/' + ids.runId + '/discrete-data')
         .then(function (discreteData) {
             var tickers = discreteData.tickers;
             if (tickers.length === 0) return;
 
             // Step 2: Fetch latest prices
-            return fetch('/api/prices/latest?tickers=' + encodeURIComponent(tickers.join(',')))
-                .then(function (r) { return r.json(); })
+            return Http.json('/api/prices/latest?tickers=' + encodeURIComponent(tickers.join(',')))
                 .then(function (priceData) {
                     // Collect currencies we need rates for
                     var currencies = [];
@@ -55,9 +53,8 @@ document.addEventListener('DOMContentLoaded', function () {
                     // Step 3: Fetch FX rates (base = portfolio baseCurrency)
                     var fxPromise;
                     if (currencies.length > 0) {
-                        fxPromise = fetch('/api/fx/latest?base=' + encodeURIComponent(discreteData.baseCurrency) +
-                            '&currencies=' + encodeURIComponent(currencies.join(',')))
-                            .then(function (r) { return r.json(); });
+                        fxPromise = Http.json('/api/fx/latest?base=' + encodeURIComponent(discreteData.baseCurrency) +
+                            '&currencies=' + encodeURIComponent(currencies.join(',')));
                     } else {
                         fxPromise = Promise.resolve({});
                     }
