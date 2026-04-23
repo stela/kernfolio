@@ -92,8 +92,7 @@
                 <div>
                     <h2 class="text-lg font-medium">Positions</h2>
                     <p id="fx-freshness" class="hidden mt-1 text-xs text-gray-500">
-                        Oldest loaded FX rate: as of <span id="fx-freshness-asof"></span>,
-                        cached <span id="fx-freshness-fetched"></span>
+                        Oldest loaded FX rate: as of <span id="fx-freshness-asof"></span>
                     </p>
                 </div>
                 <button type="button" id="add-position-btn"

@@ -12,13 +12,15 @@
         addBtn.addEventListener('click', function () {
             var url = addBtn.dataset.newRowUrl;
             fetch(url, { headers: Csrf.headers() })
+                .then(FetchSession.assertNotExpired)
                 .then(function (r) { return r.text(); })
                 .then(function (html) {
                     var empty = document.getElementById('empty-state');
                     if (empty) empty.remove();
                     tbody.insertAdjacentHTML('beforeend', html);
                     initNewRow(tbody.lastElementChild);
-                });
+                })
+                .catch(function (e) { if (e.message !== 'session-expired') throw e; });
         });
     }
 
@@ -45,7 +47,9 @@
             var url = deleteBtn.dataset.deletePosition;
             var tr = deleteBtn.closest('tr');
             fetch(url, { method: 'DELETE', headers: Csrf.headers() })
-                .then(function () { tr.remove(); });
+                .then(FetchSession.assertNotExpired)
+                .then(function () { tr.remove(); })
+                .catch(function (e) { if (e.message !== 'session-expired') throw e; });
         }
     });
 
@@ -123,11 +127,13 @@
                 body: formData,
             });
         })
+            .then(FetchSession.assertNotExpired)
             .then(function (r) { return r.text(); })
             .then(function (html) {
                 tr.outerHTML = html;
                 if (typeof PortfolioEntry !== 'undefined') PortfolioEntry.updateDisplays();
-            });
+            })
+            .catch(function (e) { if (e.message !== 'session-expired') throw e; });
     }
 
     function initNewRow(tr) {

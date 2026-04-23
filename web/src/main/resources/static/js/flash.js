@@ -19,3 +19,18 @@ var Flash = (function () {
 
     return { error: error, dismiss: dismiss };
 })();
+
+// Detect a session-expiry redirect (fetch follows the 302 to /login and
+// returns 200 with the login page HTML — if we naively stitched that into
+// the DOM we'd end up with a sign-in form inside a table row) and recover
+// by hard-reloading so the server can route the user to /login properly.
+var FetchSession = (function () {
+    function assertNotExpired(response) {
+        if (response.redirected || response.url.indexOf('/login') !== -1) {
+            window.location.reload();
+            throw new Error('session-expired');
+        }
+        return response;
+    }
+    return { assertNotExpired: assertNotExpired };
+})();

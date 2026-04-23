@@ -91,6 +91,7 @@ var PortfolioEntry = (function () {
 
     function fetchEntryData() {
         fetch('/api/portfolios/' + portfolioId + '/entry-data')
+            .then(FetchSession.assertNotExpired)
             .then(function (r) { return r.json(); })
             .then(function (data) {
                 baseCurrency = data.baseCurrency;
@@ -107,6 +108,7 @@ var PortfolioEntry = (function () {
                 }
 
                 return fetch('/api/prices/latest?tickers=' + encodeURIComponent(tickers.join(',')))
+                    .then(FetchSession.assertNotExpired)
                     .then(function (r) { return r.json(); })
                     .then(function (priceData) {
                         prices = priceData;
@@ -133,6 +135,7 @@ var PortfolioEntry = (function () {
 
                         return fetch('/api/fx/latest?base=' + encodeURIComponent(baseCurrency) +
                             '&currencies=' + encodeURIComponent(currencies.join(',')))
+                            .then(FetchSession.assertNotExpired)
                             .then(function (r) { return r.json(); })
                             .then(function (fxData) {
                                 resetFxTable(baseCurrency);
@@ -176,6 +179,7 @@ var PortfolioEntry = (function () {
         var url = '/api/fx/latest?base=' + encodeURIComponent(base) +
             '&currencies=' + encodeURIComponent(currency);
         var p = fetch(url)
+            .then(FetchSession.assertNotExpired)
             .then(function (r) {
                 if (!r.ok) throw new Error('HTTP ' + r.status);
                 return r.json();
@@ -293,35 +297,32 @@ var PortfolioEntry = (function () {
         var container = document.getElementById('fx-freshness');
         if (!container) return;
         var asOfEl = document.getElementById('fx-freshness-asof');
-        var fetchedEl = document.getElementById('fx-freshness-fetched');
 
-        // Pick the oldest entry across all loaded rates so the "as of" we show
-        // is never optimistic.
-        var oldest = null;
+        // Pick the oldest asOf across all loaded rates so the "as of" we show
+        // is never optimistic. fetchedAt (when we cached it locally) is not
+        // shown: it's operational metadata, not a property of the rate itself
+        // — the rate is "the ECB rate for day X" no matter when we pulled it.
+        var oldestAsOf = null;
         Object.keys(fxTable.rates).forEach(function (cur) {
             var e = fxTable.rates[cur];
-            if (!e || !e.fetchedAt) return;
-            if (!oldest || e.fetchedAt < oldest.fetchedAt) oldest = e;
+            if (!e || !e.asOf) return;
+            if (!oldestAsOf || e.asOf < oldestAsOf) oldestAsOf = e.asOf;
         });
 
-        if (!oldest) {
+        if (!oldestAsOf) {
             container.classList.add('hidden');
             return;
         }
 
-        // asOf is a date-only string like "2026-04-20" — parse as UTC midnight
-        // so it renders the same calendar date regardless of local zone.
+        // asOf is a plain ECB calendar date ("2026-04-22"). Render it in
+        // Europe/Berlin so the label matches ECB's publication-day notion;
+        // locally-formatted per user locale, but the day-of-month is stable
+        // across the globe because the underlying date has no timezone.
         if (asOfEl) {
-            var asOfDate = new Date(oldest.asOf + 'T00:00:00Z');
+            var asOfDate = new Date(oldestAsOf + 'T12:00:00Z');
             asOfEl.textContent = asOfDate.toLocaleDateString(undefined, {
-                year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC',
+                year: 'numeric', month: 'short', day: 'numeric', timeZone: 'Europe/Berlin',
             });
-        }
-        // fetchedAt is an ISO instant (Z suffix) — Date renders it in the
-        // browser's local timezone.
-        if (fetchedEl) {
-            var fetchedDate = new Date(oldest.fetchedAt);
-            fetchedEl.textContent = fetchedDate.toLocaleString();
         }
         container.classList.remove('hidden');
     }
