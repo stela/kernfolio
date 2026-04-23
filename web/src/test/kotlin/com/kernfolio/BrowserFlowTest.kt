@@ -755,6 +755,88 @@ class BrowserFlowTest {
     }
 
     @Test
+    @Order(37)
+    fun `total portfolio value auto-bumps and allocation progress reflects positions`() {
+        val today = LocalDate.now()
+        instrumentRepository.save(Instrument("PGRSEU", "Progress Test EUR", "TEST", "EUR", "Test", BigDecimal("0")))
+        instrumentRepository.save(Instrument("PGRSE2", "Progress Test EUR 2", "TEST", "EUR", "Test", BigDecimal("0")))
+        cachedPriceRepository.upsert("PGRSEU", today, BigDecimal("100.00"), "EUR")
+        cachedPriceRepository.upsert("PGRSE2", today, BigDecimal("100.00"), "EUR")
+
+        navigateTo("/portfolios/new")
+        fillField("name", "Progress Meter Test")
+        fillField("baseCurrency", "EUR")
+        driver.findElement(By.cssSelector("button[type='submit']")).click()
+        waitForPortfolioDetail()
+        val pfPath = driver.currentUrl!!.replace(baseUrl(), "")
+
+        val totalInput = driver.findElement(By.id("total-value-input"))
+
+        // No total entered — saving a position should auto-bump the total
+        // to the position's base-currency value.
+        driver.findElement(By.id("add-position-btn")).click()
+        var newRow = wait.until(
+            ExpectedConditions.presenceOfElementLocated(By.cssSelector("tr[data-new-row]"))
+        )
+        Select(newRow.findElement(By.cssSelector(".js-pos-type"))).selectByValue("CASH")
+        val currField = newRow.findElement(By.cssSelector(".js-currency"))
+        currField.clear()
+        currField.sendKeys("EUR")
+        newRow.findElement(By.cssSelector(".js-cash-amount")).sendKeys("500")
+        newRow.findElement(By.cssSelector(".js-save-position")).click()
+        wait.until(ExpectedConditions.stalenessOf(newRow))
+
+        wait.until { (totalInput.getAttribute("value") ?: "") == "500" }
+        val progress1 = driver.findElement(By.id("allocation-progress-text"))
+        assertThat(progress1.text).contains("100% allocated")
+
+        // Manually set a larger total so the next position lands below 100%
+        // and the progress meter shows a non-zero "remaining".
+        totalInput.clear()
+        totalInput.sendKeys("2000")
+
+        driver.findElement(By.id("add-position-btn")).click()
+        newRow = wait.until(
+            ExpectedConditions.presenceOfElementLocated(By.cssSelector("tr[data-new-row]"))
+        )
+        newRow.findElement(By.cssSelector(".js-ticker-input")).sendKeys("PGRSEU")
+        newRow.findElement(By.cssSelector(".js-shares")).sendKeys("5")  // 5 × 100 EUR = 500 EUR
+        newRow.findElement(By.cssSelector(".js-save-position")).click()
+        wait.until(ExpectedConditions.stalenessOf(newRow))
+
+        // Filled is now 500 EUR cash + 500 EUR equity = 1000 of 2000.
+        wait.until {
+            val t = driver.findElement(By.id("allocation-progress-text")).text
+            t.contains("50.00%") && t.contains("remaining")
+        }
+        val progress2 = driver.findElement(By.id("allocation-progress-text")).text
+        assertThat(progress2).contains("1000.00 EUR")
+
+        // Over-allocating via a new equity position should bump the total up
+        // again so filled matches.
+        driver.findElement(By.id("add-position-btn")).click()
+        newRow = wait.until(
+            ExpectedConditions.presenceOfElementLocated(By.cssSelector("tr[data-new-row]"))
+        )
+        // Different ticker so this is an ADD, not an overwrite of the 5-share
+        // PGRSEU position from the previous step. 20 × 100 = 2000 EUR on top
+        // of the existing 1000 EUR → 3000 EUR total.
+        newRow.findElement(By.cssSelector(".js-ticker-input")).sendKeys("PGRSE2")
+        newRow.findElement(By.cssSelector(".js-shares")).sendKeys("20")
+        newRow.findElement(By.cssSelector(".js-save-position")).click()
+        wait.until(ExpectedConditions.stalenessOf(newRow))
+
+        wait.until { (totalInput.getAttribute("value") ?: "").startsWith("3000") }
+        assertThat(driver.findElement(By.id("allocation-progress-text")).text)
+            .contains("100% allocated")
+
+        // Clean up
+        driver.findElement(By.cssSelector("form[data-confirm] button[type='submit']")).click()
+        driver.switchTo().alert().accept()
+        waitForUrl("/dashboard")
+    }
+
+    @Test
     @Order(90)
     fun `no browser console errors from entire test run`() {
         // Navigate to a page to ensure logs are flushed

@@ -55,19 +55,6 @@
             }
             return;
         }
-        // Without a total, weight_pct can't be computed — saving now would
-        // persist 0% to the DB, which is indistinguishable from a legitimate
-        // zero-weight position. Block and point the user at the input.
-        var totalInput = document.getElementById('total-value-input');
-        var total = totalInput ? parseFloat(totalInput.value) : 0;
-        if (!(total > 0)) {
-            if (typeof Flash !== 'undefined') {
-                Flash.error('Enter the total portfolio value before saving positions — otherwise weights are undefined.');
-            }
-            if (totalInput) totalInput.focus();
-            return;
-        }
-
         // Ensure FX (and, for equities, price) are loaded before computing
         // weight — otherwise we'd persist 0% for a non-base-currency position
         // or a freshly-added ticker whose price isn't in the client's map yet.
@@ -93,6 +80,10 @@
                     var sharesInput = tr.querySelector('.js-shares');
                     if (sharesInput && ticker) PortfolioEntry.updateShares(ticker, sharesInput.value, currency);
                 }
+                // If the incoming position pushes the filled sum above the
+                // declared total (or the user never set a total), bump total
+                // up so weight_pct lands in a sane range.
+                PortfolioEntry.ensureTotalCoversPositions();
                 var weightPct = PortfolioEntry.computeWeightPct(ticker, posType, currency);
                 var costBasisPct = PortfolioEntry.computeCostBasisPct(ticker, currency);
                 var wpField = tr.querySelector('[name="weightPct"]');

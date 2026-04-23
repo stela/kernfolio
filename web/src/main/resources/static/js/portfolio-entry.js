@@ -253,6 +253,72 @@ var PortfolioEntry = (function () {
         return cashInBaseCurrency(currency, h.costBasis) / totalValue;
     }
 
+    function filledInBaseCurrency() {
+        // Sum of every position's value expressed in the portfolio's base
+        // currency. Positions for currencies whose FX rate isn't loaded yet
+        // contribute 0 — the aggregate will jump once ensureFxRate resolves
+        // and updateDisplays re-runs. Same for equities whose price isn't
+        // cached yet.
+        var sum = 0;
+        Object.keys(cash).forEach(function (cur) {
+            var amount = (cash[cur] && cash[cur].amount) || 0;
+            sum += cashInBaseCurrency(cur, amount);
+        });
+        Object.keys(holdings).forEach(function (ticker) {
+            var h = holdings[ticker];
+            if (!h || !h.shares) return;
+            sum += h.shares * priceInBaseCurrency(ticker);
+        });
+        return sum;
+    }
+
+    function ensureTotalCoversPositions() {
+        // Called right before we compute a weight for persistence. If the
+        // user hasn't entered a total, or the sum of positions has grown
+        // past what they entered, auto-bump the total to match. Prevents
+        // saving nonsense weights (0% or >100%) and gives the user a sane
+        // default if they never bothered to set a total up-front.
+        var filled = filledInBaseCurrency();
+        if (filled > totalValue + 0.005) {  // small tolerance for fp noise
+            totalValue = Math.round(filled * 100) / 100;
+            var input = document.getElementById('total-value-input');
+            if (input) input.value = String(totalValue);
+            saveToLocalStorage();
+            return true;
+        }
+        return false;
+    }
+
+    function updateAllocationProgress() {
+        var container = document.getElementById('allocation-progress');
+        var bar = document.getElementById('allocation-progress-bar');
+        var text = document.getElementById('allocation-progress-text');
+        if (!container || !bar || !text) return;
+        if (totalValue <= 0) {
+            container.classList.add('hidden');
+            return;
+        }
+        var filled = filledInBaseCurrency();
+        var pct = (filled / totalValue) * 100;
+        bar.style.width = Math.min(Math.max(pct, 0), 100).toFixed(2) + '%';
+        if (filled <= 0) {
+            text.textContent = 'No positions saved yet — 0% allocated of ' +
+                totalValue.toFixed(2) + ' ' + baseCurrency + '.';
+        } else if (Math.abs(filled - totalValue) < 0.01) {
+            text.textContent = '100% allocated (' + totalValue.toFixed(2) + ' ' + baseCurrency + ').';
+        } else if (filled < totalValue) {
+            var remaining = totalValue - filled;
+            var remainingPct = 100 - pct;
+            text.textContent = pct.toFixed(2) + '% allocated — ' +
+                remaining.toFixed(2) + ' ' + baseCurrency + ' (' + remainingPct.toFixed(2) + '%) remaining.';
+        } else {
+            // Shouldn't happen post-save because we auto-bump, but covers
+            // transient in-flight states.
+            text.textContent = 'Over-allocated by ' + (filled - totalValue).toFixed(2) + ' ' + baseCurrency + '.';
+        }
+        container.classList.remove('hidden');
+    }
+
     function formatWeight(ticker, positionType, currency) {
         // Without a total, weights are undefined — not zero. Showing "0.00%"
         // when the user hasn't entered their portfolio total yet is actively
@@ -298,6 +364,7 @@ var PortfolioEntry = (function () {
         });
 
         updateFreshnessIndicator();
+        updateAllocationProgress();
 
         // Show/hide recovery prompt
         var recoveryPrompt = document.getElementById('recovery-prompt');
@@ -425,5 +492,6 @@ var PortfolioEntry = (function () {
         updateDisplays: updateDisplays,
         ensureFxRate: ensureFxRate,
         ensurePrice: ensurePrice,
+        ensureTotalCoversPositions: ensureTotalCoversPositions,
     };
 })();
