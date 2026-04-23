@@ -112,4 +112,29 @@ class FxRateControllerTest {
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.XYZ").isEmpty())
     }
+
+    @Test
+    fun `rejects malformed currency code with 400`() {
+        val user = createUser()
+        mockMvc.perform(
+            get("/api/fx/latest")
+                .param("base", "EUR")
+                .param("currencies", "EU")
+                .with(mockUserDetails(user))
+        )
+            .andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.error").value(org.hamcrest.Matchers.containsString("ISO 4217")))
+    }
+
+    @Test
+    fun `rejects non-alphabetic currency code with 400`() {
+        val user = createUser()
+        mockMvc.perform(
+            get("/api/fx/latest")
+                .param("base", "EUR")
+                .param("currencies", "123")
+                .with(mockUserDetails(user))
+        )
+            .andExpect(status().isBadRequest)
+    }
 }

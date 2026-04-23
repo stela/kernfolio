@@ -52,7 +52,13 @@
     function savePosition(tr) {
         var url = tr.dataset.submitUrl;
         var posType = tr.querySelector('[name="positionType"]').value;
-        var currency = tr.querySelector('.js-currency').value;
+        var currency = (tr.querySelector('.js-currency').value || '').trim().toUpperCase();
+        if (!/^[A-Z]{3}$/.test(currency)) {
+            if (typeof Flash !== 'undefined') {
+                Flash.error('Currency must be a three-letter ISO code (e.g. EUR, USD). Got: "' + currency + '"');
+            }
+            return;
+        }
 
         // Ensure the FX rate for this currency is loaded before we compute the
         // weight — otherwise we'd persist 0% for a non-base-currency position.
@@ -152,6 +158,16 @@
 
         typeSelect.addEventListener('change', updateVisibility);
         currencyInput.addEventListener('input', function () {
+            // Normalise to upper-case in place so the displayed value matches
+            // what we submit and what the server stores. Without this, typing
+            // "eur" would ask the server for an EUR/eur cross-rate — which is
+            // the same currency, but the case-sensitive short-circuit misses.
+            var upper = currencyInput.value.toUpperCase();
+            if (currencyInput.value !== upper) {
+                var pos = currencyInput.selectionStart;
+                currencyInput.value = upper;
+                currencyInput.setSelectionRange(pos, pos);
+            }
             updateCashTicker();
             scheduleFxFetch();
         });

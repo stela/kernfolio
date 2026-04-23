@@ -78,7 +78,13 @@ class FxRateService(
         return eurTarget.divide(eurBase, 8, java.math.RoundingMode.HALF_UP)
     }
 
-    fun getLatestCrossRateInfoOrFetch(base: String, target: String): CrossRateInfo? {
+    fun getLatestCrossRateInfoOrFetch(rawBase: String, rawTarget: String): CrossRateInfo? {
+        // Currency codes are ISO 4217 — always upper-case. Normalising at the
+        // entry point lets callers (HTTP controller, test code, future
+        // callers) be lax without breaking the same-currency short-circuit or
+        // producing bogus Frankfurter requests like "EUReur".
+        val base = rawBase.trim().uppercase()
+        val target = rawTarget.trim().uppercase()
         buildCrossRateInfo(base, target)?.let { return it }
         val missing = listOf(base, target).filter { it != BASE_CURRENCY }.distinct()
         if (missing.isEmpty()) return buildCrossRateInfo(base, target)

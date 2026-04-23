@@ -192,4 +192,15 @@ class FxRateServiceTest {
 
         assertEquals(Instant.EPOCH, info.fetchedAt)
     }
+
+    @Test
+    fun `getLatestCrossRateInfoOrFetch normalises currency codes and short-circuits same-currency`() {
+        // Lowercase or mixed-case input must not bypass the identity short-
+        // circuit or produce bogus Frankfurter lookups like "EUReur".
+        val info = service.getLatestCrossRateInfoOrFetch("eur", " EuR ")!!
+
+        assertEquals(BigDecimal.ONE, info.rate)
+        verify(exactly = 0) { frankfurterClient.fetchFxRates(any(), any(), any(), any()) }
+        verify(exactly = 0) { cachedFxRateRepository.findLatestByCurrencyPair(any()) }
+    }
 }

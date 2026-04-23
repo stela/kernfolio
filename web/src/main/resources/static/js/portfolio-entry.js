@@ -164,6 +164,10 @@ var PortfolioEntry = (function () {
 
     function ensureFxRate(currency) {
         resetFxTable(baseCurrency);
+        // Defensive: callers may pass the user's raw input; normalise so a
+        // stray lowercase or surrounding whitespace can't sneak past the
+        // same-currency short-circuit below.
+        currency = (currency || '').trim().toUpperCase();
         if (!currency || currency === fxTable.base) return Promise.resolve();
         if (fxTable.rates[currency]) return Promise.resolve();
         if (pendingFxFetches[currency]) return pendingFxFetches[currency];
