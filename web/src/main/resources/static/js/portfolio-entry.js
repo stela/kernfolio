@@ -20,6 +20,7 @@ var PortfolioEntry = (function () {
     // cached it (ISO-8601 with Z suffix, rendered in browser-local time).
     var fxTable = { base: null, rates: {} };
     var pendingFxFetches = {};
+    var pendingPriceFetches = {};
     var loaded = false;
 
     function init() {
@@ -183,11 +184,37 @@ var PortfolioEntry = (function () {
                         ' exchange rate. ' + currency + ' positions will show 0% until the rate is available.');
                 }
             })
-            .catch(function (err) {
-                Flash.error('Failed to fetch ' + base + '/' + currency + ' exchange rate: ' + err.message);
-            })
             .finally(function () { delete pendingFxFetches[currency]; });
         pendingFxFetches[currency] = p;
+        return p;
+    }
+
+    function ensurePrice(ticker) {
+        // Equity counterpart to ensureFxRate: when a ticker is added after
+        // page load, fetch its price (and, if denominated in a non-base
+        // currency, the relevant FX rate) on demand. Without this, the
+        // weight display for a freshly-added equity stays at 0%.
+        ticker = (ticker || '').trim();
+        if (!ticker) return Promise.resolve();
+        if (prices[ticker] && prices[ticker].close) return Promise.resolve();
+        if (pendingPriceFetches[ticker]) return pendingPriceFetches[ticker];
+
+        var p = Http.json('/api/prices/latest?tickers=' + encodeURIComponent(ticker))
+            .then(function (data) {
+                var entry = data[ticker];
+                if (!entry || !entry.close) {
+                    Flash.error('No price available for ' + ticker +
+                        '. Weight will show 0% until a price is cached.');
+                    return;
+                }
+                prices[ticker] = entry;
+                if (entry.currency && entry.currency !== baseCurrency) {
+                    return ensureFxRate(entry.currency).then(updateDisplays);
+                }
+                updateDisplays();
+            })
+            .finally(function () { delete pendingPriceFetches[ticker]; });
+        pendingPriceFetches[ticker] = p;
         return p;
     }
 
@@ -397,5 +424,6 @@ var PortfolioEntry = (function () {
         updateCashAmount: updateCashAmount,
         updateDisplays: updateDisplays,
         ensureFxRate: ensureFxRate,
+        ensurePrice: ensurePrice,
     };
 })();

@@ -1,4 +1,5 @@
 @import com.kernfolio.domain.Position
+@import java.util.Locale
 @import java.util.UUID
 
 @param position: Position
@@ -15,10 +16,10 @@
         @elseif(position.positionType == "CASH")
             <span data-cash-currency="${position.currency}"></span>
         @else
-            ${"%.2f".format(position.weightPct.toDouble() * 100)}%
+            ${String.format(Locale.ROOT, "%.2f", position.weightPct.toDouble() * 100)}%
         @endif
     </td>
-    <td class="px-4 py-3 text-sm text-right">${"%.2f".format(position.weightPct.toDouble() * 100)}%</td>
+    <td class="px-4 py-3 text-sm text-right">${String.format(Locale.ROOT, "%.2f", position.weightPct.toDouble() * 100)}%</td>
     <td class="px-4 py-3 text-sm text-gray-500">${position.sector}</td>
     <td class="px-4 py-3 text-sm text-right">
         <button type="button"

@@ -679,6 +679,82 @@ class BrowserFlowTest {
     }
 
     @Test
+    @Order(36)
+    fun `weight display covers cash and equity in base and foreign currency`() {
+        // Seed independent instruments + FX so this test doesn't depend on
+        // the optimization suite's data (and can't be poisoned by it).
+        val today = LocalDate.now()
+        cachedFxRateRepository.upsert("EURSEK", today, BigDecimal("11.00000000"))
+        instrumentRepository.save(Instrument("WTSTEU", "Weight Test EUR", "TEST", "EUR", "Test", BigDecimal("0")))
+        instrumentRepository.save(Instrument("WTSTSE", "Weight Test SEK", "TEST", "SEK", "Test", BigDecimal("0")))
+        cachedPriceRepository.upsert("WTSTEU", today, BigDecimal("100.00"), "EUR")
+        cachedPriceRepository.upsert("WTSTSE", today, BigDecimal("1100.00"), "SEK")
+
+        navigateTo("/portfolios/new")
+        fillField("name", "Weight Display Test")
+        fillField("baseCurrency", "EUR")
+        driver.findElement(By.cssSelector("button[type='submit']")).click()
+        waitForPortfolioDetail()
+        val pfPath = driver.currentUrl!!.replace(baseUrl(), "")
+
+        driver.findElement(By.id("total-value-input")).sendKeys("100000")
+
+        // Each case is rigged to land at exactly 10.00% so an exact string
+        // match suffices. Covers the four quadrants: cash × equity × base ×
+        // foreign currency. EURSEK=11.00, so SEK amounts/prices are 11× the
+        // EUR equivalent.
+        data class Case(
+            val type: String,
+            val ticker: String,
+            val currency: String,
+            val amountOrShares: String,
+            val rowClue: String,
+        )
+        val cases = listOf(
+            Case("CASH", "", "EUR", "10000", "CASH.EUR"),
+            Case("CASH", "", "SEK", "110000", "CASH.SEK"),
+            Case("EQUITY", "WTSTEU", "EUR", "100", "WTSTEU"),
+            Case("EQUITY", "WTSTSE", "SEK", "100", "WTSTSE"),
+        )
+
+        for (c in cases) {
+            driver.findElement(By.id("add-position-btn")).click()
+            val newRow = wait.until(
+                ExpectedConditions.presenceOfElementLocated(By.cssSelector("tr[data-new-row]"))
+            )
+            Select(newRow.findElement(By.cssSelector(".js-pos-type"))).selectByValue(c.type)
+
+            val currField = newRow.findElement(By.cssSelector(".js-currency"))
+            currField.clear()
+            currField.sendKeys(c.currency)
+
+            if (c.type == "EQUITY") {
+                newRow.findElement(By.cssSelector(".js-ticker-input")).sendKeys(c.ticker)
+                newRow.findElement(By.cssSelector(".js-shares")).sendKeys(c.amountOrShares)
+            } else {
+                newRow.findElement(By.cssSelector(".js-cash-amount")).sendKeys(c.amountOrShares)
+            }
+
+            newRow.findElement(By.cssSelector(".js-save-position")).click()
+            wait.until(ExpectedConditions.stalenessOf(newRow))
+
+            val savedRow = wait.until(
+                ExpectedConditions.presenceOfElementLocated(
+                    By.xpath("//tr[.//td[contains(normalize-space(), '${c.rowClue}')]]")
+                )
+            )
+            assertThat(savedRow.text)
+                .`as`("weight for ${c.type} ${c.currency} (${c.rowClue})")
+                .contains("10.00%")
+        }
+
+        // Clean up so this portfolio doesn't clutter later tests.
+        driver.findElement(By.cssSelector("form[data-confirm] button[type='submit']")).click()
+        driver.switchTo().alert().accept()
+        waitForUrl("/dashboard")
+    }
+
+    @Test
     @Order(90)
     fun `no browser console errors from entire test run`() {
         // Navigate to a page to ensure logs are flushed

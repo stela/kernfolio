@@ -68,11 +68,18 @@
             return;
         }
 
-        // Ensure the FX rate for this currency is loaded before we compute the
-        // weight — otherwise we'd persist 0% for a non-base-currency position.
-        var ready = typeof PortfolioEntry !== 'undefined' && PortfolioEntry.ensureFxRate
-            ? PortfolioEntry.ensureFxRate(currency)
-            : Promise.resolve();
+        // Ensure FX (and, for equities, price) are loaded before computing
+        // weight — otherwise we'd persist 0% for a non-base-currency position
+        // or a freshly-added ticker whose price isn't in the client's map yet.
+        var tickerForFetch = posType === 'EQUITY'
+            ? tr.querySelector('.js-ticker-input').value.trim()
+            : null;
+        var prereqs = [];
+        if (typeof PortfolioEntry !== 'undefined') {
+            prereqs.push(PortfolioEntry.ensureFxRate(currency));
+            if (tickerForFetch) prereqs.push(PortfolioEntry.ensurePrice(tickerForFetch));
+        }
+        var ready = Promise.all(prereqs);
 
         ready.then(function () {
             if (typeof PortfolioEntry !== 'undefined') {
@@ -124,7 +131,9 @@
         if (!tr) return;
         var typeSelect = tr.querySelector('.js-pos-type');
         var currencyInput = tr.querySelector('.js-currency');
+        var tickerInput = tr.querySelector('.js-ticker-input');
         var fxFetchTimer = null;
+        var priceFetchTimer = null;
 
         function updateVisibility() {
             var isCash = typeSelect.value === 'CASH';
@@ -158,7 +167,19 @@
             }, 300);
         }
 
+        function schedulePriceFetch() {
+            if (typeof PortfolioEntry === 'undefined' || !PortfolioEntry.ensurePrice) return;
+            if (!tickerInput || typeSelect.value !== 'EQUITY') return;
+            var t = tickerInput.value.trim();
+            if (!t) return;
+            if (priceFetchTimer) clearTimeout(priceFetchTimer);
+            priceFetchTimer = setTimeout(function () {
+                PortfolioEntry.ensurePrice(t).then(updateWeight);
+            }, 400);
+        }
+
         typeSelect.addEventListener('change', updateVisibility);
+        if (tickerInput) tickerInput.addEventListener('input', schedulePriceFetch);
         currencyInput.addEventListener('input', function () {
             // Normalise to upper-case in place so the displayed value matches
             // what we submit and what the server stores. Without this, typing
