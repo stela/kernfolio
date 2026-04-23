@@ -59,6 +59,18 @@
             }
             return;
         }
+        // Without a total, weight_pct can't be computed — saving now would
+        // persist 0% to the DB, which is indistinguishable from a legitimate
+        // zero-weight position. Block and point the user at the input.
+        var totalInput = document.getElementById('total-value-input');
+        var total = totalInput ? parseFloat(totalInput.value) : 0;
+        if (!(total > 0)) {
+            if (typeof Flash !== 'undefined') {
+                Flash.error('Enter the total portfolio value before saving positions — otherwise weights are undefined.');
+            }
+            if (totalInput) totalInput.focus();
+            return;
+        }
 
         // Ensure the FX rate for this currency is loaded before we compute the
         // weight — otherwise we'd persist 0% for a non-base-currency position.

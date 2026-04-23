@@ -235,6 +235,10 @@ var PortfolioEntry = (function () {
     }
 
     function formatWeight(ticker, positionType, currency) {
+        // Without a total, weights are undefined — not zero. Showing "0.00%"
+        // when the user hasn't entered their portfolio total yet is actively
+        // misleading ("did my 200 EUR turn into nothing?").
+        if (totalValue <= 0) return '—';
         var w = computeWeightPct(ticker, positionType, currency);
         return (w * 100).toFixed(2) + '%';
     }
