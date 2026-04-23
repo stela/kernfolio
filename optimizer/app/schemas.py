@@ -30,6 +30,27 @@ class PriceFetchResponse(BaseModel):
     errors: dict[str, str]
 
 
+# ── /search-tickers ─────────────────────────────────────────────────
+
+
+class TickerSearchRequest(BaseModel):
+    query: str
+    limit: int = 10
+
+
+class TickerSearchResult(BaseModel):
+    symbol: str
+    shortname: str | None = None
+    longname: str | None = None
+    exchange: str | None = None
+    quote_type: str | None = None
+    currency: str | None = None
+
+
+class TickerSearchResponse(BaseModel):
+    results: list[TickerSearchResult]
+
+
 # ── /fetch-fx-rates ──────────────────────────────────────────────────
 
 

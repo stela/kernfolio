@@ -19,12 +19,24 @@
         });
     }
 
+    // Snapshot of the original saved-row HTML, keyed by the edit-row's
+    // submit URL, so Cancel can restore the row exactly as it was
+    // rendered by the server — no extra round-trip needed.
+    var originalRowHtml = {};
+
     // --- Delegated events on tbody ---
     tbody.addEventListener('click', function (e) {
         // Cancel button
         var cancelBtn = e.target.closest('.js-cancel-row');
         if (cancelBtn) {
-            cancelBtn.closest('tr').remove();
+            var tr = cancelBtn.closest('tr');
+            var submitUrl = tr.dataset.submitUrl;
+            if (tr.hasAttribute('data-edit-row') && originalRowHtml[submitUrl]) {
+                tr.outerHTML = originalRowHtml[submitUrl];
+                delete originalRowHtml[submitUrl];
+            } else {
+                tr.remove();
+            }
             return;
         }
 
@@ -35,18 +47,47 @@
             return;
         }
 
+        // Edit position button
+        var editBtn = e.target.closest('[data-edit-position]');
+        if (editBtn) {
+            var editUrl = editBtn.dataset.editPosition;
+            var row = editBtn.closest('tr');
+            Http.text(editUrl).then(function (html) {
+                // Stash the original saved-row so Cancel can restore it.
+                // The edit-row template sets data-submit-url to the
+                // position's canonical URL — we key on that.
+                var tmp = document.createElement('tbody');
+                tmp.innerHTML = html;
+                var newRow = tmp.firstElementChild;
+                if (!newRow) return;
+                originalRowHtml[newRow.dataset.submitUrl] = row.outerHTML;
+                row.replaceWith(newRow);
+                initNewRow(newRow);
+            });
+            return;
+        }
+
         // Delete position button
         var deleteBtn = e.target.closest('[data-delete-position]');
         if (deleteBtn) {
             if (!confirm('Remove this position?')) return;
             var url = deleteBtn.dataset.deletePosition;
             var tr = deleteBtn.closest('tr');
-            Http.fetch(url, { method: 'DELETE' }).then(function () { tr.remove(); });
+            Http.fetch(url, { method: 'DELETE' }).then(function () {
+                tr.remove();
+                if (typeof PortfolioEntry !== 'undefined') {
+                    // Deleting redistributes implied weights across the
+                    // remaining positions, so re-sync all of them.
+                    if (PortfolioEntry.rebalanceNow) PortfolioEntry.rebalanceNow();
+                    else if (PortfolioEntry.refresh) PortfolioEntry.refresh();
+                }
+            });
         }
     });
 
     function savePosition(tr) {
         var url = tr.dataset.submitUrl;
+        var method = (tr.dataset.submitMethod || 'POST').toUpperCase();
         var posType = tr.querySelector('[name="positionType"]').value;
         var currency = (tr.querySelector('.js-currency').value || '').trim().toUpperCase();
         if (!/^[A-Z]{3}$/.test(currency)) {
@@ -111,10 +152,22 @@
                 if (sectorInput && sectorInput.value) formData.append('sector', sectorInput.value);
             }
 
-            return Http.text(url, { method: 'POST', body: formData });
+            return Http.text(url, { method: method, body: formData });
         }).then(function (html) {
+            // Successful save ends the edit session; drop any stashed
+            // original so subsequent edits start fresh.
+            if (tr.dataset.submitUrl) delete originalRowHtml[tr.dataset.submitUrl];
             tr.outerHTML = html;
-            if (typeof PortfolioEntry !== 'undefined') PortfolioEntry.updateDisplays();
+            if (typeof PortfolioEntry !== 'undefined') {
+                // rebalanceNow syncs every position's stored weight to its
+                // current live value, then refreshes. Covers the case
+                // where the save also implicitly bumped the total (via
+                // ensureTotalCoversPositions) and every *other* position
+                // now drifts too.
+                if (PortfolioEntry.rebalanceNow) PortfolioEntry.rebalanceNow();
+                else if (PortfolioEntry.refresh) PortfolioEntry.refresh();
+                else PortfolioEntry.updateDisplays();
+            }
         });
     }
 
@@ -123,8 +176,51 @@
         var typeSelect = tr.querySelector('.js-pos-type');
         var currencyInput = tr.querySelector('.js-currency');
         var tickerInput = tr.querySelector('.js-ticker-input');
+        var tickerList = tr.querySelector('.js-ticker-suggest');
+        var tickerStatus = tr.querySelector('.js-ticker-status');
+        var nameInput = tr.querySelector('input[name="name"]');
+        var sectorInput = tr.querySelector('input[name="sector"]');
         var fxFetchTimer = null;
         var priceFetchTimer = null;
+
+        function setStatus(text, tone) {
+            if (!tickerStatus) return;
+            tickerStatus.classList.remove('text-gray-500', 'text-emerald-700', 'text-amber-700');
+            tickerStatus.textContent = text;
+            if (tone === 'ok') tickerStatus.classList.add('text-emerald-700');
+            else if (tone === 'warn') tickerStatus.classList.add('text-amber-700');
+            else tickerStatus.classList.add('text-gray-500');
+        }
+
+        function renderPriceStatus(entry, ticker) {
+            if (entry) {
+                var parts = [ticker];
+                if (entry.close) parts.push(parseFloat(entry.close).toFixed(2));
+                if (entry.currency) parts.push(entry.currency);
+                setStatus(parts.join(' · '), 'ok');
+            } else {
+                setStatus('No price data — we’ll try to fetch it when you save.', 'warn');
+            }
+        }
+
+        function refreshPriceForTicker(ticker) {
+            // Eager, on-demand yfinance fetch so the user sees the real
+            // price and currency as soon as they pick a suggestion — instead
+            // of waiting for the nightly scheduled refresh.
+            setStatus('Fetching price for ' + ticker + '…', 'neutral');
+            return Http.json('/api/prices/refresh', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ticker: ticker }),
+            }).then(function (data) {
+                var entry = data && data[ticker];
+                return PortfolioEntry.ensurePrice(ticker, function (cached) {
+                    renderPriceStatus(cached || entry, ticker);
+                });
+            }).catch(function () {
+                setStatus('Could not fetch price for ' + ticker + ' right now.', 'warn');
+            });
+        }
 
         function updateVisibility() {
             var isCash = typeSelect.value === 'CASH';
@@ -165,12 +261,39 @@
             if (!t) return;
             if (priceFetchTimer) clearTimeout(priceFetchTimer);
             priceFetchTimer = setTimeout(function () {
-                PortfolioEntry.ensurePrice(t).then(updateWeight);
+                PortfolioEntry.ensurePrice(t, function (entry) {
+                    renderPriceStatus(entry, t);
+                }).then(updateWeight);
             }, 400);
         }
 
         typeSelect.addEventListener('change', updateVisibility);
-        if (tickerInput) tickerInput.addEventListener('input', schedulePriceFetch);
+        var autocompleteWired = false;
+        if (tickerInput && typeof TickerAutocomplete !== 'undefined' && tickerList) {
+            TickerAutocomplete.attach(tickerInput, {
+                listEl: tickerList,
+                statusEl: tickerStatus,
+                onSelect: function (suggestion) {
+                    if (priceFetchTimer) clearTimeout(priceFetchTimer);
+                    if (nameInput && !nameInput.value) nameInput.value = suggestion.name || '';
+                    if (currencyInput && suggestion.currency) {
+                        currencyInput.value = suggestion.currency;
+                        updateCashTicker();
+                        scheduleFxFetch();
+                    }
+                    if (sectorInput && !sectorInput.value && suggestion.sector) {
+                        sectorInput.value = suggestion.sector;
+                    }
+                    refreshPriceForTicker(suggestion.ticker).then(updateWeight);
+                },
+            });
+            autocompleteWired = true;
+        }
+        // Fallback for environments where the autocomplete module didn't load:
+        // fetch price + show inline status directly from keystrokes.
+        if (tickerInput && !autocompleteWired) {
+            tickerInput.addEventListener('input', schedulePriceFetch);
+        }
         currencyInput.addEventListener('input', function () {
             // Normalise to upper-case in place so the displayed value matches
             // what we submit and what the server stores. Without this, typing
@@ -211,6 +334,20 @@
         if (cashInput) cashInput.addEventListener('input', updateWeight);
 
         updateVisibility();
+        // Edit-row case: the shares / cash amount lives only in
+        // localStorage (privacy), so the server can't pre-fill it for us.
+        // Pull it from PortfolioEntry so the user sees their real values
+        // instead of a blank input.
+        if (tr.hasAttribute('data-edit-row') && typeof PortfolioEntry !== 'undefined') {
+            if (typeSelect.value === 'EQUITY' && sharesInput && tickerInput && tickerInput.value) {
+                var shares = PortfolioEntry.getShares(tickerInput.value);
+                if (shares) sharesInput.value = shares;
+            } else if (typeSelect.value === 'CASH' && cashInput && currencyInput.value) {
+                var amount = PortfolioEntry.getCashAmount(currencyInput.value);
+                if (amount) cashInput.value = amount;
+            }
+            updateWeight();
+        }
         // Prime FX for the row's default currency (e.g. "USD") so the weight
         // display becomes correct as soon as the user starts typing an amount,
         // without waiting for the save click.

@@ -1,48 +1,59 @@
+@import com.kernfolio.domain.Position
 @import java.util.UUID
 
+@param position: Position
 @param portfolioId: UUID
 
-<tr data-new-row data-submit-url="/portfolios/${portfolioId.toString()}/positions">
+!{var isCash = position.positionType == "CASH";}
+!{var nameValue = position.name ?: "";}
+!{var sectorValue = position.sector ?: "";}
+
+<tr data-new-row data-edit-row
+    data-submit-url="/portfolios/${portfolioId.toString()}/positions/${position.id.toString()}"
+    data-submit-method="PUT">
     <td class="px-4 py-2">
         <select name="positionType" class="js-pos-type rounded-md border border-gray-300 px-2 py-1 text-sm">
-            <option value="EQUITY" selected>EQUITY</option>
-            <option value="CASH">CASH</option>
+            <option value="EQUITY" selected="${!isCash}">EQUITY</option>
+            <option value="CASH" selected="${isCash}">CASH</option>
         </select>
     </td>
     <td class="px-4 py-2 align-top">
-        <div class="js-ticker-combobox js-equity-field w-24">
+        <div class="js-ticker-combobox js-equity-field ${if (isCash) "hidden" else ""} w-24">
             <input type="text" name="ticker" required placeholder="Search"
                    autocomplete="off" role="combobox" aria-autocomplete="list"
                    aria-expanded="false"
+                   value="${if (!isCash) position.ticker else ""}"
                    class="js-ticker-input w-full rounded-md border border-gray-300 px-2 py-1 text-sm font-mono">
             <ul class="js-ticker-suggest hidden fixed z-50 w-80 max-h-64 overflow-y-auto rounded-md border border-gray-200 bg-white shadow-lg"
                 role="listbox"></ul>
             <div class="js-ticker-status mt-1 text-xs text-gray-500 whitespace-normal break-words" aria-live="polite"></div>
         </div>
-        <span class="js-cash-ticker js-cash-field hidden text-sm text-gray-500"></span>
-        <input type="hidden" name="cashTicker" class="js-cash-ticker-hidden js-cash-field hidden">
+        <span class="js-cash-ticker js-cash-field ${if (!isCash) "hidden" else ""} text-sm text-gray-500">${if (isCash) position.ticker else ""}</span>
+        <input type="hidden" name="cashTicker" class="js-cash-ticker-hidden js-cash-field ${if (!isCash) "hidden" else ""}" value="${if (isCash) position.ticker else ""}">
     </td>
     <td class="px-4 py-2">
         <input type="text" name="name" placeholder="Optional"
-               class="js-equity-field w-32 rounded-md border border-gray-300 px-2 py-1 text-sm">
-        <input type="hidden" name="cashName" class="js-cash-field hidden">
+               value="${if (!isCash) nameValue else ""}"
+               class="js-equity-field ${if (isCash) "hidden" else ""} w-32 rounded-md border border-gray-300 px-2 py-1 text-sm">
+        <input type="hidden" name="cashName" class="js-cash-field ${if (!isCash) "hidden" else ""}" value="${if (isCash) nameValue else ""}">
     </td>
     <td class="px-4 py-2">
-        <input type="text" name="currency" value="USD" required maxlength="3"
+        <input type="text" name="currency" value="${position.currency}" required maxlength="3"
                class="js-currency w-16 rounded-md border border-gray-300 px-2 py-1 text-sm font-mono uppercase">
     </td>
     <td class="px-4 py-2">
         <input type="number" step="any" min="0" placeholder="Shares"
-               class="js-shares js-equity-field w-20 rounded-md border border-gray-300 px-2 py-1 text-sm text-right">
+               class="js-shares js-equity-field ${if (isCash) "hidden" else ""} w-20 rounded-md border border-gray-300 px-2 py-1 text-sm text-right">
         <input type="number" step="0.01" min="0" placeholder="Amount"
-               class="js-cash-amount js-cash-field hidden w-20 rounded-md border border-gray-300 px-2 py-1 text-sm text-right">
+               class="js-cash-amount js-cash-field ${if (!isCash) "hidden" else ""} w-20 rounded-md border border-gray-300 px-2 py-1 text-sm text-right">
     </td>
     <td class="px-4 py-2 text-right text-sm text-gray-500">
         <span class="js-weight-display"></span>
     </td>
     <td class="px-4 py-2">
         <input type="text" name="sector" placeholder="Sector"
-               class="js-equity-field w-24 rounded-md border border-gray-300 px-2 py-1 text-sm">
+               value="${sectorValue}"
+               class="js-equity-field ${if (isCash) "hidden" else ""} w-24 rounded-md border border-gray-300 px-2 py-1 text-sm">
     </td>
     <td class="px-4 py-2 text-right">
         <input type="hidden" name="weightPct" value="0">

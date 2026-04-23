@@ -19,9 +19,18 @@
             ${String.format(Locale.ROOT, "%.2f", position.weightPct.toDouble() * 100)}%
         @endif
     </td>
-    <td class="px-4 py-3 text-sm text-right">${String.format(Locale.ROOT, "%.2f", position.weightPct.toDouble() * 100)}%</td>
-    <td class="px-4 py-3 text-sm text-gray-500">${position.sector}</td>
     <td class="px-4 py-3 text-sm text-right">
+        <span data-weight-ticker="${position.ticker}"
+              data-weight-type="${position.positionType}"
+              data-weight-currency="${position.currency}">${String.format(Locale.ROOT, "%.2f", position.weightPct.toDouble() * 100)}%</span>
+    </td>
+    <td class="px-4 py-3 text-sm text-gray-500">${position.sector}</td>
+    <td class="px-4 py-3 text-sm text-right whitespace-nowrap">
+        <button type="button"
+                data-edit-position="/portfolios/${portfolioId.toString()}/positions/${position.id.toString()}/edit-row"
+                class="text-blue-600 hover:text-blue-800 text-sm font-medium mr-3">
+            Edit
+        </button>
         <button type="button"
                 data-delete-position="/portfolios/${portfolioId.toString()}/positions/${position.id.toString()}"
                 class="text-red-600 hover:text-red-800 text-sm font-medium">

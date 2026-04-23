@@ -34,6 +34,22 @@ data class MetadataDto(
     val sector: String
 )
 
+data class TickerSearchRequest(
+    val query: String,
+    val limit: Int = 10,
+)
+
+data class TickerSearchResponseItem(
+    val symbol: String,
+    val shortname: String?,
+    val longname: String?,
+    val exchange: String?,
+    @get:JsonProperty("quote_type") val quoteType: String?,
+    val currency: String?,
+)
+
+data class TickerSearchResponse(val results: List<TickerSearchResponseItem>)
+
 @RestController
 class PriceController(private val fixtureStore: PriceFixtureStore) {
 
@@ -82,6 +98,23 @@ class PriceController(private val fixtureStore: PriceFixtureStore) {
         val errors = unknownTickers.associateWith { "No data found for ticker $it" }
 
         return ResponseEntity.ok(FetchPricesResponse(prices = pricesDto, metadata = metadataDto, errors = errors))
+    }
+
+    @PostMapping("/search-tickers")
+    fun searchTickers(@RequestBody request: TickerSearchRequest): ResponseEntity<TickerSearchResponse> {
+        val limit = request.limit.coerceIn(1, 20)
+        val hits = fixtureStore.searchByQuery(request.query, limit)
+        val results = hits.map {
+            TickerSearchResponseItem(
+                symbol = it.symbol,
+                shortname = it.shortname,
+                longname = it.longname,
+                exchange = it.exchange,
+                quoteType = it.quoteType,
+                currency = it.currency,
+            )
+        }
+        return ResponseEntity.ok(TickerSearchResponse(results = results))
     }
 
     @GetMapping("/health")

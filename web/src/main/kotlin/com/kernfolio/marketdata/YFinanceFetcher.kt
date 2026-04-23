@@ -2,6 +2,9 @@ package com.kernfolio.marketdata
 
 import com.kernfolio.marketdata.dto.FetchPricesRequest
 import com.kernfolio.marketdata.dto.FetchPricesResponse
+import com.kernfolio.marketdata.dto.SearchTickersRequest
+import com.kernfolio.marketdata.dto.SearchTickersResponse
+import com.kernfolio.marketdata.dto.TickerSearchResult
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 import org.springframework.web.reactive.function.client.WebClient
@@ -35,6 +38,25 @@ class YFinanceFetcher(
             throw e
         } catch (e: Exception) {
             throw MarketDataException("Failed to fetch prices", e)
+        }
+    }
+
+    fun searchTickers(query: String, limit: Int): List<TickerSearchResult> {
+        val trimmed = query.trim()
+        if (trimmed.isEmpty()) return emptyList()
+
+        return try {
+            optimizerWebClient.post()
+                .uri("/search-tickers")
+                .bodyValue(SearchTickersRequest(trimmed, limit))
+                .retrieve()
+                .bodyToMono(SearchTickersResponse::class.java)
+                .block()
+                ?.results
+                ?: emptyList()
+        } catch (e: Exception) {
+            log.warn("Ticker search failed for query '{}': {}", trimmed, e.message)
+            emptyList()
         }
     }
 }

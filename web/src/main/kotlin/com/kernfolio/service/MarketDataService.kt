@@ -93,6 +93,98 @@ class MarketDataService(
     fun getLatestPrices(tickers: List<String>): Map<String, CachedPrice?> =
         tickers.associateWith { cachedPriceRepository.findLatestByTicker(it) }
 
+    fun searchInstruments(query: String, limit: Int = 10): List<TickerSuggestion> {
+        val trimmed = query.trim()
+        if (trimmed.isEmpty()) return emptyList()
+
+        val localHits = instrumentRepository.search(trimmed, limit).map {
+            TickerSuggestion(
+                ticker = it.ticker,
+                name = it.name,
+                exchange = it.exchange,
+                currency = it.currency,
+                sector = it.sector,
+                source = "local",
+            )
+        }
+
+        if (localHits.size >= limit) return localHits
+
+        val remaining = limit - localHits.size
+        val seen = localHits.map { it.ticker }.toMutableSet()
+
+        val remoteHits = yFinanceFetcher.searchTickers(trimmed, remaining + localHits.size)
+            .asSequence()
+            .mapNotNull { remote ->
+                val internal = tickerMapper.toInternal(remote.symbol)
+                if (!seen.add(internal)) return@mapNotNull null
+                TickerSuggestion(
+                    ticker = internal,
+                    name = remote.longname ?: remote.shortname,
+                    exchange = remote.exchange,
+                    currency = remote.currency,
+                    sector = null,
+                    source = "remote",
+                )
+            }
+            .take(remaining)
+            .toList()
+
+        cacheRemoteSuggestions(remoteHits)
+
+        return localHits + remoteHits
+    }
+
+    // Piggyback a metadata cache on every remote search hit: the
+    // search endpoint already hands us {ticker, name, exchange, currency},
+    // so we might as well persist it. Subsequent searches can serve that
+    // row locally (no yfinance round-trip), and later price fetches
+    // inherit the name/exchange instead of leaving them null.
+    //
+    // "Fill gaps" merge: never overwrite a richer existing field with a
+    // search-level one (price-fetch metadata is usually more complete).
+    private fun cacheRemoteSuggestions(suggestions: List<TickerSuggestion>) {
+        suggestions.forEach { sug ->
+            try {
+                val existing = instrumentRepository.findById(sug.ticker).orElse(null)
+                if (existing == null) {
+                    instrumentRepository.save(
+                        Instrument(
+                            ticker = sug.ticker,
+                            name = sug.name,
+                            exchange = sug.exchange,
+                            currency = sug.currency,
+                        )
+                    )
+                    return@forEach
+                }
+
+                val mergedName = existing.name ?: sug.name
+                val mergedExchange = existing.exchange ?: sug.exchange
+                val mergedCurrency = existing.currency ?: sug.currency
+                val changed = mergedName != existing.name ||
+                    mergedExchange != existing.exchange ||
+                    mergedCurrency != existing.currency
+                if (!changed) return@forEach
+
+                instrumentRepository.save(
+                    Instrument(
+                        ticker = existing.ticker,
+                        name = mergedName,
+                        exchange = mergedExchange,
+                        currency = mergedCurrency,
+                        sector = existing.sector,
+                        marketCapUsd = existing.marketCapUsd,
+                        fractional = existing.fractional,
+                        lastRefreshedAt = existing.lastRefreshedAt,
+                    ).markNotNew()
+                )
+            } catch (e: Exception) {
+                log.warn("Failed to cache search suggestion {}: {}", sug.ticker, e.message)
+            }
+        }
+    }
+
     private fun updateInstruments(metadata: Map<String, TickerMetadata>) {
         metadata.forEach { (yTicker, meta) ->
             val internal = tickerMapper.toInternal(yTicker)

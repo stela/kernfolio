@@ -14,6 +14,7 @@ import org.springframework.transaction.annotation.Transactional
 import org.springframework.ui.Model
 import org.springframework.validation.BindingResult
 import org.springframework.web.bind.annotation.DeleteMapping
+import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.ModelAttribute
 import org.springframework.web.bind.annotation.PathVariable
@@ -149,6 +150,42 @@ class PortfolioController(
     ): String {
         try {
             val position = portfolioService.addPosition(id, currentUserId(authentication), positionForm)
+            model.addAttribute("position", position)
+            model.addAttribute("portfolioId", id)
+            return "partial/position-saved-row"
+        } catch (_: PortfolioNotFoundException) {
+            throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        }
+    }
+
+    @GetMapping("/portfolios/{id}/positions/{posId}/edit-row")
+    fun editPositionRow(
+        @PathVariable id: UUID,
+        @PathVariable posId: UUID,
+        authentication: Authentication,
+        model: Model,
+    ): String {
+        val position = try {
+            portfolioService.findPosition(posId, id, currentUserId(authentication))
+        } catch (_: PortfolioNotFoundException) {
+            throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        }
+        model.addAttribute("position", position)
+        model.addAttribute("portfolioId", id)
+        return "partial/position-edit-row"
+    }
+
+    @PutMapping("/portfolios/{id}/positions/{posId}")
+    @Transactional
+    fun updatePosition(
+        @PathVariable id: UUID,
+        @PathVariable posId: UUID,
+        @ModelAttribute positionForm: PositionForm,
+        authentication: Authentication,
+        model: Model,
+    ): String {
+        try {
+            val position = portfolioService.updatePosition(posId, id, currentUserId(authentication), positionForm)
             model.addAttribute("position", position)
             model.addAttribute("portfolioId", id)
             return "partial/position-saved-row"

@@ -34,6 +34,17 @@ var PortfolioEntry = (function () {
         setupTotalValueInput();
         setupRecoveryButton();
         fetchEntryData();
+
+        // If the user navigates away (or backgrounds the tab) with a
+        // pending debounced rebalance, flush it immediately. Otherwise
+        // they land on the next page, come back, and see a drift banner
+        // for weights that merely didn't get time to sync.
+        document.addEventListener('visibilitychange', function () {
+            if (document.visibilityState === 'hidden' && rebalanceTimer) {
+                clearTimeout(rebalanceTimer);
+                rebalanceNow();
+            }
+        });
     }
 
     function storageKey() {
@@ -78,6 +89,50 @@ var PortfolioEntry = (function () {
             totalValue = parseFloat(input.value) || 0;
             saveToLocalStorage();
             updateDisplays();
+            // Server stores per-position weights which were computed
+            // against the prior total. Now that the total has changed,
+            // those stored weights are stale — push fresh ones.
+            scheduleRebalance();
+        });
+    }
+
+    var rebalanceTimer = null;
+    function scheduleRebalance() {
+        if (rebalanceTimer) clearTimeout(rebalanceTimer);
+        rebalanceTimer = setTimeout(rebalanceNow, 1500);
+    }
+
+    function rebalanceNow() {
+        rebalanceTimer = null;
+        if (!loaded || !portfolioId || !positions || positions.length === 0) return;
+        if (totalValue <= 0) return;
+
+        var weights = {};
+        var anyChanged = false;
+        positions.forEach(function (pos) {
+            if (!pos.id) return;
+            var live = computeWeightPct(pos.ticker, pos.positionType, pos.currency);
+            var stored = parseFloat(pos.weightPct);
+            // Only push positions whose derived weight actually differs —
+            // 0.00005 tolerance matches the 6-decimal precision we store.
+            if (!isFinite(live) || !isFinite(stored)) return;
+            if (Math.abs(live - stored) < 0.00005) return;
+            weights[pos.id] = live.toFixed(6);
+            anyChanged = true;
+        });
+        if (!anyChanged) return;
+
+        Http.fetch('/api/portfolios/' + portfolioId + '/rebalance', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ weights: weights }),
+        }).then(function () {
+            // Reload positions so checkReconciliation sees the fresh
+            // server-side values and the drift banner clears.
+            return refresh();
+        }).catch(function () {
+            // Swallow — rebalance is best-effort. The drift banner stays
+            // visible so the user knows something didn't sync.
         });
     }
 
@@ -189,29 +244,40 @@ var PortfolioEntry = (function () {
         return p;
     }
 
-    function ensurePrice(ticker) {
+    function ensurePrice(ticker, onResult) {
         // Equity counterpart to ensureFxRate: when a ticker is added after
         // page load, fetch its price (and, if denominated in a non-base
         // currency, the relevant FX rate) on demand. Without this, the
         // weight display for a freshly-added equity stays at 0%.
+        //
+        // onResult is an optional callback invoked with the cached entry
+        // (or null if the server has no price) so callers can render inline
+        // status instead of relying on a global flash banner.
         ticker = (ticker || '').trim();
-        if (!ticker) return Promise.resolve();
-        if (prices[ticker] && prices[ticker].close) return Promise.resolve();
+        if (!ticker) return Promise.resolve(null);
+        if (prices[ticker] && prices[ticker].close) {
+            if (onResult) onResult(prices[ticker]);
+            return Promise.resolve(prices[ticker]);
+        }
         if (pendingPriceFetches[ticker]) return pendingPriceFetches[ticker];
 
         var p = Http.json('/api/prices/latest?tickers=' + encodeURIComponent(ticker))
             .then(function (data) {
                 var entry = data[ticker];
                 if (!entry || !entry.close) {
-                    Flash.error('No price available for ' + ticker +
-                        '. Weight will show 0% until a price is cached.');
-                    return;
+                    if (onResult) onResult(null);
+                    return null;
                 }
                 prices[ticker] = entry;
+                if (onResult) onResult(entry);
                 if (entry.currency && entry.currency !== baseCurrency) {
-                    return ensureFxRate(entry.currency).then(updateDisplays);
+                    return ensureFxRate(entry.currency).then(function () {
+                        updateDisplays();
+                        return entry;
+                    });
                 }
                 updateDisplays();
+                return entry;
             })
             .finally(function () { delete pendingPriceFetches[ticker]; });
         pendingPriceFetches[ticker] = p;
@@ -362,6 +428,17 @@ var PortfolioEntry = (function () {
         document.querySelectorAll('[data-cash-currency]').forEach(function (el) {
             el.textContent = getCashAmount(el.dataset.cashCurrency);
         });
+        // Recompute weight cells live: the server-rendered `weight_pct`
+        // is the last value persisted at save time, which goes stale as
+        // soon as the user edits the total or adds/removes a position.
+        // Computing from localStorage + prices keeps the table in sync
+        // with the allocation progress bar (same inputs, same formula).
+        document.querySelectorAll('[data-weight-ticker]').forEach(function (el) {
+            var ticker = el.dataset.weightTicker;
+            var type = el.dataset.weightType;
+            var currency = el.dataset.weightCurrency;
+            el.textContent = formatWeight(ticker, type, currency);
+        });
 
         updateFreshnessIndicator();
         updateAllocationProgress();
@@ -479,6 +556,18 @@ var PortfolioEntry = (function () {
         if (recoveryPrompt) recoveryPrompt.classList.add('hidden');
     }
 
+    function refresh() {
+        // Re-fetch the positions list from the server so the drift check
+        // and the saved-row displays see the freshest stored weights.
+        // Called after a save / delete so "Saved weights are out of date"
+        // clears as soon as the backend actually catches up.
+        return Http.json('/api/portfolios/' + portfolioId + '/entry-data').then(function (data) {
+            positions = data.positions;
+            checkReconciliation();
+            updateDisplays();
+        });
+    }
+
     document.addEventListener('DOMContentLoaded', init);
 
     return {
@@ -490,6 +579,8 @@ var PortfolioEntry = (function () {
         updateShares: updateShares,
         updateCashAmount: updateCashAmount,
         updateDisplays: updateDisplays,
+        refresh: refresh,
+        rebalanceNow: rebalanceNow,
         ensureFxRate: ensureFxRate,
         ensurePrice: ensurePrice,
         ensureTotalCoversPositions: ensureTotalCoversPositions,

@@ -75,4 +75,61 @@ class PriceFixtureStore(jsonMapper: JsonMapper) {
 
     val availableTickers: Set<String>
         get() = allPrices.keys
+
+    fun searchByQuery(query: String, limit: Int): List<TickerSearchHit> {
+        val q = query.trim().lowercase()
+        if (q.isEmpty()) return emptyList()
+
+        return allMetadata.entries.asSequence()
+            .mapNotNull { (ticker, meta) ->
+                val tickerLower = ticker.lowercase()
+                val nameLower = meta.name.lowercase()
+                val rank = when {
+                    tickerLower == q -> 0
+                    tickerLower.startsWith(q) -> 1
+                    nameLower.startsWith(q) -> 2
+                    nameLower.contains(q) || tickerLower.contains(q) -> 3
+                    else -> return@mapNotNull null
+                }
+                TickerSearchHit(
+                    symbol = ticker,
+                    shortname = meta.name,
+                    longname = meta.name,
+                    exchange = exchangeFromSuffix(ticker),
+                    quoteType = "EQUITY",
+                    currency = meta.currency,
+                    rank = rank,
+                )
+            }
+            .sortedWith(compareBy({ it.rank }, { it.symbol }))
+            .take(limit)
+            .toList()
+    }
+
+    private fun exchangeFromSuffix(ticker: String): String? {
+        val dot = ticker.lastIndexOf('.')
+        if (dot < 0) return "NASDAQ"
+        return when (ticker.substring(dot + 1).uppercase()) {
+            "L" -> "LSE"
+            "TO" -> "TSX"
+            "MX" -> "BMV"
+            "AS" -> "Euronext Amsterdam"
+            "PA" -> "Euronext Paris"
+            "DE" -> "XETRA"
+            "HE" -> "Helsinki"
+            "T" -> "Tokyo"
+            "HK" -> "Hong Kong"
+            else -> null
+        }
+    }
 }
+
+data class TickerSearchHit(
+    val symbol: String,
+    val shortname: String?,
+    val longname: String?,
+    val exchange: String?,
+    val quoteType: String?,
+    val currency: String?,
+    val rank: Int,
+)

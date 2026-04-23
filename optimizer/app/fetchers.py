@@ -14,6 +14,9 @@ from app.schemas import (
     PriceFetchRequest,
     PriceFetchResponse,
     TickerMetadata,
+    TickerSearchRequest,
+    TickerSearchResponse,
+    TickerSearchResult,
 )
 
 FRANKFURTER_BASE_URL = os.environ.get(
@@ -92,6 +95,47 @@ def fetch_prices(request: PriceFetchRequest) -> PriceFetchResponse:
             )
 
     return PriceFetchResponse(prices=prices, metadata=metadata, errors=errors)
+
+
+# ── /search-tickers ─────────────────────────────────────────────────
+
+_SEARCH_QUOTE_TYPES = {"EQUITY", "ETF", "MUTUALFUND", "INDEX"}
+
+
+def search_tickers(request: TickerSearchRequest) -> TickerSearchResponse:
+    """Search Yahoo Finance for tickers matching a free-text query."""
+    query = request.query.strip()
+    if not query:
+        return TickerSearchResponse(results=[])
+
+    limit = max(1, min(request.limit, 20))
+
+    try:
+        search = yf.Search(query, max_results=limit)
+        raw_quotes = getattr(search, "quotes", None) or []
+    except Exception:
+        return TickerSearchResponse(results=[])
+
+    results: list[TickerSearchResult] = []
+    for quote in raw_quotes:
+        quote_type = (quote.get("quoteType") or "").upper()
+        if quote_type and quote_type not in _SEARCH_QUOTE_TYPES:
+            continue
+        symbol = quote.get("symbol")
+        if not symbol:
+            continue
+        results.append(TickerSearchResult(
+            symbol=symbol,
+            shortname=quote.get("shortname"),
+            longname=quote.get("longname"),
+            exchange=quote.get("exchDisp") or quote.get("exchange"),
+            quote_type=quote_type or None,
+            currency=quote.get("currency"),
+        ))
+        if len(results) >= limit:
+            break
+
+    return TickerSearchResponse(results=results)
 
 
 # ── /fetch-fx-rates ──────────────────────────────────────────────────

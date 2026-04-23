@@ -119,6 +119,63 @@ class PriceControllerTest(
     }
 
     @Test
+    fun `search-tickers returns fixture matches for name substring`() {
+        val body = client.post()
+            .uri("/search-tickers")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"query":"mexico","limit":5}""")
+            .retrieve()
+            .body(String::class.java)!!
+
+        val typeRef = object : TypeReference<Map<String, Any>>() {}
+        val parsed: Map<String, Any> = jsonMapper.readValue(body, typeRef)
+
+        @Suppress("UNCHECKED_CAST")
+        val results = parsed["results"] as List<Map<String, Any>>
+        assertThat(results).isNotEmpty
+        val first = results.first()
+        assertThat(first["symbol"]).isEqualTo("GMEXICOB.MX")
+        assertThat(first["shortname"]).isEqualTo("Grupo Mexico")
+        assertThat(first["exchange"]).isEqualTo("BMV")
+        assertThat(first["currency"]).isEqualTo("MXN")
+        assertThat(first["quote_type"]).isEqualTo("EQUITY")
+    }
+
+    @Test
+    fun `search-tickers ranks exact ticker match first`() {
+        val body = client.post()
+            .uri("/search-tickers")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"query":"GOOG","limit":5}""")
+            .retrieve()
+            .body(String::class.java)!!
+
+        val typeRef = object : TypeReference<Map<String, Any>>() {}
+        val parsed: Map<String, Any> = jsonMapper.readValue(body, typeRef)
+
+        @Suppress("UNCHECKED_CAST")
+        val results = parsed["results"] as List<Map<String, Any>>
+        assertThat(results.first()["symbol"]).isEqualTo("GOOG")
+    }
+
+    @Test
+    fun `search-tickers returns empty on blank query`() {
+        val body = client.post()
+            .uri("/search-tickers")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"query":"  ","limit":5}""")
+            .retrieve()
+            .body(String::class.java)!!
+
+        val typeRef = object : TypeReference<Map<String, Any>>() {}
+        val parsed: Map<String, Any> = jsonMapper.readValue(body, typeRef)
+
+        @Suppress("UNCHECKED_CAST")
+        val results = parsed["results"] as List<Map<String, Any>>
+        assertThat(results).isEmpty()
+    }
+
+    @Test
     fun `health endpoint returns ok`() {
         val body = client.get()
             .uri("/health")

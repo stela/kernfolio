@@ -8,6 +8,7 @@ import com.kernfolio.marketdata.YFinanceFetcher
 import com.kernfolio.marketdata.dto.FetchPricesResponse
 import com.kernfolio.marketdata.dto.PricePoint
 import com.kernfolio.marketdata.dto.TickerMetadata
+import com.kernfolio.marketdata.dto.TickerSearchResult
 import com.kernfolio.repository.CachedPriceRepository
 import com.kernfolio.repository.InstrumentRepository
 import com.kernfolio.repository.PositionRepository
@@ -218,4 +219,162 @@ class MarketDataServiceTest {
             })
         }
     }
+
+    @Test
+    fun `searchInstruments returns empty for blank query without hitting backends`() {
+        val result = service.searchInstruments("   ", 10)
+        assertEquals(emptyList<TickerSuggestion>(), result)
+        verify(exactly = 0) { instrumentRepository.search(any(), any()) }
+        verify(exactly = 0) { yFinanceFetcher.searchTickers(any(), any()) }
+    }
+
+    @Test
+    fun `searchInstruments returns only local hits when local fills the limit`() {
+        every { instrumentRepository.search("app", 3) } returns listOf(
+            instrument("AAPL", "Apple Inc."),
+            instrument("AAP", "Advance Auto Parts"),
+            instrument("APP", "Applovin"),
+        )
+
+        val result = service.searchInstruments("app", 3)
+        assertEquals(listOf("AAPL", "AAP", "APP"), result.map { it.ticker })
+        assertEquals(listOf("local", "local", "local"), result.map { it.source })
+        verify(exactly = 0) { yFinanceFetcher.searchTickers(any(), any()) }
+    }
+
+    @Test
+    fun `searchInstruments falls back to remote when local is sparse`() {
+        every { instrumentRepository.search("goog", 5) } returns listOf(
+            instrument("GOOG", "Alphabet Inc.")
+        )
+        every { instrumentRepository.findById("GOOGL") } returns Optional.empty()
+        every { yFinanceFetcher.searchTickers("goog", 5) } returns listOf(
+            TickerSearchResult(
+                symbol = "GOOGL", shortname = "Alphabet", longname = "Alphabet Inc. Class A",
+                exchange = "NASDAQ", currency = "USD",
+            ),
+            // Duplicate of local — must be filtered out by dedupe
+            TickerSearchResult(symbol = "GOOG", shortname = "Alphabet", currency = "USD"),
+        )
+
+        val result = service.searchInstruments("goog", 5)
+        assertEquals(listOf("GOOG", "GOOGL"), result.map { it.ticker })
+        assertEquals(listOf("local", "remote"), result.map { it.source })
+    }
+
+    @Test
+    fun `searchInstruments persists fresh remote hits as instruments rows`() {
+        every { instrumentRepository.search("apv", 5) } returns emptyList()
+        every { instrumentRepository.findById("APP") } returns Optional.empty()
+        every { yFinanceFetcher.searchTickers("apv", 5) } returns listOf(
+            TickerSearchResult(
+                symbol = "APP", shortname = "AppLovin", longname = "AppLovin Corporation",
+                exchange = "NMS", currency = "USD",
+            ),
+        )
+
+        service.searchInstruments("apv", 5)
+
+        verify {
+            instrumentRepository.save(match<Instrument> {
+                it.ticker == "APP" &&
+                    it.name == "AppLovin Corporation" &&
+                    it.exchange == "NMS" &&
+                    it.currency == "USD" &&
+                    it.isNew
+            })
+        }
+    }
+
+    @Test
+    fun `searchInstruments does not overwrite richer existing instrument fields`() {
+        val existing = Instrument(
+            ticker = "AAPL",
+            name = "Apple Inc.",
+            exchange = "NASDAQ",
+            currency = "USD",
+            sector = "Technology",
+            marketCapUsd = java.math.BigDecimal("3000000000000"),
+        ).markNotNew()
+
+        every { instrumentRepository.search("app", 5) } returns emptyList()
+        every { instrumentRepository.findById("AAPL") } returns Optional.of(existing)
+        every { yFinanceFetcher.searchTickers("app", 5) } returns listOf(
+            // Remote returns a different (less rich) name for the same symbol.
+            TickerSearchResult(
+                symbol = "AAPL", shortname = "AAPL", longname = null,
+                exchange = "NASDAQ", currency = "USD",
+            ),
+        )
+
+        service.searchInstruments("app", 5)
+
+        // No save: every field already populated with richer data.
+        verify(exactly = 0) { instrumentRepository.save(any<Instrument>()) }
+    }
+
+    @Test
+    fun `searchInstruments fills gaps on a partially populated existing row`() {
+        val existing = Instrument(
+            ticker = "FOO",
+            name = null,
+            exchange = null,
+            currency = null,
+            sector = "Consumer",  // pre-existing, must survive the merge
+        ).markNotNew()
+
+        every { instrumentRepository.search("foo", 5) } returns emptyList()
+        every { instrumentRepository.findById("FOO") } returns Optional.of(existing)
+        every { yFinanceFetcher.searchTickers("foo", 5) } returns listOf(
+            TickerSearchResult(
+                symbol = "FOO", shortname = "FOO Corp", longname = "FOO Corporation",
+                exchange = "NYSE", currency = "USD",
+            ),
+        )
+
+        service.searchInstruments("foo", 5)
+
+        verify {
+            instrumentRepository.save(match<Instrument> {
+                it.ticker == "FOO" &&
+                    it.name == "FOO Corporation" &&
+                    it.exchange == "NYSE" &&
+                    it.currency == "USD" &&
+                    it.sector == "Consumer" &&  // preserved
+                    !it.isNew
+            })
+        }
+    }
+
+    @Test
+    fun `searchInstruments converts remote yfinance symbols to internal tickers`() {
+        every { instrumentRepository.search("mex", 5) } returns emptyList()
+        every { yFinanceFetcher.searchTickers("mex", 5) } returns listOf(
+            TickerSearchResult(
+                symbol = "GMEXICOB.MX", shortname = "Grupo Mexico",
+                exchange = "BMV", currency = "MXN",
+            ),
+        )
+
+        val result = service.searchInstruments("mex", 5)
+        assertEquals(listOf("GMEXICOB"), result.map { it.ticker })
+        assertEquals("remote", result.first().source)
+    }
+
+    @Test
+    fun `searchInstruments falls back to local when remote throws`() {
+        every { instrumentRepository.search("q", 5) } returns listOf(
+            instrument("FOO", "Foo Inc.")
+        )
+        every { yFinanceFetcher.searchTickers(any(), any()) } returns emptyList()
+
+        val result = service.searchInstruments("q", 5)
+        assertEquals(listOf("FOO"), result.map { it.ticker })
+    }
+
+    private fun instrument(ticker: String, name: String) = Instrument(
+        ticker = ticker,
+        name = name,
+        currency = "USD",
+    )
 }

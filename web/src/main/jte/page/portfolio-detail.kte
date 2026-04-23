@@ -74,9 +74,9 @@
                           d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/>
                 </svg>
                 <div class="ml-3">
-                    <h3 class="text-sm font-medium text-amber-800">Weight drift detected</h3>
+                    <h3 class="text-sm font-medium text-amber-800">Saved weights are out of date</h3>
                     <p class="mt-1 text-sm text-amber-700">
-                        Some position weights have drifted &gt;1% since last update due to price changes.
+                        Some positions' saved weights no longer match their current share count × price ÷ total — most often because the total portfolio value or another position was changed. The table below shows the live weights; re-save each affected position to update the stored value.
                     </p>
                     <ul class="mt-2 text-xs text-amber-600" id="drift-list"></ul>
                 </div>
@@ -148,6 +148,7 @@
     `,
     scripts = @`
         <script src="/js/portfolio-entry.js" nonce="${nonce}"></script>
+        <script src="/js/ticker-autocomplete.js" nonce="${nonce}"></script>
         <script src="/js/portfolio-positions.js" nonce="${nonce}"></script>
     `
 )

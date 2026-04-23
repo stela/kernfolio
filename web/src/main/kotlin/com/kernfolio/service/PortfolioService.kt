@@ -87,6 +87,55 @@ class PortfolioService(
         )
     }
 
+    fun findPosition(positionId: UUID, portfolioId: UUID, userId: UUID): Position {
+        findByIdAndUserId(portfolioId, userId)
+            ?: throw PortfolioNotFoundException("Portfolio not found")
+        val position = positionRepository.findById(positionId).orElse(null)
+            ?: throw PortfolioNotFoundException("Position not found")
+        if (position.portfolioId != portfolioId) {
+            throw PortfolioNotFoundException("Position not found")
+        }
+        return position
+    }
+
+    fun updatePosition(
+        positionId: UUID,
+        portfolioId: UUID,
+        userId: UUID,
+        form: PositionForm,
+    ): Position {
+        val existing = findPosition(positionId, portfolioId, userId)
+        return positionRepository.save(
+            existing.copy(
+                positionType = form.positionType,
+                ticker = form.ticker,
+                name = form.name,
+                currency = form.currency,
+                weightPct = form.weightPct,
+                costBasisPct = form.costBasisPct,
+                intrinsicValueLocal = form.intrinsicValueLocal,
+                confidencePct = form.confidencePct,
+                sector = form.sector,
+                notes = form.notes,
+            )
+        )
+    }
+
+    // Partial update: only the weight_pct field. Used by the auto-rebalance
+    // path when the user changes the local total portfolio value — we want
+    // to sync the derived weights to the server without touching any of
+    // the richer metadata (name, sector, notes) saved against the position.
+    fun updatePositionWeight(
+        positionId: UUID,
+        portfolioId: UUID,
+        userId: UUID,
+        weightPct: BigDecimal,
+    ): Position {
+        val existing = findPosition(positionId, portfolioId, userId)
+        if (existing.weightPct.compareTo(weightPct) == 0) return existing
+        return positionRepository.save(existing.copy(weightPct = weightPct))
+    }
+
     fun deletePosition(positionId: UUID, portfolioId: UUID, userId: UUID) {
         findByIdAndUserId(portfolioId, userId)
             ?: throw PortfolioNotFoundException("Portfolio not found")

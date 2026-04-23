@@ -521,5 +521,66 @@ class RepositoryIntegrationTest {
             val found = instrumentRepository.findById("NVDA").orElse(null)
             assertEquals("Technology", found!!.sector)
         }
+
+        @Test
+        fun `search ranks exact ticker before prefix before name-substring`() {
+            instrumentRepository.save(
+                Instrument(ticker = "AAPL", name = "Apple Inc.", currency = "USD",
+                    marketCapUsd = BigDecimal("3000000000000"))
+            )
+            instrumentRepository.save(
+                Instrument(ticker = "AAPLW", name = "Apple Warrants", currency = "USD",
+                    marketCapUsd = BigDecimal("1000000"))
+            )
+            instrumentRepository.save(
+                Instrument(ticker = "SOMEOTHER", name = "Fresh Apple Ltd.", currency = "USD",
+                    marketCapUsd = BigDecimal("5000000"))
+            )
+            instrumentRepository.save(
+                Instrument(ticker = "UNRELATED", name = "Unrelated Ltd.", currency = "USD",
+                    marketCapUsd = BigDecimal("100000"))
+            )
+
+            val results = instrumentRepository.search("AAPL", 10)
+            val tickers = results.map { it.ticker }
+            assertEquals(listOf("AAPL", "AAPLW"), tickers)
+        }
+
+        @Test
+        fun `search matches by name substring case-insensitively`() {
+            instrumentRepository.save(Instrument(ticker = "AMZN", name = "Amazon.com Inc.", currency = "USD"))
+            instrumentRepository.save(Instrument(ticker = "GOOG", name = "Alphabet Inc.", currency = "USD"))
+
+            val results = instrumentRepository.search("alphabet", 10)
+            assertEquals(listOf("GOOG"), results.map { it.ticker })
+        }
+
+        @Test
+        fun `search orders ties by market cap desc`() {
+            instrumentRepository.save(
+                Instrument(ticker = "FOO1", name = "Foo One", currency = "USD",
+                    marketCapUsd = BigDecimal("1000"))
+            )
+            instrumentRepository.save(
+                Instrument(ticker = "FOO2", name = "Foo Two", currency = "USD",
+                    marketCapUsd = BigDecimal("9000"))
+            )
+
+            val results = instrumentRepository.search("FOO", 10)
+            assertEquals(listOf("FOO2", "FOO1"), results.map { it.ticker })
+        }
+
+        @Test
+        fun `search honours limit`() {
+            repeat(5) { i ->
+                instrumentRepository.save(
+                    Instrument(ticker = "BAR$i", name = "Bar $i", currency = "USD",
+                        marketCapUsd = BigDecimal(i.toLong()))
+                )
+            }
+
+            val results = instrumentRepository.search("BAR", 2)
+            assertEquals(2, results.size)
+        }
     }
 }
