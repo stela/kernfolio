@@ -63,7 +63,11 @@ services:
         condition: service_completed_successfully
 
   vault-db-init:
-    image: hashicorp/vault:1.19
+    # Reuses the vault-init image (same Dockerfile) because setup-db.sh needs
+    # both the `vault` CLI (from the base image) and `psql` (to bootstrap the
+    # app_owner role before Vault starts handing out dynamic app credentials).
+    build: ./vault/init
+    image: kernfolio-vault-init
     mem_limit: 128m
     depends_on:
       vault:

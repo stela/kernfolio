@@ -5,3 +5,5 @@ databaseChangeLog:
       file: db/changelog/002-seed-feature-flags.yaml
   - include:
       file: db/changelog/003-add-fractional-to-instruments.yaml
+  - include:
+      file: db/changelog/004-instrument-search-index.yaml

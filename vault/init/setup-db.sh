@@ -19,6 +19,30 @@ DB_ROOT_PASSWORD="$(cat "${PG_ROOT_PASSWORD_FILE}")"
 echo "=== Vault DB init: waiting for Vault ==="
 until vault status >/dev/null 2>&1; do sleep 1; done
 
+# ── Bootstrap app_owner group role ────────────────────────────────────
+# Every ephemeral app role Vault mints needs to own (or act as owner of)
+# all schema objects, so DDL operations like CREATE INDEX and ALTER TABLE
+# keep working across role rotations. We solve this with a single
+# non-login role "app_owner" that owns every object, and arrange for
+# each dynamic role to SET ROLE = app_owner on connect. That way Liquibase
+# migrations run as app_owner regardless of which ephemeral role is
+# currently active, and stale tables owned by a previous dynamic role
+# don't prevent future DDL.
+echo "=== Bootstrapping app_owner role ==="
+export PGPASSWORD="${DB_ROOT_PASSWORD}"
+psql -h postgres -U kernfolio -d kernfolio -v ON_ERROR_STOP=1 <<'SQL'
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_owner') THEN
+        CREATE ROLE app_owner NOLOGIN;
+    END IF;
+END
+$$;
+GRANT ALL ON SCHEMA public TO app_owner;
+ALTER SCHEMA public OWNER TO app_owner;
+SQL
+unset PGPASSWORD
+
 # ── Database secrets engine ──────────────────────────────────────────
 echo "=== Enabling database secrets engine ==="
 vault secrets enable database 2>/dev/null || true
@@ -30,12 +54,17 @@ vault write database/config/kernfolio \
   username="kernfolio" \
   password="${DB_ROOT_PASSWORD}"
 
+# creation_statements:
+#   - Create the ephemeral login role with an expiration.
+#   - Make it a member of app_owner so it inherits the group's privileges.
+#   - Pin role=app_owner at the role level so every session the dynamic role
+#     opens automatically runs as app_owner. Tables, indexes, and Liquibase
+#     metadata created in that session are owned by app_owner — not by the
+#     ephemeral role — so subsequent role rotations can keep editing schema.
 vault write database/roles/app \
   db_name=kernfolio \
-  creation_statements="CREATE ROLE \"{{name}}\" WITH LOGIN PASSWORD '{{password}}' VALID UNTIL '{{expiration}}'; \
-    GRANT ALL ON SCHEMA public TO \"{{name}}\"; \
-    GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO \"{{name}}\"; \
-    GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO \"{{name}}\";" \
+  creation_statements="CREATE ROLE \"{{name}}\" WITH LOGIN PASSWORD '{{password}}' VALID UNTIL '{{expiration}}' IN ROLE app_owner INHERIT; \
+    ALTER ROLE \"{{name}}\" SET ROLE = app_owner;" \
   revocation_statements="DROP ROLE IF EXISTS \"{{name}}\";" \
   default_ttl="1h" \
   max_ttl="24h"

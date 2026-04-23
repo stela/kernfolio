@@ -1,0 +1,18 @@
+databaseChangeLog:
+  - changeSet:
+      id: 004-instrument-search-index
+      author: kernfolio
+      changes:
+        - sql:
+            sql: |
+              CREATE INDEX IF NOT EXISTS idx_instruments_name_lower
+              ON instruments (LOWER(name))
+        - sql:
+            sql: |
+              CREATE INDEX IF NOT EXISTS idx_instruments_ticker_lower
+              ON instruments (LOWER(ticker))
+      rollback:
+        - sql:
+            sql: DROP INDEX IF EXISTS idx_instruments_name_lower
+        - sql:
+            sql: DROP INDEX IF EXISTS idx_instruments_ticker_lower
