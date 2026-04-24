@@ -5,6 +5,7 @@
 @param position: Position
 @param displayName: String
 @param portfolioId: UUID
+@param cagr: Double? = null
 
 <tr>
     <td class="px-4 py-3 text-sm">${position.positionType}</td>
@@ -36,6 +37,9 @@
         !{var iv = position.intrinsicValueLocal;}
         @if(iv != null)
             ${String.format(Locale.ROOT, "%,.2f", iv.toDouble())}
+            @if(cagr != null)
+                <div class="text-xs text-gray-500 font-sans">≈ ${String.format(Locale.ROOT, "%.2f", cagr * 100)}%/yr over 5y</div>
+            @endif
         @else
             <span class="text-gray-400">—</span>
         @endif

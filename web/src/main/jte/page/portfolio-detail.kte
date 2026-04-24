@@ -5,6 +5,7 @@
 @param portfolio: Portfolio
 @param positions: List<Position>
 @param displayNames: Map<UUID, String>
+@param cagrByPositionId: Map<UUID, Double>
 @param nonce: String
 @param csrfToken: String
 @param csrfHeaderName: String
@@ -133,7 +134,8 @@
                         @template.partial.position-saved-row(
                             position = pos,
                             displayName = displayNames[pos.id] ?: pos.ticker,
-                            portfolioId = portfolio.id!!
+                            portfolioId = portfolio.id!!,
+                            cagr = cagrByPositionId[pos.id]
                         )
                     @endfor
                     @if(positions.isEmpty())
