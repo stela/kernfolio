@@ -12,7 +12,6 @@ data class Position(
     val portfolioId: UUID,
     val positionType: String = "EQUITY",
     val ticker: String,
-    val name: String? = null,
     val currency: String,
     val weightPct: BigDecimal,
     val costBasisPct: BigDecimal? = null,

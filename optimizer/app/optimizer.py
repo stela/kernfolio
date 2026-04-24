@@ -201,6 +201,21 @@ def run_optimization(request: OptimizeRequest) -> OptimizeResponse:
     start = time.perf_counter_ns()
 
     prices_df = _build_prices_dataframe(request.prices)
+    # Catch obviously infeasible inputs up-front so the user gets a
+    # clear message instead of pypfopt's "Solver status: infeasible"
+    # or a divide-by-zero RuntimeWarning from numpy.
+    n_assets = len(prices_df.columns)
+    if n_assets < 1:
+        raise ValueError("Portfolio optimization requires at least 1 asset; got 0")
+    max_w = request.constraints.max_weight
+    if n_assets * max_w < 1.0:
+        min_feasible = 1.0 / n_assets
+        raise ValueError(
+            f"Constraints are infeasible: {n_assets} asset(s) with "
+            f"max_weight={max_w} cannot sum to 1.0. Increase max_weight to "
+            f"at least {min_feasible:.2f} or add more assets."
+        )
+
     cov_matrix = _compute_covariance(prices_df, request.covariance_method)
 
     all_tickers = list(prices_df.columns)

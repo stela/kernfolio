@@ -11,6 +11,7 @@ import com.kernfolio.dto.OptimizeConstraintsDto
 import com.kernfolio.dto.OptimizeErrorDto
 import com.kernfolio.dto.OptimizeRequestDto
 import com.kernfolio.dto.OptimizeResponseDto
+import com.kernfolio.marketdata.MarketDataException
 import com.kernfolio.marketdata.TickerMapper
 import com.kernfolio.repository.CachedPriceRepository
 import com.kernfolio.repository.InstrumentRepository
@@ -33,6 +34,7 @@ class OptimizerService(
     private val cachedPriceRepository: CachedPriceRepository,
     private val instrumentRepository: InstrumentRepository,
     private val currencyConversionService: CurrencyConversionService,
+    private val fxRateService: FxRateService,
     private val tickerMapper: TickerMapper,
     private val optimizationRunRepository: OptimizationRunRepository,
     private val optimizerWebClient: WebClient,
@@ -114,6 +116,24 @@ class OptimizerService(
 
         val allPrices = cachedPriceRepository.findByTickersAndDateRange(tickers, startDate, endDate)
         val pricesByTicker = allPrices.groupBy { it.ticker }
+
+        // Backfill any missing historical FX coverage *before* conversion.
+        // Scheduler is disabled in dev and ticker-add only fetches prices,
+        // so a fresh portfolio's cache lacks the 5 years of FX history the
+        // optimizer needs. Include every non-base currency we'll convert
+        // FROM, plus (if base != EUR) the base itself — CurrencyConversionService.convertTo
+        // goes source→EUR→target, so both legs need coverage.
+        val requiredCurrencies = buildSet {
+            allPrices.mapTo(this) { it.currency }
+            if (baseCurrency != "EUR") add(baseCurrency)
+        }
+        try {
+            fxRateService.ensureCoverage(requiredCurrencies, startDate, endDate)
+        } catch (e: MarketDataException) {
+            throw OptimizationException(
+                "Could not fetch historical FX rates: ${e.message}", e
+            )
+        }
 
         val convertedByTicker = mutableMapOf<String, Map<LocalDate, Double>>()
         for (ticker in tickers) {
@@ -205,7 +225,12 @@ class OptimizerService(
         }
 
         return OptimizeRequestDto(
-            algorithm = algorithm,
+            // Python optimizer matches algorithm values case-sensitively
+            // against the enum-like uppercase constants (BLACK_LITTERMAN,
+            // MAX_SHARPE, ...). The HTML form and DB-stored value are
+            // lowercase; normalise at the wire so the boundary is the only
+            // place that knows about the casing convention.
+            algorithm = algorithm.uppercase(),
             prices = prices,
             marketCaps = marketCaps,
             views = views,

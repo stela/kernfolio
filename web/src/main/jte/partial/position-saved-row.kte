@@ -3,12 +3,13 @@
 @import java.util.UUID
 
 @param position: Position
+@param displayName: String
 @param portfolioId: UUID
 
 <tr>
     <td class="px-4 py-3 text-sm">${position.positionType}</td>
     <td class="px-4 py-3 text-sm font-mono font-medium">${position.ticker}</td>
-    <td class="px-4 py-3 text-sm text-gray-500">${position.name}</td>
+    <td class="px-4 py-3 text-sm text-gray-500">${displayName}</td>
     <td class="px-4 py-3 text-sm font-mono">${position.currency}</td>
     <td class="px-4 py-3 text-sm text-right font-mono">
         @if(position.positionType == "EQUITY")
@@ -20,9 +21,15 @@
         @endif
     </td>
     <td class="px-4 py-3 text-sm text-right">
-        <span data-weight-ticker="${position.ticker}"
-              data-weight-type="${position.positionType}"
-              data-weight-currency="${position.currency}">${String.format(Locale.ROOT, "%.2f", position.weightPct.toDouble() * 100)}%</span>
+        <div>
+            <span data-weight-ticker="${position.ticker}"
+                  data-weight-type="${position.positionType}"
+                  data-weight-currency="${position.currency}">${String.format(Locale.ROOT, "%.2f", position.weightPct.toDouble() * 100)}%</span>
+        </div>
+        <div class="text-xs text-gray-400 font-mono mt-0.5"
+             data-weight-breakdown-ticker="${position.ticker}"
+             data-weight-breakdown-type="${position.positionType}"
+             data-weight-breakdown-currency="${position.currency}"></div>
     </td>
     <td class="px-4 py-3 text-sm text-gray-500">${position.sector}</td>
     <td class="px-4 py-3 text-sm text-right whitespace-nowrap">

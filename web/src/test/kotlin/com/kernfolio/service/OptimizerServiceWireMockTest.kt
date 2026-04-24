@@ -65,6 +65,7 @@ class OptimizerServiceWireMockTest {
     private val cachedPriceRepository = mockk<CachedPriceRepository>()
     private val instrumentRepository = mockk<InstrumentRepository>()
     private val currencyConversionService = mockk<CurrencyConversionService>()
+    private val fxRateService = mockk<FxRateService>(relaxed = true)
     private val tickerMapper = TickerMapper()
     private val optimizationRunRepository = mockk<OptimizationRunRepository> {
         every { save(any<OptimizationRun>()) } answers { firstArg() }
@@ -74,7 +75,7 @@ class OptimizerServiceWireMockTest {
     private val service: OptimizerService by lazy {
         OptimizerService(
             portfolioService, cachedPriceRepository, instrumentRepository,
-            currencyConversionService, tickerMapper, optimizationRunRepository,
+            currencyConversionService, fxRateService, tickerMapper, optimizationRunRepository,
             webClient, objectMapper,
         )
     }

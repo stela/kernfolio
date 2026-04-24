@@ -15,6 +15,9 @@ interface CachedFxRateRepository : Repository<CachedFxRate, String> {
     @Query("SELECT * FROM cached_fx_rates WHERE currency_pair = :currencyPair ORDER BY rate_date DESC LIMIT 1")
     fun findLatestByCurrencyPair(currencyPair: String): CachedFxRate?
 
+    @Query("SELECT * FROM cached_fx_rates WHERE currency_pair = :currencyPair ORDER BY rate_date ASC LIMIT 1")
+    fun findEarliestByCurrencyPair(currencyPair: String): CachedFxRate?
+
     @Modifying
     @Query("""
         INSERT INTO cached_fx_rates (currency_pair, rate_date, rate, fetched_at)

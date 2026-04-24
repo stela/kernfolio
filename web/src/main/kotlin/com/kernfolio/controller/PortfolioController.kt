@@ -73,6 +73,7 @@ class PortfolioController(
         val positions = portfolioService.findPositionsByPortfolioId(id, userId)
         model.addAttribute("portfolio", portfolio)
         model.addAttribute("positions", positions)
+        model.addAttribute("displayNames", portfolioService.displayNames(positions))
         model.addAttribute("positionForm", PositionForm())
         return "page/portfolio-detail"
     }
@@ -151,6 +152,7 @@ class PortfolioController(
         try {
             val position = portfolioService.addPosition(id, currentUserId(authentication), positionForm)
             model.addAttribute("position", position)
+            model.addAttribute("displayName", portfolioService.displayNameFor(position))
             model.addAttribute("portfolioId", id)
             return "partial/position-saved-row"
         } catch (_: PortfolioNotFoundException) {
@@ -171,6 +173,7 @@ class PortfolioController(
             throw ResponseStatusException(HttpStatus.NOT_FOUND)
         }
         model.addAttribute("position", position)
+        model.addAttribute("displayName", portfolioService.displayNameFor(position))
         model.addAttribute("portfolioId", id)
         return "partial/position-edit-row"
     }
@@ -187,6 +190,7 @@ class PortfolioController(
         try {
             val position = portfolioService.updatePosition(posId, id, currentUserId(authentication), positionForm)
             model.addAttribute("position", position)
+            model.addAttribute("displayName", portfolioService.displayNameFor(position))
             model.addAttribute("portfolioId", id)
             return "partial/position-saved-row"
         } catch (_: PortfolioNotFoundException) {

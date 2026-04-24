@@ -292,14 +292,14 @@ class EndToEndFlowTest {
     @Order(13)
     fun `add equity positions`() {
         data class TestPosition(
-            val ticker: String, val name: String, val currency: String,
+            val ticker: String, val currency: String,
             val sector: String, val weight: String,
         )
 
         val positions = listOf(
-            TestPosition("GOOG", "Alphabet Inc.", "USD", "Technology", "0.40"),
-            TestPosition("CSU.TO", "Constellation Software", "CAD", "Technology", "0.35"),
-            TestPosition("8PSB", "Physical Silver ETC", "GBP", "Commodities", "0.25"),
+            TestPosition("GOOG", "USD", "Technology", "0.40"),
+            TestPosition("CSU.TO", "CAD", "Technology", "0.35"),
+            TestPosition("8PSB", "GBP", "Commodities", "0.25"),
         )
 
         for (pos in positions) {
@@ -309,7 +309,6 @@ class EndToEndFlowTest {
                     .with(csrf())
                     .param("positionType", "EQUITY")
                     .param("ticker", pos.ticker)
-                    .param("name", pos.name)
                     .param("currency", pos.currency)
                     .param("weightPct", pos.weight)
                     .param("sector", pos.sector)
@@ -387,6 +386,21 @@ class EndToEndFlowTest {
         instrumentRepository.save(Instrument("GOOG", "Alphabet Inc.", "NASDAQ", "USD", "Technology", BigDecimal("2000000000000")))
         instrumentRepository.save(Instrument("CSU.TO", "Constellation Software", "TSX", "CAD", "Technology", BigDecimal("70000000000")))
         instrumentRepository.save(Instrument("8PSB", "Physical Silver ETC", "LSE", "GBP", "Commodities", BigDecimal("500000000")))
+
+        // OptimizerService.ensureCoverage backfills missing FX history
+        // through Frankfurter before running conversion. The seeded FX
+        // rates below only cover ~10 days; the 5-year lookback triggers
+        // an old-side gap fetch. Stub an empty response so the optimizer
+        // happily uses whatever's in the cache.
+        wireMockServer.stubFor(
+            post(urlPathEqualTo("/fetch-fx-rates"))
+                .willReturn(
+                    aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", MediaType.APPLICATION_JSON_VALUE)
+                        .withBody("""{"rates": {}}""")
+                )
+        )
 
         // Insert 10 days of prices (within 5-year lookback)
         val dates = (1L..10L).map { LocalDate.now().minusDays(it) }

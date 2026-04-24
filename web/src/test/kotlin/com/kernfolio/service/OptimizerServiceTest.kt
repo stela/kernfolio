@@ -5,6 +5,7 @@ import com.kernfolio.domain.Instrument
 import com.kernfolio.domain.OptimizationRun
 import com.kernfolio.domain.Portfolio
 import com.kernfolio.domain.Position
+import com.kernfolio.marketdata.MarketDataException
 import com.kernfolio.marketdata.TickerMapper
 import com.kernfolio.repository.CachedPriceRepository
 import com.kernfolio.repository.InstrumentRepository
@@ -31,6 +32,7 @@ class OptimizerServiceTest {
     private val cachedPriceRepository = mockk<CachedPriceRepository>()
     private val instrumentRepository = mockk<InstrumentRepository>()
     private val currencyConversionService = mockk<CurrencyConversionService>()
+    private val fxRateService = mockk<FxRateService>(relaxed = true)
     private val tickerMapper = TickerMapper()
     private val optimizationRunRepository = mockk<OptimizationRunRepository> {
         every { save(any<OptimizationRun>()) } answers { firstArg() }
@@ -40,7 +42,7 @@ class OptimizerServiceTest {
 
     private val service = OptimizerService(
         portfolioService, cachedPriceRepository, instrumentRepository,
-        currencyConversionService, tickerMapper, optimizationRunRepository,
+        currencyConversionService, fxRateService, tickerMapper, optimizationRunRepository,
         optimizerWebClient, objectMapper,
     )
 
@@ -75,6 +77,29 @@ class OptimizerServiceTest {
 
     private fun cachedPrice(ticker: String, date: LocalDate, price: BigDecimal, currency: String = "USD") =
         CachedPrice(ticker = ticker, priceDate = date, closePrice = price, currency = currency)
+
+    // Stubs the optimizer WebClient chain to return a trivial successful
+    // response. Individual tests that need to capture the request body
+    // should still do it inline (slot<Any>()), but tests that only care
+    // that `optimize` completes past the HTTP call can use this.
+    private fun stubOptimizerOk() {
+        val requestSpec = mockk<WebClient.RequestBodyUriSpec>()
+        val requestBodySpec = mockk<WebClient.RequestBodySpec>()
+        val responseSpec = mockk<WebClient.ResponseSpec>()
+        every { optimizerWebClient.post() } returns requestSpec
+        every { requestSpec.uri("/optimize") } returns requestBodySpec
+        every { requestBodySpec.bodyValue(any()) } returns requestBodySpec
+        every { requestBodySpec.retrieve() } returns responseSpec
+        every { responseSpec.bodyToMono(any<Class<*>>()) } returns mockk {
+            every { block() } returns com.kernfolio.dto.OptimizeResponseDto(
+                weights = emptyMap(),
+                metrics = com.kernfolio.dto.OptimizeMetricsDto(0.09, 0.17, 0.35, -0.03),
+                efficientFrontier = emptyList(),
+                correlationMatrix = emptyMap(),
+                computationMs = 100,
+            )
+        }
+    }
 
     @Nested
     inner class CagrConversion {
@@ -250,6 +275,161 @@ class OptimizerServiceTest {
             assertFalse(request.prices.containsKey("GMEXICOB"))
             // Result weights should be mapped back to internal tickers
             assertTrue(result.results.optimizedWeights.containsKey("GMEXICOB"))
+        }
+
+        @Test
+        fun `uppercases algorithm at the wire while keeping stored value lowercase`() {
+            // Python optimizer compares request.algorithm against
+            // "BLACK_LITTERMAN" literally. The HTML form and the DB-stored
+            // OptimizationRun.algorithm are lowercase. Normalise only at the
+            // wire so the UI/DB can stay lowercase without the Python layer
+            // rejecting the request as "Unsupported algorithm".
+            val pos = position("GOOG", currency = "USD")
+            every { portfolioService.findByIdAndUserId(portfolioId, userId) } returns portfolio
+            every { portfolioService.findPositionsByPortfolioId(portfolioId, userId) } returns listOf(pos)
+            val dates = listOf(LocalDate.of(2025, 1, 1), LocalDate.of(2025, 1, 2))
+            val prices = dates.map { cachedPrice("GOOG", it, BigDecimal("100")) }
+            every { cachedPriceRepository.findByTickersAndDateRange(any(), any(), any()) } returns prices
+            every { currencyConversionService.convertTo(any(), any(), any()) } answers {
+                (firstArg<List<com.kernfolio.domain.CachedPrice>>()).map { it.priceDate to it.closePrice }
+            }
+            every { cachedPriceRepository.findLatestByTicker(any()) } returns null
+            every { instrumentRepository.findByTickers(any()) } returns listOf(
+                Instrument(ticker = "GOOG", currency = "USD", marketCapUsd = BigDecimal("1850000000000")),
+            )
+
+            val requestSlot = slot<Any>()
+            val requestSpec = mockk<WebClient.RequestBodyUriSpec>()
+            val requestBodySpec = mockk<WebClient.RequestBodySpec>()
+            val responseSpec = mockk<WebClient.ResponseSpec>()
+            every { optimizerWebClient.post() } returns requestSpec
+            every { requestSpec.uri("/optimize") } returns requestBodySpec
+            every { requestBodySpec.bodyValue(capture(requestSlot)) } returns requestBodySpec
+            every { requestBodySpec.retrieve() } returns responseSpec
+            every { responseSpec.bodyToMono(any<Class<*>>()) } returns mockk {
+                every { block() } returns com.kernfolio.dto.OptimizeResponseDto(
+                    weights = mapOf("GOOG" to 1.0),
+                    metrics = com.kernfolio.dto.OptimizeMetricsDto(0.09, 0.17, 0.35, -0.03),
+                    efficientFrontier = emptyList(),
+                    correlationMatrix = emptyMap(),
+                    computationMs = 100,
+                )
+            }
+
+            val result = service.optimize(portfolioId, userId, "black_litterman")
+
+            val request = requestSlot.captured as com.kernfolio.dto.OptimizeRequestDto
+            assertEquals("BLACK_LITTERMAN", request.algorithm)
+            // Stored algorithm stays lowercase — DB / UI convention.
+            assertEquals("black_litterman", result.algorithm)
+        }
+    }
+
+    @Nested
+    inner class FxBackfill {
+
+        @Test
+        fun `triggers FX backfill for every non-base currency present in prices`() {
+            // Regression test for: optimize used to fail with
+            //   "No FX rate available for USD on or before 2021-04-26"
+            // because nothing backfilled 5-year FX history before calling
+            // CurrencyConversionService. Now OptimizerService must ensure
+            // coverage first.
+            val usdPos = position("GOOG", currency = "USD")
+            val sekPos = position("VOLVO-B", currency = "SEK")
+
+            every { portfolioService.findByIdAndUserId(portfolioId, userId) } returns portfolio
+            every { portfolioService.findPositionsByPortfolioId(portfolioId, userId) } returns
+                listOf(usdPos, sekPos)
+
+            val dates = listOf(LocalDate.of(2021, 1, 1), LocalDate.of(2026, 1, 1))
+            val prices = listOf(
+                cachedPrice("GOOG", dates[0], BigDecimal("100"), "USD"),
+                cachedPrice("GOOG", dates[1], BigDecimal("200"), "USD"),
+                cachedPrice("VOLVO-B", dates[0], BigDecimal("250"), "SEK"),
+                cachedPrice("VOLVO-B", dates[1], BigDecimal("300"), "SEK"),
+            )
+            every { cachedPriceRepository.findByTickersAndDateRange(any(), any(), any()) } returns prices
+            every { currencyConversionService.convertTo(any(), any(), any()) } answers {
+                (firstArg<List<com.kernfolio.domain.CachedPrice>>()).map { it.priceDate to it.closePrice }
+            }
+            every { cachedPriceRepository.findLatestByTicker(any()) } returns null
+            every { instrumentRepository.findByTickers(any()) } returns listOf(
+                Instrument(ticker = "GOOG", currency = "USD"),
+                Instrument(ticker = "VOLVO-B", currency = "SEK"),
+            )
+
+            stubOptimizerOk()
+
+            service.optimize(portfolioId, userId, "black_litterman")
+
+            // ensureCoverage must be called with both currencies before any
+            // conversion happens, so the conversion below can't fail on
+            // missing FX.
+            io.mockk.verify {
+                fxRateService.ensureCoverage(
+                    match { it.toSet() == setOf("USD", "SEK") },
+                    any(),
+                    any(),
+                )
+            }
+        }
+
+        @Test
+        fun `includes non-EUR base currency in backfill set for cross-leg conversion`() {
+            // SEK-based portfolio holding USD: convertTo goes USD → EUR → SEK,
+            // so BOTH EUR/USD and EUR/SEK need coverage. The base currency
+            // itself must therefore be part of the ensureCoverage call.
+            val sekPortfolio = portfolio.copy(baseCurrency = "SEK")
+            val usdPos = position("GOOG", currency = "USD")
+
+            every { portfolioService.findByIdAndUserId(portfolioId, userId) } returns sekPortfolio
+            every { portfolioService.findPositionsByPortfolioId(portfolioId, userId) } returns listOf(usdPos)
+
+            val dates = listOf(LocalDate.of(2025, 1, 1), LocalDate.of(2025, 1, 2))
+            val prices = dates.map { cachedPrice("GOOG", it, BigDecimal("100"), "USD") }
+            every { cachedPriceRepository.findByTickersAndDateRange(any(), any(), any()) } returns prices
+            every { currencyConversionService.convertTo(any(), any(), any()) } answers {
+                (firstArg<List<com.kernfolio.domain.CachedPrice>>()).map { it.priceDate to it.closePrice }
+            }
+            every { cachedPriceRepository.findLatestByTicker(any()) } returns null
+            every { instrumentRepository.findByTickers(any()) } returns listOf(
+                Instrument(ticker = "GOOG", currency = "USD"),
+            )
+
+            stubOptimizerOk()
+
+            service.optimize(portfolioId, userId, "black_litterman")
+
+            io.mockk.verify {
+                fxRateService.ensureCoverage(
+                    match { it.toSet() == setOf("USD", "SEK") },
+                    any(),
+                    any(),
+                )
+            }
+        }
+
+        @Test
+        fun `wraps backfill failure in OptimizationException with underlying cause`() {
+            // Consistent with other pre-optimizer-call failures (e.g. "no
+            // price data available"): the exception surfaces via the
+            // optimize-error partial; no FAILED run is persisted because the
+            // existing try/catch only wraps the HTTP call. Narrow scope.
+            val pos = position("GOOG", currency = "USD")
+            every { portfolioService.findByIdAndUserId(portfolioId, userId) } returns portfolio
+            every { portfolioService.findPositionsByPortfolioId(portfolioId, userId) } returns listOf(pos)
+            val dates = listOf(LocalDate.of(2025, 1, 1), LocalDate.of(2025, 1, 2))
+            val prices = dates.map { cachedPrice("GOOG", it, BigDecimal("100"), "USD") }
+            every { cachedPriceRepository.findByTickersAndDateRange(any(), any(), any()) } returns prices
+            every { fxRateService.ensureCoverage(any(), any(), any()) } throws
+                MarketDataException("frankfurter unreachable")
+
+            val ex = assertThrows<OptimizationException> {
+                service.optimize(portfolioId, userId, "black_litterman")
+            }
+            assertTrue(ex.message!!.contains("FX"), "message should mention FX: ${ex.message}")
+            assertTrue(ex.cause is MarketDataException)
         }
     }
 

@@ -13,12 +13,18 @@ document.addEventListener('DOMContentLoaded', function () {
     // Form submission via fetch
     var form = document.getElementById('optimize-form');
     var spinner = document.getElementById('spinner');
+    var submitBtn = document.getElementById('optimize-submit');
     var resultsContainer = document.getElementById('results-container');
     if (!form) return;
 
+    function setBusy(busy) {
+        if (spinner) spinner.classList.toggle('hidden', !busy);
+        if (submitBtn) submitBtn.disabled = busy;
+    }
+
     form.addEventListener('submit', function (e) {
         e.preventDefault();
-        if (spinner) spinner.classList.remove('hidden');
+        setBusy(true);
 
         Http.fetch(form.action, {
             method: 'POST',
@@ -29,7 +35,9 @@ document.addEventListener('DOMContentLoaded', function () {
                 // On successful optimization, the server 302s to the run's
                 // results page; fetch auto-follows and we navigate the
                 // browser there. Session-expiry 401 is already handled by
-                // Http.fetch (reloads the page).
+                // Http.fetch (reloads the page). Keep the spinner visible
+                // through the navigation — setBusy(false) on redirect
+                // would flash the page before unload.
                 if (r.redirected) {
                     window.location.href = r.url;
                     return null;
@@ -40,10 +48,11 @@ document.addEventListener('DOMContentLoaded', function () {
                 if (html != null && resultsContainer) {
                     resultsContainer.innerHTML = html;
                 }
-                if (spinner) spinner.classList.add('hidden');
+                // Only clear busy if we're staying on the page (error case).
+                if (html != null) setBusy(false);
             })
             .catch(function () {
-                if (spinner) spinner.classList.add('hidden');
+                setBusy(false);
             });
     });
 });

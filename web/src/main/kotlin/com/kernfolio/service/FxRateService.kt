@@ -24,6 +24,91 @@ class FxRateService(
 
     companion object {
         const val BASE_CURRENCY = "EUR"
+
+        // Upper bound on a single Frankfurter request window. Keeps us from
+        // slamming a free public API with a 5-year fetch when only the edges
+        // of the window are missing; also bounds retry cost on transient
+        // failure. Tuned for "big enough that a cold 5-year backfill is only
+        // a handful of calls, small enough that any single failure is cheap
+        // to redo."
+        private const val FX_BACKFILL_CHUNK_DAYS = 365L
+    }
+
+    // Returns the sub-ranges of [windowStart, windowEnd] that are missing
+    // from the cache for the given pair. Assumes the cache is built by a
+    // contiguous-upsert writer, so a hole in the middle of
+    // [earliestCached, latestCached] is not considered here — findRate's
+    // weekend-forward-fill in CurrencyConversionService absorbs small holes.
+    private fun missingRanges(
+        pair: String,
+        windowStart: LocalDate,
+        windowEnd: LocalDate,
+    ): List<Pair<LocalDate, LocalDate>> {
+        val earliest = cachedFxRateRepository.findEarliestByCurrencyPair(pair)?.rateDate
+        val latest = cachedFxRateRepository.findLatestByCurrencyPair(pair)?.rateDate
+        if (earliest == null || latest == null) return listOf(windowStart to windowEnd)
+        val gaps = mutableListOf<Pair<LocalDate, LocalDate>>()
+        if (earliest.isAfter(windowStart)) gaps += windowStart to earliest.minusDays(1)
+        if (latest.isBefore(windowEnd)) gaps += latest.plusDays(1) to windowEnd
+        return gaps
+    }
+
+    // On-demand historical backfill used by the optimizer before running
+    // currency conversion. Fetches only the missing sub-ranges per currency
+    // and chunks requests to FX_BACKFILL_CHUNK_DAYS so we don't hand
+    // Frankfurter a 5-year-wide request.
+    fun ensureCoverage(
+        currencies: Collection<String>,
+        startDate: LocalDate,
+        endDate: LocalDate,
+    ) {
+        if (startDate.isAfter(endDate)) return
+
+        // currency -> list of (gapStart, gapEnd); currencies with identical
+        // gap lists can share a single multi-currency Frankfurter call.
+        val gapsByCurrency = currencies
+            .asSequence()
+            .map { it.uppercase() }
+            .filter { it != BASE_CURRENCY }
+            .distinct()
+            .associateWith { missingRanges("$BASE_CURRENCY$it", startDate, endDate) }
+            .filterValues { it.isNotEmpty() }
+
+        if (gapsByCurrency.isEmpty()) return
+
+        // Group currencies by their gap list so identical-gap currencies
+        // share a request. Typical case: everything has the same old-side
+        // gap because the cache was seeded by the same 14-day UI fetch.
+        val currenciesByGapSet = gapsByCurrency.entries
+            .groupBy({ it.value }, { it.key })
+
+        for ((gapList, currenciesForGroup) in currenciesByGapSet) {
+            for ((gapStart, gapEnd) in gapList) {
+                var chunkStart = gapStart
+                while (!chunkStart.isAfter(gapEnd)) {
+                    val chunkEnd = minOf(
+                        chunkStart.plusDays(FX_BACKFILL_CHUNK_DAYS - 1),
+                        gapEnd,
+                    )
+                    log.info(
+                        "FX backfill: {} for {} currencies ({}..{})",
+                        "$BASE_CURRENCY/${currenciesForGroup.joinToString(",")}",
+                        currenciesForGroup.size, chunkStart, chunkEnd,
+                    )
+                    val response = frankfurterClient.fetchFxRates(
+                        BASE_CURRENCY, currenciesForGroup, chunkStart, chunkEnd
+                    )
+                    response.rates.forEach { (date, currencyRates) ->
+                        currencyRates.forEach { (currency, rate) ->
+                            cachedFxRateRepository.upsert(
+                                "$BASE_CURRENCY$currency", date, rate
+                            )
+                        }
+                    }
+                    chunkStart = chunkEnd.plusDays(1)
+                }
+            }
+        }
     }
 
     fun refreshAllFxRates() {

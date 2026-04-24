@@ -93,8 +93,37 @@ class CurrencyConversionServiceTest {
 
         every { fxRateService.getRatesForDateRange("USD", date, date) } returns emptyList()
 
-        assertThrows<MarketDataException> {
+        val ex = assertThrows<MarketDataException> {
             service.convertToEur(prices, "USD")
         }
+        // The message must name the CURRENCY PAIR (EUR/USD), not just "USD".
+        // FX rates are bidirectional and stored as EUR/X — knowing only one
+        // side leaves the reader guessing which lookup failed.
+        assertTrue(
+            ex.message!!.contains("EUR/USD"),
+            "expected message to name the EUR/USD pair, got: ${ex.message}",
+        )
+        assertTrue(ex.message!!.contains(date.toString()))
+    }
+
+    @Test
+    fun `cross-currency conversion error names the target pair`() {
+        // SEK -> USD goes SEK -> EUR -> USD. Failure on the second leg
+        // should blame EUR/USD, not bare "USD".
+        val date = LocalDate.of(2025, 6, 15)
+        val prices = listOf(price("VOLVO-B", date, BigDecimal("300"), "SEK"))
+
+        every { fxRateService.getRatesForDateRange("SEK", date, date) } returns listOf(
+            CachedFxRate(currencyPair = "EURSEK", rateDate = date, rate = BigDecimal("11.50")),
+        )
+        every { fxRateService.getRatesForDateRange("USD", date, date) } returns emptyList()
+
+        val ex = assertThrows<MarketDataException> {
+            service.convertTo(prices, "SEK", "USD")
+        }
+        assertTrue(
+            ex.message!!.contains("EUR/USD"),
+            "expected message to name the EUR/USD pair, got: ${ex.message}",
+        )
     }
 }

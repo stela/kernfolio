@@ -143,11 +143,8 @@
 
             if (posType === 'CASH') {
                 formData.append('ticker', 'CASH.' + currency);
-                formData.append('name', currency + ' Cash');
             } else {
                 formData.append('ticker', tr.querySelector('.js-ticker-input').value);
-                var nameInput = tr.querySelector('[name="name"]');
-                if (nameInput && nameInput.value) formData.append('name', nameInput.value);
                 var sectorInput = tr.querySelector('[name="sector"]');
                 if (sectorInput && sectorInput.value) formData.append('sector', sectorInput.value);
             }
@@ -178,7 +175,6 @@
         var tickerInput = tr.querySelector('.js-ticker-input');
         var tickerList = tr.querySelector('.js-ticker-suggest');
         var tickerStatus = tr.querySelector('.js-ticker-status');
-        var nameInput = tr.querySelector('input[name="name"]');
         var sectorInput = tr.querySelector('input[name="sector"]');
         var fxFetchTimer = null;
         var priceFetchTimer = null;
@@ -195,7 +191,12 @@
         function renderPriceStatus(entry, ticker) {
             if (entry) {
                 var parts = [ticker];
-                if (entry.close) parts.push(parseFloat(entry.close).toFixed(2));
+                if (entry.close) {
+                    parts.push(parseFloat(entry.close).toLocaleString(undefined, {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                    }));
+                }
                 if (entry.currency) parts.push(entry.currency);
                 setStatus(parts.join(' · '), 'ok');
             } else {
@@ -240,8 +241,6 @@
             var hidden = tr.querySelector('.js-cash-ticker-hidden');
             if (span) span.textContent = 'CASH.' + cur;
             if (hidden) hidden.value = 'CASH.' + cur;
-            var nameHidden = tr.querySelector('[name="cashName"]');
-            if (nameHidden) nameHidden.value = cur + ' Cash';
         }
 
         function scheduleFxFetch() {
@@ -274,16 +273,17 @@
                 listEl: tickerList,
                 statusEl: tickerStatus,
                 onSelect: function (suggestion) {
+                    // Suggestion overrides current-row metadata. Name is no
+                    // longer stored on positions — we only overwrite the
+                    // fields that are still editable (currency, sector),
+                    // and kick a price fetch so the weight reflects reality.
                     if (priceFetchTimer) clearTimeout(priceFetchTimer);
-                    if (nameInput && !nameInput.value) nameInput.value = suggestion.name || '';
                     if (currencyInput && suggestion.currency) {
                         currencyInput.value = suggestion.currency;
                         updateCashTicker();
                         scheduleFxFetch();
                     }
-                    if (sectorInput && !sectorInput.value && suggestion.sector) {
-                        sectorInput.value = suggestion.sector;
-                    }
+                    if (sectorInput) sectorInput.value = suggestion.sector || '';
                     refreshPriceForTicker(suggestion.ticker).then(updateWeight);
                 },
             });

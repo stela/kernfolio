@@ -46,7 +46,6 @@ class PortfolioApiController(
                         id = pos.id.toString(),
                         positionType = pos.positionType,
                         ticker = pos.ticker,
-                        name = pos.name,
                         currency = pos.currency,
                         weightPct = pos.weightPct,
                         costBasisPct = pos.costBasisPct,

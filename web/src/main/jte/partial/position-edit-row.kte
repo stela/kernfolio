@@ -2,10 +2,10 @@
 @import java.util.UUID
 
 @param position: Position
+@param displayName: String
 @param portfolioId: UUID
 
 !{var isCash = position.positionType == "CASH";}
-!{var nameValue = position.name ?: "";}
 !{var sectorValue = position.sector ?: "";}
 
 <tr data-new-row data-edit-row
@@ -31,12 +31,7 @@
         <span class="js-cash-ticker js-cash-field ${if (!isCash) "hidden" else ""} text-sm text-gray-500">${if (isCash) position.ticker else ""}</span>
         <input type="hidden" name="cashTicker" class="js-cash-ticker-hidden js-cash-field ${if (!isCash) "hidden" else ""}" value="${if (isCash) position.ticker else ""}">
     </td>
-    <td class="px-4 py-2">
-        <input type="text" name="name" placeholder="Optional"
-               value="${if (!isCash) nameValue else ""}"
-               class="js-equity-field ${if (isCash) "hidden" else ""} w-32 rounded-md border border-gray-300 px-2 py-1 text-sm">
-        <input type="hidden" name="cashName" class="js-cash-field ${if (!isCash) "hidden" else ""}" value="${if (isCash) nameValue else ""}">
-    </td>
+    <td class="px-4 py-2 text-sm text-gray-500">${displayName}</td>
     <td class="px-4 py-2">
         <input type="text" name="currency" value="${position.currency}" required maxlength="3"
                class="js-currency w-16 rounded-md border border-gray-300 px-2 py-1 text-sm font-mono uppercase">

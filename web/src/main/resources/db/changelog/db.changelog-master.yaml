@@ -7,3 +7,5 @@ databaseChangeLog:
       file: db/changelog/003-add-fractional-to-instruments.yaml
   - include:
       file: db/changelog/004-instrument-search-index.yaml
+  - include:
+      file: db/changelog/005-drop-positions-name.yaml

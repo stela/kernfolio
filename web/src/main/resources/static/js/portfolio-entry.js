@@ -4,6 +4,20 @@
  * Users enter share counts (equity) or cash amounts instead of weight percentages.
  * The browser computes weight_pct from current prices and total portfolio value,
  * stores absolute values in localStorage, and sends only percentages to the backend.
+ *
+ * ── Locale note ─────────────────────────────────────────────────────────
+ * Numbers shown to the user are formatted via `toLocaleString` (see
+ * formatAmount / formatPct / formatQty). `toFixed` is locale-blind and
+ * reserved for serialization only (JSON bodies, hidden form fields) where
+ * the server parser is dot-strict.
+ *
+ * `parseFloat` is also locale-blind — it always expects "." as the decimal
+ * separator. We rely on every input to parseFloat in this file being
+ * dot-canonical: JSON numbers from the server (JSON spec), `<input
+ * type="number">.value` (HTML spec returns canonical form regardless of
+ * user-typed locale), and our own localStorage writes (String(n) uses
+ * default toString which is dot). Don't feed parseFloat a raw string
+ * from a `type="text"` input without normalizing first.
  */
 var PortfolioEntry = (function () {
     var portfolioId = '';
@@ -120,7 +134,15 @@ var PortfolioEntry = (function () {
             weights[pos.id] = live.toFixed(6);
             anyChanged = true;
         });
-        if (!anyChanged) return;
+        if (!anyChanged) {
+            // No drift to push, but the `positions` array still reflects
+            // the pre-save state — callers like savePosition rely on us to
+            // refresh so the newly-inserted row's JS-populated spans
+            // (data-shares-ticker, data-weight-ticker) actually get
+            // filled in. Without this, a freshly-saved position shows an
+            // empty shares column until the next full page reload.
+            return refresh();
+        }
 
         Http.fetch('/api/portfolios/' + portfolioId + '/rebalance', {
             method: 'POST',
@@ -366,23 +388,50 @@ var PortfolioEntry = (function () {
         }
         var filled = filledInBaseCurrency();
         var pct = (filled / totalValue) * 100;
+        // CSS lengths must use a dot — `width: 12,50%` is invalid.
         bar.style.width = Math.min(Math.max(pct, 0), 100).toFixed(2) + '%';
         if (filled <= 0) {
             text.textContent = 'No positions saved yet — 0% allocated of ' +
-                totalValue.toFixed(2) + ' ' + baseCurrency + '.';
+                formatAmount(totalValue) + ' ' + baseCurrency + '.';
         } else if (Math.abs(filled - totalValue) < 0.01) {
-            text.textContent = '100% allocated (' + totalValue.toFixed(2) + ' ' + baseCurrency + ').';
+            text.textContent = '100% allocated (' + formatAmount(totalValue) + ' ' + baseCurrency + ').';
         } else if (filled < totalValue) {
             var remaining = totalValue - filled;
             var remainingPct = 100 - pct;
-            text.textContent = pct.toFixed(2) + '% allocated — ' +
-                remaining.toFixed(2) + ' ' + baseCurrency + ' (' + remainingPct.toFixed(2) + '%) remaining.';
+            text.textContent = formatPct(pct) + ' allocated — ' +
+                formatAmount(remaining) + ' ' + baseCurrency +
+                ' (' + formatPct(remainingPct) + ') remaining.';
         } else {
             // Shouldn't happen post-save because we auto-bump, but covers
             // transient in-flight states.
-            text.textContent = 'Over-allocated by ' + (filled - totalValue).toFixed(2) + ' ' + baseCurrency + '.';
+            text.textContent = 'Over-allocated by ' + formatAmount(filled - totalValue) + ' ' + baseCurrency + '.';
         }
         container.classList.remove('hidden');
+    }
+
+    // Locale-aware formatters. Numbers shown to the user go through these
+    // so that e.g. a de-DE browser sees "1.234,56" instead of "1,234.56".
+    // `toFixed` is locale-blind (always emits "."), so reserve it for
+    // serialization (form fields, JSON bodies) where the server parser is
+    // dot-strict.
+    function formatAmount(value, digits) {
+        if (!isFinite(value)) return '';
+        if (digits == null) digits = 2;
+        return value.toLocaleString(undefined, {
+            minimumFractionDigits: digits,
+            maximumFractionDigits: digits,
+        });
+    }
+    function formatPct(value, digits) {
+        if (digits == null) digits = 2;
+        return formatAmount(value, digits) + '%';
+    }
+    function formatQty(value) {
+        // Whole shares render compactly ("100"); fractional shares (ETFs,
+        // reinvested dividends) up to 4 decimals, trailing zeros stripped.
+        if (!isFinite(value)) return '';
+        if (Number.isInteger(value)) return value.toLocaleString();
+        return value.toLocaleString(undefined, { maximumFractionDigits: 4 });
     }
 
     function formatWeight(ticker, positionType, currency) {
@@ -391,7 +440,20 @@ var PortfolioEntry = (function () {
         // misleading ("did my 200 EUR turn into nothing?").
         if (totalValue <= 0) return '—';
         var w = computeWeightPct(ticker, positionType, currency);
-        return (w * 100).toFixed(2) + '%';
+        return formatPct(w * 100);
+    }
+
+    // The native-currency price for equity rows. Surfaces the per-share
+    // price and listing currency below the weight so the user can see
+    // what the % was derived from without opening the edit form. Cash
+    // rows render nothing — amount + currency are already in the main
+    // cells, and FX for the portfolio as a whole is shown once in the
+    // "oldest loaded FX rate" header above the table.
+    function formatWeightBreakdown(ticker, positionType, currency) {
+        if (positionType !== 'EQUITY') return '';
+        var pd = prices[ticker];
+        if (!pd || pd.close == null || !pd.currency) return '';
+        return formatAmount(parseFloat(pd.close)) + ' ' + pd.currency;
     }
 
     function getShares(ticker) {
@@ -422,11 +484,11 @@ var PortfolioEntry = (function () {
     function updateDisplays() {
         // Update shares displays
         document.querySelectorAll('[data-shares-ticker]').forEach(function (el) {
-            el.textContent = getShares(el.dataset.sharesTicker);
+            el.textContent = formatQty(getShares(el.dataset.sharesTicker));
         });
         // Update cash displays
         document.querySelectorAll('[data-cash-currency]').forEach(function (el) {
-            el.textContent = getCashAmount(el.dataset.cashCurrency);
+            el.textContent = formatAmount(getCashAmount(el.dataset.cashCurrency));
         });
         // Recompute weight cells live: the server-rendered `weight_pct`
         // is the last value persisted at save time, which goes stale as
@@ -438,6 +500,12 @@ var PortfolioEntry = (function () {
             var type = el.dataset.weightType;
             var currency = el.dataset.weightCurrency;
             el.textContent = formatWeight(ticker, type, currency);
+        });
+        document.querySelectorAll('[data-weight-breakdown-ticker]').forEach(function (el) {
+            var ticker = el.dataset.weightBreakdownTicker;
+            var type = el.dataset.weightBreakdownType;
+            var currency = el.dataset.weightBreakdownCurrency;
+            el.textContent = formatWeightBreakdown(ticker, type, currency);
         });
 
         updateFreshnessIndicator();
@@ -501,8 +569,8 @@ var PortfolioEntry = (function () {
             if (drift > 0.01) {
                 drifted.push({
                     ticker: pos.ticker,
-                    backendWeight: (backendWeight * 100).toFixed(2),
-                    currentWeight: (currentWeight * 100).toFixed(2),
+                    backendWeight: formatPct(backendWeight * 100),
+                    currentWeight: formatPct(currentWeight * 100),
                 });
             }
         }
@@ -514,7 +582,7 @@ var PortfolioEntry = (function () {
                 list.innerHTML = '';
                 drifted.forEach(function (d) {
                     var li = document.createElement('li');
-                    li.textContent = d.ticker + ': backend ' + d.backendWeight + '% vs. current ' + d.currentWeight + '%';
+                    li.textContent = d.ticker + ': backend ' + d.backendWeight + ' vs. current ' + d.currentWeight;
                     list.appendChild(li);
                 });
                 warning.classList.remove('hidden');

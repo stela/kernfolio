@@ -142,5 +142,134 @@ def test_optimize_invalid_algorithm():
     request["algorithm"] = "UNSUPPORTED"
     resp = client.post("/optimize", json=request)
     assert resp.status_code == 500
-    detail = resp.json()["detail"]
-    assert detail["error"] == "OptimizationError"
+    # Body is the raw {error, message, detail} dict — see main.py for why
+    # we deliberately don't wrap it under "detail".
+    body = resp.json()
+    assert body["error"] == "OptimizationError"
+    assert "Unsupported algorithm" in body["message"]
+
+
+# ── Algorithm × asset-count coverage ──────────────────────────────────
+#
+# Each supported algorithm gets tested against 0, 1, and 2+ non-currency
+# assets. The purpose is to guarantee that no call path silently swallows
+# an error or produces garbage — every case must either return a valid
+# response or fail with a clear, user-actionable message.
+
+
+def _synthetic_request(algorithm: str, n_tickers: int, max_weight: float = 0.60) -> dict:
+    """Build an optimize request with n_tickers randomly-walked price series."""
+    import numpy as np
+
+    rng = np.random.default_rng(42)
+    n_days = 252
+    dates = [
+        f"2024-{(i // 22) + 1:02d}-{(i % 22) + 1:02d}" for i in range(n_days)
+    ]
+    tickers = [f"T{i}" for i in range(n_tickers)]
+
+    prices: dict = {"dates": dates}
+    market_caps: dict = {}
+    sectors: dict = {}
+    for i, t in enumerate(tickers):
+        prices[t] = (100 * np.cumprod(1 + rng.normal(0.0004, 0.015, n_days))).tolist()
+        market_caps[t] = (10 ** (11 + i))
+        sectors[t] = "Tech"
+
+    return {
+        "algorithm": algorithm,
+        "prices": prices,
+        "market_caps": market_caps,
+        "views": {},
+        "confidences": {},
+        "risk_free_rate": 0.03,
+        "tau": 0.05,
+        "kelly_fraction": 0.5,
+        "constraints": {
+            "min_weight": 0.0,
+            "max_weight": max_weight,
+            "long_only": True,
+        },
+        "sectors": sectors,
+        "covariance_method": "ledoit_wolf",
+    }
+
+
+# ── BLACK_LITTERMAN ─────────────────
+
+
+def test_bl_zero_tickers_returns_clear_error():
+    resp = client.post("/optimize", json=_synthetic_request("BLACK_LITTERMAN", 0))
+    assert resp.status_code == 500
+    body = resp.json()
+    assert "at least 1 asset" in body["message"].lower() or "requires at least" in body["message"].lower()
+
+
+def test_bl_one_ticker_with_fractional_cap_is_infeasible():
+    # Default max_weight=0.40 with 1 asset can't sum to 1.0. Must fail
+    # with a user-friendly message, not the raw solver's "infeasible" cry.
+    resp = client.post(
+        "/optimize", json=_synthetic_request("BLACK_LITTERMAN", 1, max_weight=0.40)
+    )
+    assert resp.status_code == 500
+    body = resp.json()
+    msg = body["message"].lower()
+    assert "infeasible" in msg
+    assert "max_weight" in msg
+
+
+def test_bl_one_ticker_with_full_cap_succeeds():
+    # max_weight=1.0 permits 100% allocation; 1-asset portfolio is
+    # mathematically degenerate but should not error — you get 100%
+    # weight in the single asset.
+    resp = client.post(
+        "/optimize", json=_synthetic_request("BLACK_LITTERMAN", 1, max_weight=1.0)
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert set(data["weights"].keys()) == {"T0"}
+    assert abs(data["weights"]["T0"] - 1.0) < 0.001
+
+
+def test_bl_two_tickers_succeeds():
+    resp = client.post("/optimize", json=_synthetic_request("BLACK_LITTERMAN", 2))
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert set(data["weights"].keys()) == {"T0", "T1"}
+    assert abs(sum(data["weights"].values()) - 1.0) < 0.001
+
+
+# ── MAX_SHARPE / MIN_VARIANCE / RISK_PARITY: unsupported today ──────
+#
+# These are listed in the UI form's algorithm dropdown but the Python
+# optimizer only implements BLACK_LITTERMAN. Each must fail fast with
+# an "Unsupported algorithm" message — not hang, crash, or silently
+# accept and return zeros.
+
+
+@pytest.mark.parametrize(
+    "algorithm",
+    ["MAX_SHARPE", "MIN_VARIANCE", "RISK_PARITY"],
+)
+def test_unsupported_algorithm_with_valid_tickers_fails_cleanly(algorithm):
+    resp = client.post("/optimize", json=_synthetic_request(algorithm, 3))
+    assert resp.status_code == 500
+    body = resp.json()
+    assert body["error"] == "OptimizationError"
+    assert "Unsupported algorithm" in body["message"]
+    assert algorithm in body["message"]
+
+
+@pytest.mark.parametrize(
+    "algorithm",
+    ["MAX_SHARPE", "MIN_VARIANCE", "RISK_PARITY"],
+)
+def test_unsupported_algorithm_with_zero_tickers_fails_cleanly(algorithm):
+    # Feasibility guard runs before the algorithm dispatch, so the 0-asset
+    # case reports "at least 1 asset" regardless of which unsupported
+    # algorithm was requested. That's fine — the first error encountered
+    # is still user-actionable.
+    resp = client.post("/optimize", json=_synthetic_request(algorithm, 0))
+    assert resp.status_code == 500
+    body = resp.json()
+    assert body["error"] == "OptimizationError"

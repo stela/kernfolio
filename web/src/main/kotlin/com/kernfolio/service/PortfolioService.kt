@@ -2,6 +2,7 @@ package com.kernfolio.service
 
 import com.kernfolio.domain.Portfolio
 import com.kernfolio.domain.Position
+import com.kernfolio.repository.InstrumentRepository
 import com.kernfolio.repository.PortfolioRepository
 import com.kernfolio.repository.PositionRepository
 import org.springframework.stereotype.Service
@@ -13,7 +14,6 @@ class PortfolioNotFoundException(message: String) : RuntimeException(message)
 data class PositionForm(
     val positionType: String = "EQUITY",
     val ticker: String = "",
-    val name: String? = null,
     val currency: String = "USD",
     val weightPct: BigDecimal = BigDecimal.ZERO,
     val costBasisPct: BigDecimal? = null,
@@ -27,6 +27,7 @@ data class PositionForm(
 class PortfolioService(
     private val portfolioRepository: PortfolioRepository,
     private val positionRepository: PositionRepository,
+    private val instrumentRepository: InstrumentRepository,
 ) {
 
     fun findByUserId(userId: UUID): List<Portfolio> =
@@ -75,7 +76,6 @@ class PortfolioService(
                 portfolioId = portfolioId,
                 positionType = form.positionType,
                 ticker = form.ticker,
-                name = form.name,
                 currency = form.currency,
                 weightPct = form.weightPct,
                 costBasisPct = form.costBasisPct,
@@ -109,7 +109,6 @@ class PortfolioService(
             existing.copy(
                 positionType = form.positionType,
                 ticker = form.ticker,
-                name = form.name,
                 currency = form.currency,
                 weightPct = form.weightPct,
                 costBasisPct = form.costBasisPct,
@@ -134,6 +133,33 @@ class PortfolioService(
         val existing = findPosition(positionId, portfolioId, userId)
         if (existing.weightPct.compareTo(weightPct) == 0) return existing
         return positionRepository.save(existing.copy(weightPct = weightPct))
+    }
+
+    // Display-name resolution. `positions` no longer carries a `name`
+    // column — authoritative names live in `instruments` for equities and
+    // are synthesized from currency for cash. Renders go through these
+    // helpers; they are the only place that knows how to derive a name.
+    fun displayNameFor(position: Position): String = when (position.positionType) {
+        "CASH" -> "${position.currency} Cash"
+        else -> instrumentRepository.findById(position.ticker).orElse(null)?.name
+            ?: position.ticker
+    }
+
+    fun displayNames(positions: List<Position>): Map<UUID, String> {
+        val equityTickers = positions
+            .filter { it.positionType != "CASH" }
+            .map { it.ticker }
+            .distinct()
+        val byTicker = if (equityTickers.isEmpty()) emptyMap()
+            else instrumentRepository.findByTickers(equityTickers)
+                .associate { it.ticker to (it.name ?: it.ticker) }
+        return positions.mapNotNull { pos ->
+            val id = pos.id ?: return@mapNotNull null
+            id to when (pos.positionType) {
+                "CASH" -> "${pos.currency} Cash"
+                else -> byTicker[pos.ticker] ?: pos.ticker
+            }
+        }.toMap()
     }
 
     fun deletePosition(positionId: UUID, portfolioId: UUID, userId: UUID) {

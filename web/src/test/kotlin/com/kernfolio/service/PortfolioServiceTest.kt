@@ -1,7 +1,9 @@
 package com.kernfolio.service
 
+import com.kernfolio.domain.Instrument
 import com.kernfolio.domain.Portfolio
 import com.kernfolio.domain.Position
+import com.kernfolio.repository.InstrumentRepository
 import com.kernfolio.repository.PortfolioRepository
 import com.kernfolio.repository.PositionRepository
 import io.mockk.every
@@ -23,6 +25,7 @@ class PortfolioServiceTest {
 
     private val portfolioRepository = mockk<PortfolioRepository>()
     private val positionRepository = mockk<PositionRepository>()
+    private val instrumentRepository = mockk<InstrumentRepository>(relaxed = true)
     private lateinit var service: PortfolioService
 
     private val userId = UUID.randomUUID()
@@ -39,7 +42,7 @@ class PortfolioServiceTest {
 
     @BeforeEach
     fun setup() {
-        service = PortfolioService(portfolioRepository, positionRepository)
+        service = PortfolioService(portfolioRepository, positionRepository, instrumentRepository)
     }
 
     @Nested
@@ -200,6 +203,84 @@ class PortfolioServiceTest {
             assertThrows<PortfolioNotFoundException> {
                 service.deletePosition(positionId, portfolioId, userId)
             }
+        }
+    }
+
+    @Nested
+    inner class DisplayName {
+        // Authoritative name lives in `instruments.name` for equities;
+        // for cash it's synthesized from the currency. Regression guard for
+        // the dropped `positions.name` column — a position row carrying
+        // ticker "BE" must resolve to Bloom Energy's name via instruments,
+        // never whatever stale string was stored on the row.
+        @Test
+        fun `equity name comes from instruments`() {
+            val pos = Position(
+                id = UUID.randomUUID(),
+                portfolioId = portfolioId,
+                ticker = "BE",
+                currency = "USD",
+                weightPct = BigDecimal("0.10"),
+            )
+            every { instrumentRepository.findById("BE") } returns Optional.of(
+                Instrument(ticker = "BE", name = "Bloom Energy Corporation", currency = "USD")
+            )
+
+            assertEquals("Bloom Energy Corporation", service.displayNameFor(pos))
+        }
+
+        @Test
+        fun `equity falls back to ticker when instruments row is missing`() {
+            val pos = Position(
+                portfolioId = portfolioId,
+                ticker = "NEW1",
+                currency = "USD",
+                weightPct = BigDecimal("0.05"),
+            )
+            every { instrumentRepository.findById("NEW1") } returns Optional.empty()
+
+            assertEquals("NEW1", service.displayNameFor(pos))
+        }
+
+        @Test
+        fun `cash name is synthesized from currency regardless of instruments`() {
+            val pos = Position(
+                portfolioId = portfolioId,
+                positionType = "CASH",
+                ticker = "CASH.EUR",
+                currency = "EUR",
+                weightPct = BigDecimal("0.05"),
+            )
+
+            assertEquals("EUR Cash", service.displayNameFor(pos))
+            verify(exactly = 0) { instrumentRepository.findById(any()) }
+        }
+
+        @Test
+        fun `displayNames batches instruments lookup and keys by position id`() {
+            val be = Position(
+                id = UUID.randomUUID(), portfolioId = portfolioId,
+                ticker = "BE", currency = "USD", weightPct = BigDecimal("0.10"),
+            )
+            val goog = Position(
+                id = UUID.randomUUID(), portfolioId = portfolioId,
+                ticker = "GOOG", currency = "USD", weightPct = BigDecimal("0.20"),
+            )
+            val cash = Position(
+                id = UUID.randomUUID(), portfolioId = portfolioId,
+                positionType = "CASH", ticker = "CASH.USD",
+                currency = "USD", weightPct = BigDecimal("0.05"),
+            )
+            every { instrumentRepository.findByTickers(match { it.toSet() == setOf("BE", "GOOG") }) } returns listOf(
+                Instrument(ticker = "BE", name = "Bloom Energy Corporation", currency = "USD"),
+                Instrument(ticker = "GOOG", name = "Alphabet Inc.", currency = "USD"),
+            )
+
+            val names = service.displayNames(listOf(be, goog, cash))
+
+            assertEquals("Bloom Energy Corporation", names[be.id])
+            assertEquals("Alphabet Inc.", names[goog.id])
+            assertEquals("USD Cash", names[cash.id])
         }
     }
 }

@@ -41,7 +41,7 @@ class CurrencyConversionService(
         return eurPrices.map { (date, eurPrice) ->
             val rate = findRate(rateByDate, date)
                 ?: throw MarketDataException(
-                    "No FX rate available for $targetCurrency on or before $date"
+                    "No FX rate available for ${FxRateService.BASE_CURRENCY}/$targetCurrency on or before $date"
                 )
             // EUR/TARGET rate means 1 EUR = rate TARGET, so EUR_price * rate = TARGET_price
             date to eurPrice.multiply(rate).setScale(6, RoundingMode.HALF_UP)
@@ -67,7 +67,7 @@ class CurrencyConversionService(
         return prices.map { price ->
             val rate = findRate(rateByDate, price.priceDate)
                 ?: throw MarketDataException(
-                    "No FX rate available for $sourceCurrency on or before ${price.priceDate}"
+                    "No FX rate available for ${FxRateService.BASE_CURRENCY}/$sourceCurrency on or before ${price.priceDate}"
                 )
             // EUR/USD = 1.19 means 1 EUR = 1.19 USD, so price_in_EUR = price_in_USD / rate
             price.priceDate to price.closePrice.divide(rate, 6, RoundingMode.HALF_UP)

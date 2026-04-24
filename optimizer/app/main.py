@@ -1,6 +1,7 @@
 import traceback
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 
 from app.fetchers import fetch_fx_rates, fetch_prices, search_tickers
 from app.optimizer import run_optimization
@@ -43,11 +44,16 @@ def optimize_endpoint(request: OptimizeRequest):
     try:
         return run_optimization(request)
     except Exception as exc:
-        raise HTTPException(
+        # Use JSONResponse directly (not HTTPException) so the body is the
+        # raw {error, message, detail} shape. HTTPException would wrap it
+        # under a top-level "detail" key, which the Kotlin OptimizeErrorDto
+        # can't deserialize — the caller would then fall back to the generic
+        # "Optimizer returned 500" message and swallow the actual cause.
+        return JSONResponse(
             status_code=500,
-            detail={
+            content={
                 "error": "OptimizationError",
                 "message": str(exc),
                 "detail": traceback.format_exc(),
             },
-        ) from exc
+        )

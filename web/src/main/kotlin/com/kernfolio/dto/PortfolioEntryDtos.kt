@@ -11,7 +11,6 @@ data class PositionEntryDto(
     val id: String,
     val positionType: String,
     val ticker: String,
-    val name: String?,
     val currency: String,
     val weightPct: BigDecimal,
     val costBasisPct: BigDecimal?,

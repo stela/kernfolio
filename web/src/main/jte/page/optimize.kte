@@ -99,17 +99,22 @@
                     </div>
                 </div>
 
-                <div class="mt-6 flex items-center gap-4">
-                    <button type="submit"
-                            class="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
+                <div class="mt-6 flex items-start gap-4">
+                    <button type="submit" id="optimize-submit"
+                            class="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-blue-300">
                         Run Optimization
                     </button>
-                    <div id="spinner" class="hidden flex items-center gap-2 text-sm text-gray-500">
-                        <svg class="h-4 w-4 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <div id="spinner" class="hidden flex items-start gap-2 text-sm text-gray-600 pt-2">
+                        <svg class="h-4 w-4 animate-spin mt-0.5 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
                         </svg>
-                        Optimizing...
+                        <div>
+                            <div class="font-medium text-gray-700">Running optimization…</div>
+                            <div class="text-xs text-gray-500 mt-0.5">
+                                Caching missing historical FX rates on first run — this may take up to ~10 seconds.
+                            </div>
+                        </div>
                     </div>
                 </div>
             </form>

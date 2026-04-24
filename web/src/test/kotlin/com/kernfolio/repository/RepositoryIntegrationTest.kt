@@ -523,7 +523,7 @@ class RepositoryIntegrationTest {
         }
 
         @Test
-        fun `search ranks exact ticker before prefix before name-substring`() {
+        fun `search ranks exact ticker before prefix before name-word-prefix`() {
             instrumentRepository.save(
                 Instrument(ticker = "AAPL", name = "Apple Inc.", currency = "USD",
                     marketCapUsd = BigDecimal("3000000000000"))
@@ -547,12 +547,47 @@ class RepositoryIntegrationTest {
         }
 
         @Test
-        fun `search matches by name substring case-insensitively`() {
+        fun `search matches by name prefix case-insensitively`() {
             instrumentRepository.save(Instrument(ticker = "AMZN", name = "Amazon.com Inc.", currency = "USD"))
             instrumentRepository.save(Instrument(ticker = "GOOG", name = "Alphabet Inc.", currency = "USD"))
 
             val results = instrumentRepository.search("alphabet", 10)
             assertEquals(listOf("GOOG"), results.map { it.ticker })
+        }
+
+        @Test
+        fun `search matches by mid-name word prefix (space-delimited)`() {
+            // "hath" should surface Berkshire Hathaway via the second
+            // word of the company name.
+            instrumentRepository.save(
+                Instrument(ticker = "BRK-B", name = "Berkshire Hathaway Inc.", currency = "USD",
+                    marketCapUsd = BigDecimal("800000000000"))
+            )
+            instrumentRepository.save(Instrument(ticker = "AMZN", name = "Amazon.com Inc.", currency = "USD"))
+
+            val results = instrumentRepository.search("hath", 10)
+            assertEquals(listOf("BRK-B"), results.map { it.ticker })
+        }
+
+        @Test
+        fun `search does not return mid-word substring matches`() {
+            // Regression test: typing "be" must not surface "Alphabet"
+            // (which used to match because 'be' sits mid-word in "Alpha-
+            // be-t"). The old unanchored LIKE '%query%' was the culprit;
+            // word-prefix semantics eliminate the surprise.
+            instrumentRepository.save(Instrument(ticker = "GOOG", name = "Alphabet Inc.", currency = "USD"))
+            instrumentRepository.save(
+                Instrument(ticker = "BE", name = "Bloom Energy Corporation", currency = "USD",
+                    marketCapUsd = BigDecimal("3000000000"))
+            )
+            instrumentRepository.save(
+                Instrument(ticker = "BYND", name = "Beyond Meat, Inc.", currency = "USD",
+                    marketCapUsd = BigDecimal("1000000000"))
+            )
+
+            val tickers = instrumentRepository.search("be", 10).map { it.ticker }
+            assertEquals(listOf("BE", "BYND"), tickers)
+            // Specifically: GOOG (Alphabet) must NOT appear.
         }
 
         @Test

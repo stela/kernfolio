@@ -346,6 +346,21 @@ class BrowserFlowTest {
         instrumentRepository.save(Instrument("CSU.TO", "Constellation Software", "TSX", "CAD", "Technology", BigDecimal("70000000000")))
         instrumentRepository.save(Instrument("8PSB", "Physical Silver ETC", "LSE", "GBP", "Commodities", BigDecimal("500000000")))
 
+        // OptimizerService.ensureCoverage backfills missing FX history
+        // through Frankfurter before running conversion. The 10-day FX
+        // seed below doesn't cover the 5-year lookback, so an old-side
+        // gap fetch fires. Stub an empty response to keep the optimizer
+        // using whatever's already cached.
+        wireMockServer.stubFor(
+            post(urlPathEqualTo("/fetch-fx-rates"))
+                .willReturn(
+                    aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", MediaType.APPLICATION_JSON_VALUE)
+                        .withBody("""{"rates": {}}""")
+                )
+        )
+
         val dates = (1L..10L).map { LocalDate.now().minusDays(it) }
         for (date in dates) {
             cachedPriceRepository.upsert("GOOG", date, BigDecimal("175.00"), "USD")
@@ -577,15 +592,18 @@ class BrowserFlowTest {
         // Save is blocked without a total portfolio value set.
         driver.findElement(By.id("total-value-input")).sendKeys("100000")
 
-        // Add position with XSS payloads
+        // Add position with XSS payloads. The name column is no longer a
+        // user-editable field — it's derived from the `instruments` table at
+        // render time — so this test now only covers the ticker and sector
+        // inputs. Name-escaping is exercised against `instruments.name` via
+        // template output-escaping (see partial/position-saved-row.kte,
+        // which renders `${displayName}` via JTE's default HTML escape).
         driver.findElement(By.id("add-position-btn")).click()
         val newRow = wait.until(
             ExpectedConditions.presenceOfElementLocated(By.cssSelector("tr[data-new-row]"))
         )
         val tickerField = newRow.findElement(By.cssSelector(".js-ticker-input"))
         tickerField.sendKeys("<b>XSS</b>")
-        val nameField = newRow.findElement(By.cssSelector("[name='name']"))
-        nameField.sendKeys("<script>alert('pos')</script>")
         val sectorField = newRow.findElement(By.cssSelector("[name='sector']"))
         sectorField.sendKeys("<img/onerror=alert(1)>")
         val currField = newRow.findElement(By.cssSelector(".js-currency"))
@@ -599,7 +617,6 @@ class BrowserFlowTest {
         navigateTo(xssPfPath)
 
         // Payloads should be escaped, not interpreted
-        assertThat(driver.pageSource).doesNotContain("<script>alert('pos')</script>")
         assertThat(driver.pageSource).doesNotContain("<img/onerror")
         val xssExec = driver.executeScript("return window.__xss")
         assertThat(xssExec).isNull()

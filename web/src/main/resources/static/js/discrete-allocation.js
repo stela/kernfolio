@@ -221,7 +221,7 @@ function renderAllocation(container, result, trades, basePrices, totalValue, bas
         html += td(formatShares(shares), 'text-right');
         html += td(formatNum(price), 'text-right');
         html += td(formatNum(value), 'text-right');
-        html += td(weight.toFixed(2) + '%', 'text-right');
+        html += td(formatNum(weight) + '%', 'text-right');
         html += '</tr>';
     }
     html += '</tbody></table></div>';

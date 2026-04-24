@@ -203,4 +203,189 @@ class FxRateServiceTest {
         verify(exactly = 0) { frankfurterClient.fetchFxRates(any(), any(), any(), any()) }
         verify(exactly = 0) { cachedFxRateRepository.findLatestByCurrencyPair(any()) }
     }
+
+    // --- ensureCoverage ---
+
+    private fun cachedRate(pair: String, date: LocalDate) =
+        CachedFxRate(currencyPair = pair, rateDate = date, rate = BigDecimal("1.1"))
+
+    @Test
+    fun `ensureCoverage is a no-op when no currencies given`() {
+        service.ensureCoverage(emptyList(), LocalDate.of(2021, 1, 1), LocalDate.of(2026, 1, 1))
+
+        verify(exactly = 0) { frankfurterClient.fetchFxRates(any(), any(), any(), any()) }
+        verify(exactly = 0) { cachedFxRateRepository.findEarliestByCurrencyPair(any()) }
+    }
+
+    @Test
+    fun `ensureCoverage skips EUR`() {
+        service.ensureCoverage(listOf("EUR"), LocalDate.of(2021, 1, 1), LocalDate.of(2026, 1, 1))
+
+        verify(exactly = 0) { frankfurterClient.fetchFxRates(any(), any(), any(), any()) }
+        verify(exactly = 0) { cachedFxRateRepository.findEarliestByCurrencyPair(any()) }
+    }
+
+    @Test
+    fun `ensureCoverage is a no-op when cache fully covers the window`() {
+        val windowStart = LocalDate.of(2021, 1, 1)
+        val windowEnd = LocalDate.of(2026, 1, 1)
+        every { cachedFxRateRepository.findEarliestByCurrencyPair("EURUSD") } returns
+            cachedRate("EURUSD", windowStart)
+        every { cachedFxRateRepository.findLatestByCurrencyPair("EURUSD") } returns
+            cachedRate("EURUSD", windowEnd)
+
+        service.ensureCoverage(listOf("USD"), windowStart, windowEnd)
+
+        verify(exactly = 0) { frankfurterClient.fetchFxRates(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `ensureCoverage fetches full range in one shot when cache is empty and window is under 365 days`() {
+        val windowStart = LocalDate.of(2025, 10, 1)
+        val windowEnd = LocalDate.of(2026, 4, 1)
+        every { cachedFxRateRepository.findEarliestByCurrencyPair("EURUSD") } returns null
+        every { cachedFxRateRepository.findLatestByCurrencyPair("EURUSD") } returns null
+        every { frankfurterClient.fetchFxRates("EUR", listOf("USD"), any(), any()) } returns
+            FetchFxRatesResponse(rates = emptyMap())
+
+        service.ensureCoverage(listOf("USD"), windowStart, windowEnd)
+
+        verify(exactly = 1) {
+            frankfurterClient.fetchFxRates("EUR", listOf("USD"), windowStart, windowEnd)
+        }
+    }
+
+    @Test
+    fun `ensureCoverage splits a 6-year window into six chunks of 365 days`() {
+        val windowStart = LocalDate.of(2020, 1, 1)
+        val windowEnd = LocalDate.of(2026, 1, 1)
+        every { cachedFxRateRepository.findEarliestByCurrencyPair("EURUSD") } returns null
+        every { cachedFxRateRepository.findLatestByCurrencyPair("EURUSD") } returns null
+        every { frankfurterClient.fetchFxRates("EUR", listOf("USD"), any(), any()) } returns
+            FetchFxRatesResponse(rates = emptyMap())
+
+        service.ensureCoverage(listOf("USD"), windowStart, windowEnd)
+
+        // 2191 days / 365 = 6 full chunks + 1 remainder chunk = 7 calls
+        verify(exactly = 7) {
+            frankfurterClient.fetchFxRates("EUR", listOf("USD"), any(), any())
+        }
+    }
+
+    @Test
+    fun `ensureCoverage issues separate fetches for old-side and new-side gaps`() {
+        val windowStart = LocalDate.of(2021, 1, 1)
+        val windowEnd = LocalDate.of(2026, 4, 24)
+        // Cache only covers a narrow middle strip, like the 14-day on-demand
+        // UI fetch — gaps both before and after.
+        val cachedStart = LocalDate.of(2026, 4, 9)
+        val cachedEnd = LocalDate.of(2026, 4, 10)
+        every { cachedFxRateRepository.findEarliestByCurrencyPair("EURUSD") } returns
+            cachedRate("EURUSD", cachedStart)
+        every { cachedFxRateRepository.findLatestByCurrencyPair("EURUSD") } returns
+            cachedRate("EURUSD", cachedEnd)
+        every { frankfurterClient.fetchFxRates("EUR", listOf("USD"), any(), any()) } returns
+            FetchFxRatesResponse(rates = emptyMap())
+
+        service.ensureCoverage(listOf("USD"), windowStart, windowEnd)
+
+        // Old-side gap: 2021-01-01 → 2026-04-08. 1924 days → 6 chunks
+        //   (5 × 365 + 1 × 99). Plus new-side gap: 2026-04-11 → 2026-04-24,
+        //   1 chunk. Total = 7 fetches.
+        verify(exactly = 7) {
+            frankfurterClient.fetchFxRates("EUR", listOf("USD"), any(), any())
+        }
+        // Old-side gap ends the day before the cache starts.
+        verify(atLeast = 1) {
+            frankfurterClient.fetchFxRates("EUR", listOf("USD"), any(), cachedStart.minusDays(1))
+        }
+        // New-side gap starts the day after the cache ends and ends at windowEnd.
+        verify(exactly = 1) {
+            frankfurterClient.fetchFxRates("EUR", listOf("USD"), cachedEnd.plusDays(1), windowEnd)
+        }
+    }
+
+    @Test
+    fun `ensureCoverage batches currencies with identical missing ranges into one call`() {
+        val windowStart = LocalDate.of(2025, 6, 1)
+        val windowEnd = LocalDate.of(2025, 7, 1)
+        // Both USD and JPY have empty caches → identical "missing all" gap,
+        // so they should share a single multi-currency request.
+        every { cachedFxRateRepository.findEarliestByCurrencyPair(any()) } returns null
+        every { cachedFxRateRepository.findLatestByCurrencyPair(any()) } returns null
+        every { frankfurterClient.fetchFxRates(any(), any(), any(), any()) } returns
+            FetchFxRatesResponse(rates = emptyMap())
+
+        service.ensureCoverage(listOf("USD", "JPY"), windowStart, windowEnd)
+
+        verify(exactly = 1) {
+            frankfurterClient.fetchFxRates(
+                "EUR",
+                match { it.toSet() == setOf("USD", "JPY") },
+                windowStart,
+                windowEnd,
+            )
+        }
+    }
+
+    @Test
+    fun `ensureCoverage issues separate calls for currencies with different gaps`() {
+        val windowStart = LocalDate.of(2021, 1, 1)
+        val windowEnd = LocalDate.of(2025, 1, 1)
+        // USD: fully cached. JPY: nothing cached.
+        every { cachedFxRateRepository.findEarliestByCurrencyPair("EURUSD") } returns
+            cachedRate("EURUSD", windowStart)
+        every { cachedFxRateRepository.findLatestByCurrencyPair("EURUSD") } returns
+            cachedRate("EURUSD", windowEnd)
+        every { cachedFxRateRepository.findEarliestByCurrencyPair("EURJPY") } returns null
+        every { cachedFxRateRepository.findLatestByCurrencyPair("EURJPY") } returns null
+        every { frankfurterClient.fetchFxRates(any(), any(), any(), any()) } returns
+            FetchFxRatesResponse(rates = emptyMap())
+
+        service.ensureCoverage(listOf("USD", "JPY"), windowStart, windowEnd)
+
+        // Only JPY is fetched; USD is skipped entirely.
+        verify(exactly = 0) {
+            frankfurterClient.fetchFxRates("EUR", match { it.contains("USD") }, any(), any())
+        }
+        verify(atLeast = 1) {
+            frankfurterClient.fetchFxRates("EUR", listOf("JPY"), any(), any())
+        }
+    }
+
+    @Test
+    fun `ensureCoverage upserts every returned rate`() {
+        val windowStart = LocalDate.of(2025, 6, 1)
+        val windowEnd = LocalDate.of(2025, 6, 3)
+        every { cachedFxRateRepository.findEarliestByCurrencyPair(any()) } returns null
+        every { cachedFxRateRepository.findLatestByCurrencyPair(any()) } returns null
+        every { frankfurterClient.fetchFxRates("EUR", listOf("USD"), any(), any()) } returns
+            FetchFxRatesResponse(
+                rates = mapOf(
+                    LocalDate.of(2025, 6, 2) to mapOf("USD" to BigDecimal("1.05")),
+                    LocalDate.of(2025, 6, 3) to mapOf("USD" to BigDecimal("1.06")),
+                )
+            )
+
+        service.ensureCoverage(listOf("USD"), windowStart, windowEnd)
+
+        verify { cachedFxRateRepository.upsert("EURUSD", LocalDate.of(2025, 6, 2), BigDecimal("1.05")) }
+        verify { cachedFxRateRepository.upsert("EURUSD", LocalDate.of(2025, 6, 3), BigDecimal("1.06")) }
+    }
+
+    @Test
+    fun `ensureCoverage normalises lowercase currency codes`() {
+        every { cachedFxRateRepository.findEarliestByCurrencyPair("EURUSD") } returns null
+        every { cachedFxRateRepository.findLatestByCurrencyPair("EURUSD") } returns null
+        every { frankfurterClient.fetchFxRates(any(), any(), any(), any()) } returns
+            FetchFxRatesResponse(rates = emptyMap())
+
+        service.ensureCoverage(
+            listOf("usd"), LocalDate.of(2025, 6, 1), LocalDate.of(2025, 6, 2)
+        )
+
+        verify {
+            frankfurterClient.fetchFxRates("EUR", listOf("USD"), any(), any())
+        }
+    }
 }

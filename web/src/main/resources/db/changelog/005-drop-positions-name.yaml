@@ -1,0 +1,10 @@
+databaseChangeLog:
+  - changeSet:
+      id: 005-drop-positions-name
+      author: kernfolio
+      changes:
+        - sql:
+            sql: ALTER TABLE positions DROP COLUMN IF EXISTS name
+      rollback:
+        - sql:
+            sql: ALTER TABLE positions ADD COLUMN name VARCHAR(255)
