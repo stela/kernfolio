@@ -9,3 +9,5 @@ databaseChangeLog:
       file: db/changelog/004-instrument-search-index.yaml
   - include:
       file: db/changelog/005-drop-positions-name.yaml
+  - include:
+      file: db/changelog/006-rename-positions-confidence.yaml

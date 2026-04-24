@@ -95,7 +95,7 @@ class OptimizerServiceWireMockTest {
             Position(
                 id = UUID.randomUUID(), portfolioId = portfolioId,
                 ticker = "GOOG", currency = "USD", weightPct = BigDecimal("0.05"),
-                intrinsicValueLocal = BigDecimal("200"), confidencePct = BigDecimal("80"),
+                intrinsicValueLocal = BigDecimal("200"), confidence = BigDecimal("0.80"),
                 sector = "Technology",
             ),
             Position(

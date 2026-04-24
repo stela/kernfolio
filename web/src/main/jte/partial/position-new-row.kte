@@ -40,6 +40,18 @@
         <input type="text" name="sector" placeholder="Sector"
                class="js-equity-field w-24 rounded-md border border-gray-300 px-2 py-1 text-sm">
     </td>
+    <td class="px-4 py-2">
+        <input type="number" step="0.01" min="0" name="intrinsicValueLocal" placeholder="IV"
+               class="js-iv js-equity-field w-24 rounded-md border border-gray-300 px-2 py-1 text-sm text-right">
+        <div class="js-cagr-hint js-equity-field mt-1 text-xs text-gray-500" aria-live="polite"></div>
+    </td>
+    <td class="px-4 py-2">
+        <span class="js-equity-field inline-flex items-center gap-1">
+            <input type="number" step="any" min="0" max="100" name="confidence" placeholder="80"
+                   class="js-confidence w-16 rounded-md border border-gray-300 px-2 py-1 text-sm text-right">
+            <span class="text-xs text-gray-500">%</span>
+        </span>
+    </td>
     <td class="px-4 py-2 text-right">
         <input type="hidden" name="weightPct" value="0">
         <input type="hidden" name="costBasisPct" value="">

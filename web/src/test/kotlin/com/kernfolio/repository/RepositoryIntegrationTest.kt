@@ -202,7 +202,7 @@ class RepositoryIntegrationTest {
                     weightPct = BigDecimal("0.023500"),
                     costBasisPct = BigDecimal("0.019200"),
                     intrinsicValueLocal = BigDecimal("3500.0000"),
-                    confidencePct = BigDecimal("0.7500"),
+                    confidence = BigDecimal("0.7500"),
                 )
             )
 
@@ -211,7 +211,7 @@ class RepositoryIntegrationTest {
             assertEquals(0, BigDecimal("0.023500").compareTo(pos.weightPct))
             assertEquals(0, BigDecimal("0.019200").compareTo(pos.costBasisPct))
             assertEquals(0, BigDecimal("3500.0000").compareTo(pos.intrinsicValueLocal))
-            assertEquals(0, BigDecimal("0.7500").compareTo(pos.confidencePct))
+            assertEquals(0, BigDecimal("0.7500").compareTo(pos.confidence))
         }
 
         @Test

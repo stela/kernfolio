@@ -18,7 +18,7 @@ data class PositionForm(
     val weightPct: BigDecimal = BigDecimal.ZERO,
     val costBasisPct: BigDecimal? = null,
     val intrinsicValueLocal: BigDecimal? = null,
-    val confidencePct: BigDecimal? = null,
+    val confidence: BigDecimal? = null,
     val sector: String? = null,
     val notes: String? = null,
 )
@@ -80,7 +80,7 @@ class PortfolioService(
                 weightPct = form.weightPct,
                 costBasisPct = form.costBasisPct,
                 intrinsicValueLocal = form.intrinsicValueLocal,
-                confidencePct = form.confidencePct,
+                confidence = form.confidence,
                 sector = form.sector,
                 notes = form.notes,
             )
@@ -113,7 +113,7 @@ class PortfolioService(
                 weightPct = form.weightPct,
                 costBasisPct = form.costBasisPct,
                 intrinsicValueLocal = form.intrinsicValueLocal,
-                confidencePct = form.confidencePct,
+                confidence = form.confidence,
                 sector = form.sector,
                 notes = form.notes,
             )

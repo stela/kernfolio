@@ -9,6 +9,7 @@ import com.kernfolio.repository.UserRepository
 import com.kernfolio.service.PortfolioService
 import com.kernfolio.service.PositionForm
 import org.hamcrest.Matchers.containsString
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
@@ -254,6 +255,29 @@ class PortfolioControllerTest {
             val positions = positionRepository.findByPortfolioId(portfolio.id!!)
             assert(positions.size == 1)
             assert(positions[0].ticker == "AMZN")
+        }
+
+        @Test
+        fun `POST position persists intrinsic value and confidence`() {
+            val testUser = createUser("alice")
+            val portfolio = portfolioService.create(testUser.id!!, "Test", null, "EUR")
+
+            mockMvc.perform(
+                post("/portfolios/${portfolio.id}/positions")
+                    .with(mockUserDetails(testUser))
+                    .with(csrf())
+                    .param("ticker", "AMZN")
+                    .param("currency", "USD")
+                    .param("weightPct", "0.20")
+                    .param("intrinsicValueLocal", "275.50")
+                    .param("confidence", "0.65")
+            )
+                .andExpect(status().isOk)
+
+            val positions = positionRepository.findByPortfolioId(portfolio.id!!)
+            assert(positions.size == 1)
+            assertEquals(0, BigDecimal("275.50").compareTo(positions[0].intrinsicValueLocal))
+            assertEquals(0, BigDecimal("0.65").compareTo(positions[0].confidence))
         }
 
         @Test

@@ -70,7 +70,7 @@ class OptimizerServiceTest {
         currency = currency,
         weightPct = BigDecimal("0.05"),
         intrinsicValueLocal = intrinsicValue,
-        confidencePct = confidence,
+        confidence = confidence,
         sector = sector,
         positionType = type,
     )
@@ -129,7 +129,7 @@ class OptimizerServiceTest {
 
         @Test
         fun `includes only positions with intrinsic values in views`() {
-            val posWithIV = position("GOOG", intrinsicValue = BigDecimal("200"), confidence = BigDecimal("80"))
+            val posWithIV = position("GOOG", intrinsicValue = BigDecimal("200"), confidence = BigDecimal("0.80"))
             val posWithoutIV = position("AMZN")
             val posPartialIV = position("NVDA", intrinsicValue = BigDecimal("150"))
 

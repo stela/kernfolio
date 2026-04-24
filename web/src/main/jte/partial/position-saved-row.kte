@@ -32,6 +32,22 @@
              data-weight-breakdown-currency="${position.currency}"></div>
     </td>
     <td class="px-4 py-3 text-sm text-gray-500">${position.sector}</td>
+    <td class="px-4 py-3 text-sm text-right font-mono">
+        !{var iv = position.intrinsicValueLocal;}
+        @if(iv != null)
+            ${String.format(Locale.ROOT, "%,.2f", iv.toDouble())}
+        @else
+            <span class="text-gray-400">—</span>
+        @endif
+    </td>
+    <td class="px-4 py-3 text-sm text-right font-mono">
+        !{var conf = position.confidence;}
+        @if(conf != null)
+            ${String.format(Locale.ROOT, "%.0f", conf.toDouble() * 100)}%
+        @else
+            <span class="text-gray-400">—</span>
+        @endif
+    </td>
     <td class="px-4 py-3 text-sm text-right whitespace-nowrap">
         <button type="button"
                 data-edit-position="/portfolios/${portfolioId.toString()}/positions/${position.id.toString()}/edit-row"

@@ -176,7 +176,7 @@ class OptimizerService(
 
         for (pos in positions) {
             val iv = pos.intrinsicValueLocal ?: continue
-            val conf = pos.confidencePct ?: continue
+            val conf = pos.confidence ?: continue
 
             val latestPrice = cachedPriceRepository.findLatestByTicker(pos.ticker)
                 ?: continue
@@ -187,7 +187,7 @@ class OptimizerService(
             val cagr = computeCagr(iv.toDouble(), price.toDouble())
             val yfinanceTicker = tickerMapper.toYfinance(pos.ticker)
             views[yfinanceTicker] = cagr
-            confidences[yfinanceTicker] = conf.toDouble() / 100.0
+            confidences[yfinanceTicker] = conf.toDouble()
         }
 
         return views to confidences

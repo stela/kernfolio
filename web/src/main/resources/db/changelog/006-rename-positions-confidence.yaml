@@ -1,0 +1,19 @@
+databaseChangeLog:
+  - changeSet:
+      id: 006-rename-positions-confidence
+      author: kernfolio
+      changes:
+        - renameColumn:
+            tableName: positions
+            oldColumnName: confidence_pct
+            newColumnName: confidence
+            columnDataType: NUMERIC(5,4)
+        - sql:
+            sql: |
+              COMMENT ON COLUMN positions.confidence IS '0.0 to 1.0 fraction; maps to BL view uncertainty via Idzorek (equity only, NULL for cash)';
+      rollback:
+        - renameColumn:
+            tableName: positions
+            oldColumnName: confidence
+            newColumnName: confidence_pct
+            columnDataType: NUMERIC(5,4)

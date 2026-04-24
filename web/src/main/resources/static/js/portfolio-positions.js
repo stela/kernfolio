@@ -147,6 +147,14 @@
                 formData.append('ticker', tr.querySelector('.js-ticker-input').value);
                 var sectorInput = tr.querySelector('[name="sector"]');
                 if (sectorInput && sectorInput.value) formData.append('sector', sectorInput.value);
+                var ivInput = tr.querySelector('[name="intrinsicValueLocal"]');
+                if (ivInput && ivInput.value) formData.append('intrinsicValueLocal', ivInput.value);
+                var confInput = tr.querySelector('[name="confidence"]');
+                if (confInput && confInput.value) {
+                    // UI is in percent (0–100) for UX; wire format is 0–1.
+                    var confPct = parseFloat(confInput.value);
+                    if (isFinite(confPct)) formData.append('confidence', (confPct / 100).toString());
+                }
             }
 
             return Http.text(url, { method: method, body: formData });
@@ -176,8 +184,40 @@
         var tickerList = tr.querySelector('.js-ticker-suggest');
         var tickerStatus = tr.querySelector('.js-ticker-status');
         var sectorInput = tr.querySelector('input[name="sector"]');
+        var ivInput = tr.querySelector('.js-iv');
+        var confInput = tr.querySelector('.js-confidence');
+        var cagrHint = tr.querySelector('.js-cagr-hint');
         var fxFetchTimer = null;
         var priceFetchTimer = null;
+        // Local mirror of the row's resolved price (per-share, in the
+        // instrument's own currency). The CAGR hint needs price + IV in
+        // the SAME currency — IV is entered in the equity's local
+        // currency, so we compare it against the raw yfinance price, not
+        // the portfolio-base-converted value PortfolioEntry stores.
+        var currentPriceLocal = null;
+        var CAGR_YEARS = 5;
+
+        function updateCagrHint() {
+            if (!cagrHint) return;
+            if (typeSelect.value !== 'EQUITY') { cagrHint.textContent = ''; return; }
+            var ivRaw = ivInput ? parseFloat(ivInput.value) : NaN;
+            if (!isFinite(ivRaw) || ivRaw <= 0) { cagrHint.textContent = ''; return; }
+            if (!isFinite(currentPriceLocal) || currentPriceLocal <= 0) {
+                cagrHint.textContent = '';
+                return;
+            }
+            var cagr = Math.pow(ivRaw / currentPriceLocal, 1 / CAGR_YEARS) - 1;
+            var pct = (cagr * 100).toLocaleString(undefined, {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+            });
+            cagrHint.textContent = '≈ ' + pct + '%/yr over ' + CAGR_YEARS + 'y';
+        }
+
+        function setCurrentPriceFromEntry(entry) {
+            currentPriceLocal = entry && entry.close ? parseFloat(entry.close) : null;
+            updateCagrHint();
+        }
 
         function setStatus(text, tone) {
             if (!tickerStatus) return;
@@ -217,6 +257,7 @@
                 var entry = data && data[ticker];
                 return PortfolioEntry.ensurePrice(ticker, function (cached) {
                     renderPriceStatus(cached || entry, ticker);
+                    setCurrentPriceFromEntry(cached || entry);
                 });
             }).catch(function () {
                 setStatus('Could not fetch price for ' + ticker + ' right now.', 'warn');
@@ -262,6 +303,7 @@
             priceFetchTimer = setTimeout(function () {
                 PortfolioEntry.ensurePrice(t, function (entry) {
                     renderPriceStatus(entry, t);
+                    setCurrentPriceFromEntry(entry);
                 }).then(updateWeight);
             }, 400);
         }
@@ -332,6 +374,7 @@
 
         if (sharesInput) sharesInput.addEventListener('input', updateWeight);
         if (cashInput) cashInput.addEventListener('input', updateWeight);
+        if (ivInput) ivInput.addEventListener('input', updateCagrHint);
 
         updateVisibility();
         // Edit-row case: the shares / cash amount lives only in
@@ -342,6 +385,10 @@
             if (typeSelect.value === 'EQUITY' && sharesInput && tickerInput && tickerInput.value) {
                 var shares = PortfolioEntry.getShares(tickerInput.value);
                 if (shares) sharesInput.value = shares;
+                // Prime the CAGR hint from whatever price is already cached
+                // so the hint appears immediately for pre-existing IV values,
+                // without waiting for the user to edit anything.
+                PortfolioEntry.ensurePrice(tickerInput.value, setCurrentPriceFromEntry);
             } else if (typeSelect.value === 'CASH' && cashInput && currencyInput.value) {
                 var amount = PortfolioEntry.getCashAmount(currencyInput.value);
                 if (amount) cashInput.value = amount;

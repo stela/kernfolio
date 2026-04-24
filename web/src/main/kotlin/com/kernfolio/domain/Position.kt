@@ -16,7 +16,7 @@ data class Position(
     val weightPct: BigDecimal,
     val costBasisPct: BigDecimal? = null,
     val intrinsicValueLocal: BigDecimal? = null,
-    val confidencePct: BigDecimal? = null,
+    val confidence: BigDecimal? = null,
     val sector: String? = null,
     val notes: String? = null,
     val createdAt: Instant? = null,

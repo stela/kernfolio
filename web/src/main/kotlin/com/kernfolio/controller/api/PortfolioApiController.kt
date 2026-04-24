@@ -50,7 +50,7 @@ class PortfolioApiController(
                         weightPct = pos.weightPct,
                         costBasisPct = pos.costBasisPct,
                         intrinsicValueLocal = pos.intrinsicValueLocal,
-                        confidencePct = pos.confidencePct,
+                        confidence = pos.confidence,
                         sector = pos.sector,
                     )
                 },
