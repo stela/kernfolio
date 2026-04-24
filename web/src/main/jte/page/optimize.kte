@@ -33,9 +33,6 @@
                         <select id="algorithm" name="algorithm"
                                 class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm">
                             <option value="black_litterman" selected>Black-Litterman</option>
-                            <option value="max_sharpe">Max Sharpe Ratio</option>
-                            <option value="min_variance">Minimum Variance</option>
-                            <option value="risk_parity">Risk Parity</option>
                         </select>
                     </div>
 
