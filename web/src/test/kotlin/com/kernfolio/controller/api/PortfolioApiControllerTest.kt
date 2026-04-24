@@ -16,8 +16,10 @@ import org.springframework.context.annotation.Import
 import org.springframework.http.MediaType
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity
+import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
@@ -100,5 +102,64 @@ class PortfolioApiControllerTest {
             get("/api/portfolios/${UUID.randomUUID()}/entry-data")
         )
             .andExpect(status().isUnauthorized)
+    }
+
+    @Test
+    fun `rebalance applies weight updates including zeroing dropped positions`() {
+        val user = createUser("alice")
+        val portfolio = portfolioService.create(user.id!!, "Test", null, "EUR")
+        val portfolioId = portfolio.id!!
+
+        // Three equities and one CASH. The "apply" flow zeroes SELL
+        // (dropped by optimizer), boosts BUY, and doesn't touch CASH.
+        val buy = positionRepository.save(
+            Position(portfolioId = portfolioId, ticker = "BUY", currency = "USD",
+                     weightPct = BigDecimal("0.200000"), sector = "Tech")
+        )
+        val sell = positionRepository.save(
+            Position(portfolioId = portfolioId, ticker = "SELL", currency = "USD",
+                     weightPct = BigDecimal("0.300000"), sector = "Tech")
+        )
+        val cash = positionRepository.save(
+            Position(portfolioId = portfolioId, ticker = "CASH.EUR", currency = "EUR",
+                     weightPct = BigDecimal("0.500000"), positionType = "CASH")
+        )
+
+        mockMvc.perform(
+            post("/api/portfolios/$portfolioId/rebalance")
+                .with(mockUserDetails(user))
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"weights":{"${buy.id}":"0.600000","${sell.id}":"0.000000"}}""")
+        )
+            .andExpect(status().isNoContent)
+
+        val updated = positionRepository.findByPortfolioId(portfolioId).associateBy { it.id }
+        assert(BigDecimal("0.600000").compareTo(updated[buy.id]!!.weightPct) == 0) {
+            "buy weight: ${updated[buy.id]!!.weightPct}"
+        }
+        assert(BigDecimal("0.000000").compareTo(updated[sell.id]!!.weightPct) == 0) {
+            "sell weight: ${updated[sell.id]!!.weightPct}"
+        }
+        // Cash was not in the request → untouched.
+        assert(BigDecimal("0.500000").compareTo(updated[cash.id]!!.weightPct) == 0) {
+            "cash weight: ${updated[cash.id]!!.weightPct}"
+        }
+    }
+
+    @Test
+    fun `rebalance returns 404 for other user portfolio`() {
+        val alice = createUser("alice")
+        val bob = createUser("bob")
+        val portfolio = portfolioService.create(alice.id!!, "Alice Portfolio", null, "EUR")
+
+        mockMvc.perform(
+            post("/api/portfolios/${portfolio.id}/rebalance")
+                .with(mockUserDetails(bob))
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"weights":{}}""")
+        )
+            .andExpect(status().isNotFound)
     }
 }

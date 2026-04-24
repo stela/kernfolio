@@ -462,11 +462,73 @@ class EndToEndFlowTest {
 
     @Test
     @Order(17)
-    fun `view optimization results`() {
+    fun `view optimization results and apply weights`() {
         mockMvc.perform(get(resultsUrl!!).session(userSession!!))
             .andExpect(status().isOk)
             .andExpect(content().string(org.hamcrest.Matchers.containsString("Optimization Results")))
             .andExpect(content().string(org.hamcrest.Matchers.containsString("black_litterman")))
+            .andExpect(content().string(org.hamcrest.Matchers.containsString("Apply to portfolio")))
+
+        // Apply the optimizer's suggestion back to the portfolio — same
+        // flow apply-weights.js drives in the browser: pull allocation-data
+        // + entry-data, POST a position-id-keyed weights map to /rebalance.
+        val runId = resultsUrl!!.substringAfterLast("/results/")
+
+        val allocationJson = mockMvc.perform(
+            get("/api/portfolios/$portfolioId/runs/$runId/allocation-data").session(userSession!!)
+        )
+            .andExpect(status().isOk)
+            .andReturn().response.contentAsString
+
+        val entryJson = mockMvc.perform(
+            get("/api/portfolios/$portfolioId/entry-data").session(userSession!!)
+        )
+            .andExpect(status().isOk)
+            .andReturn().response.contentAsString
+
+        // Jackson 3.x JsonNode has its own map/filter methods that shadow
+        // the Kotlin extensions (see FixtureDeserializationTest). Iterate
+        // via buildList to avoid the trap.
+        val mapper = tools.jackson.databind.json.JsonMapper.builder().build()
+        val allocation = mapper.readTree(allocationJson)
+        val entry = mapper.readTree(entryJson)
+
+        val labels = buildList<String> { allocation["labels"].forEach { add(it.stringValue()) } }
+        val optimized = buildList<Double> { allocation["optimizedWeights"].forEach { add(it.asDouble()) } }
+        val optimizedByTicker: Map<String, Double> = labels.zip(optimized).toMap()
+
+        val weights = mutableMapOf<String, String>()
+        entry["positions"].forEach { pos ->
+            if (pos["positionType"].stringValue() != "EQUITY") return@forEach
+            val target = optimizedByTicker[pos["ticker"].stringValue()] ?: return@forEach
+            weights[pos["id"].stringValue()] = String.format(java.util.Locale.ROOT, "%.6f", target)
+        }
+        assertThat(weights).isNotEmpty()
+
+        val body = mapper.writeValueAsString(mapOf("weights" to weights))
+
+        mockMvc.perform(
+            mvcPost("/api/portfolios/$portfolioId/rebalance")
+                .session(userSession!!)
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body)
+        )
+            .andExpect(status().isNoContent)
+
+        // Every equity position's stored weight now matches the optimizer
+        // output. Fixture assigns ~0.030303 to each of the 33 tickers;
+        // all three positions in this portfolio are in that set.
+        val refreshedJson = mockMvc.perform(
+            get("/api/portfolios/$portfolioId/entry-data").session(userSession!!)
+        ).andReturn().response.contentAsString
+        val refreshed = mapper.readTree(refreshedJson)
+        refreshed["positions"].forEach { pos ->
+            if (pos["positionType"].stringValue() != "EQUITY") return@forEach
+            val expected = optimizedByTicker[pos["ticker"].stringValue()] ?: return@forEach
+            assertThat(pos["weightPct"].asDouble())
+                .isEqualTo(expected, org.assertj.core.data.Offset.offset(1e-5))
+        }
     }
 
     // ── Security & negative tests ───────────────────────────────────

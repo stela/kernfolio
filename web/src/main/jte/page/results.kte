@@ -85,9 +85,20 @@
         @endif
 
         <!-- Weights table -->
-        <div class="bg-white shadow rounded-lg overflow-hidden mb-8">
-            <div class="px-6 py-4 border-b border-gray-200">
+        <div class="bg-white shadow rounded-lg overflow-hidden mb-8"
+             data-portfolio-id="${portfolio.id.toString()}"
+             data-run-id="${run.id.toString()}">
+            <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between gap-4">
                 <h3 class="text-lg font-medium">Optimized Weights</h3>
+                @if(run.status == "COMPLETED" && !run.results.optimizedWeights.isEmpty())
+                    <div id="apply-weights-wrapper" class="flex items-center gap-3">
+                        <span id="apply-weights-status" class="text-sm text-gray-500 hidden"></span>
+                        <button type="button" id="apply-weights-btn"
+                                class="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-blue-300">
+                            Apply to portfolio
+                        </button>
+                    </div>
+                @endif
             </div>
             <table class="min-w-full divide-y divide-gray-200">
                 <thead class="bg-gray-50">
@@ -137,5 +148,6 @@
             <script src="/js/charts/efficient-frontier.js" nonce="${nonce}"></script>
         @endif
         <script src="/js/discrete-allocation.js" nonce="${nonce}"></script>
+        <script src="/js/apply-weights.js" nonce="${nonce}"></script>
     `
 )
