@@ -481,6 +481,31 @@ var PortfolioEntry = (function () {
         saveToLocalStorage();
     }
 
+    function applyWeights(weightsByTicker) {
+        // Used by the results-page "Apply to portfolio" flow: given a
+        // ticker→fraction map (the optimizer's recommendation we just
+        // pushed to /rebalance), recompute and persist new local share
+        // counts so the next visit to the detail page doesn't trip the
+        // drift banner. Same math as recoverShares — round(total ×
+        // weight ÷ priceBase). Tickers whose price isn't loaded are
+        // skipped silently and surface as drift later, matching the
+        // missing-price behaviour elsewhere in this file.
+        if (totalValue <= 0) return false;
+        var changed = false;
+        Object.keys(weightsByTicker).forEach(function (ticker) {
+            var priceBase = priceInBaseCurrency(ticker);
+            if (priceBase <= 0) return;
+            var shares = Math.round(totalValue * weightsByTicker[ticker] / priceBase);
+            if (!holdings[ticker]) {
+                holdings[ticker] = { shares: 0, costBasis: 0, currency: prices[ticker] && prices[ticker].currency || '' };
+            }
+            holdings[ticker].shares = shares;
+            changed = true;
+        });
+        if (changed) saveToLocalStorage();
+        return changed;
+    }
+
     function updateDisplays() {
         // Update shares displays
         document.querySelectorAll('[data-shares-ticker]').forEach(function (el) {
@@ -646,6 +671,7 @@ var PortfolioEntry = (function () {
         getCashAmount: getCashAmount,
         updateShares: updateShares,
         updateCashAmount: updateCashAmount,
+        applyWeights: applyWeights,
         updateDisplays: updateDisplays,
         refresh: refresh,
         rebalanceNow: rebalanceNow,

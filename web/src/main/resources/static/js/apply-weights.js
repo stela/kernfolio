@@ -12,6 +12,14 @@
  *
  * Equity positions the optimizer dropped below its floor are
  * explicitly zeroed so the user's view ends up matching the table.
+ *
+ * After the server-side weights succeed, we also recompute and persist
+ * local share counts via PortfolioEntry.applyWeights so the drift
+ * banner doesn't appear on next portfolio-detail visit.
+ *
+ * Gating: requires a totalValue in the portfolio's localStorage blob
+ * (set on the detail page). Without it, we can't derive shares from a
+ * weight, so the button is disabled with an inline pointer back.
  */
 (function () {
     var btn = document.getElementById('apply-weights-btn');
@@ -35,15 +43,47 @@
         status.classList.remove('hidden');
     }
 
+    // Read totalValue out of the same key portfolio-entry.js uses. We do
+    // it directly (not via PortfolioEntry) so the gate works even before
+    // PortfolioEntry's async init finishes — the storage read is sync.
+    function readStoredTotalValue() {
+        try {
+            var raw = localStorage.getItem('kernfolio_portfolio_' + portfolioId);
+            if (!raw) return 0;
+            var data = JSON.parse(raw);
+            return parseFloat(data.totalValue) || 0;
+        } catch (e) {
+            return 0;
+        }
+    }
+
+    if (readStoredTotalValue() <= 0) {
+        btn.disabled = true;
+        if (status) {
+            status.innerHTML =
+                'Set Total Portfolio Value on the ' +
+                '<a href="/portfolios/' + portfolioId + '" class="font-medium text-blue-600 hover:text-blue-500">portfolio page</a> ' +
+                'first, then come back to apply.';
+            status.classList.remove('hidden');
+            status.classList.add('text-gray-500');
+        }
+        return;
+    }
+
     function buildWeightsMap(allocationData, entryData) {
         // allocationData: { labels: [ticker], optimizedWeights: [frac], currentWeights: [frac] }
-        // entryData: { positions: [{ id, ticker, positionType, ... }] }
+        // entryData:      { positions: [{ id, ticker, positionType, ... }] }
+        // Returns { byPositionId: {...}, byTicker: {...}, equityTickers: [...] }.
+        // The server wants positionId-keyed; PortfolioEntry.applyWeights
+        // wants ticker-keyed; ensurePrice loops over the ticker list.
         var optimizedByTicker = {};
         for (var i = 0; i < allocationData.labels.length; i++) {
             optimizedByTicker[allocationData.labels[i]] = allocationData.optimizedWeights[i];
         }
 
-        var weights = {};
+        var byPositionId = {};
+        var byTicker = {};
+        var equityTickers = [];
         entryData.positions.forEach(function (pos) {
             if (pos.positionType !== 'EQUITY') return;
             var target = optimizedByTicker[pos.ticker];
@@ -52,9 +92,11 @@
             // portfolio tickers — but skip defensively).
             // 0 → dropped by the optimizer; include so it gets zeroed.
             if (typeof target !== 'number') return;
-            weights[pos.id] = target.toFixed(6);
+            byPositionId[pos.id] = target.toFixed(6);
+            byTicker[pos.ticker] = target;
+            equityTickers.push(pos.ticker);
         });
-        return weights;
+        return { byPositionId: byPositionId, byTicker: byTicker, equityTickers: equityTickers };
     }
 
     btn.addEventListener('click', function () {
@@ -65,17 +107,33 @@
             Http.json('/api/portfolios/' + portfolioId + '/runs/' + runId + '/allocation-data'),
             Http.json('/api/portfolios/' + portfolioId + '/entry-data'),
         ]).then(function (results) {
-            var weights = buildWeightsMap(results[0], results[1]);
-            if (Object.keys(weights).length === 0) {
+            var maps = buildWeightsMap(results[0], results[1]);
+            if (Object.keys(maps.byPositionId).length === 0) {
                 setStatus('No equity positions to update.', 'err');
                 btn.disabled = false;
                 return;
             }
-            return Http.fetch('/api/portfolios/' + portfolioId + '/rebalance', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ weights: weights }),
+            // Prime prices + FX for every ticker we're about to apply,
+            // so PortfolioEntry.applyWeights can compute non-zero shares
+            // for each. Without this, freshly-loaded results page has
+            // no prices cached and applyWeights silently skips them.
+            var priceFetches = (typeof PortfolioEntry !== 'undefined' && PortfolioEntry.ensurePrice)
+                ? maps.equityTickers.map(function (t) { return PortfolioEntry.ensurePrice(t); })
+                : [];
+            return Promise.all(priceFetches).then(function () {
+                return Http.fetch('/api/portfolios/' + portfolioId + '/rebalance', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ weights: maps.byPositionId }),
+                });
             }).then(function () {
+                if (typeof PortfolioEntry !== 'undefined' && PortfolioEntry.applyWeights) {
+                    PortfolioEntry.applyWeights(maps.byTicker);
+                    // Refresh re-reads /entry-data and re-runs the drift
+                    // check so anything that didn't reconcile (e.g. an
+                    // equity whose price never loaded) becomes visible.
+                    if (PortfolioEntry.refresh) PortfolioEntry.refresh();
+                }
                 if (wrapper) {
                     // Replace the button with a confirmation + link so
                     // the user has an obvious next step. Keep it inline
