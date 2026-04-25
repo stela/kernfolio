@@ -930,20 +930,21 @@ class EndToEndFlowTest {
             .andExpect(status().isOk)
             .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("INJECTED"))))
 
-        // Clean up: delete the injected position and admin portfolio
-        val detailHtml = mockMvc.perform(get("/portfolios/$portfolioId").session(userSession!!))
-            .andReturn().response.contentAsString
-        val posMatch = Regex("""data-delete-position="[^"]*positions/([^"]+)"""").findAll(detailHtml)
-        for (m in posMatch) {
-            val posId = m.groupValues[1]
-            // Delete the INJECTED position if found
-            val posDetailHtml = detailHtml
-            if (posDetailHtml.contains("INJECTED")) {
-                mockMvc.perform(
-                    delete("/portfolios/$portfolioId/positions/$posId")
-                        .session(userSession!!).with(csrf())
-                )
-            }
+        // Clean up: delete the injected position and admin portfolio.
+        // Use entry-data so we get position UUIDs paired with their tickers
+        // — scanning the HTML and checking `detailHtml.contains("INJECTED")`
+        // inside the loop is broken (always true once INJECTED is anywhere
+        // on the page) and ends up nuking every position the user has.
+        val entryJson = mockMvc.perform(
+            get("/api/portfolios/$portfolioId/entry-data").session(userSession!!)
+        ).andReturn().response.contentAsString
+        val mapper = tools.jackson.databind.json.JsonMapper.builder().build()
+        mapper.readTree(entryJson)["positions"].forEach { pos ->
+            if (pos["ticker"].stringValue() != "INJECTED") return@forEach
+            mockMvc.perform(
+                delete("/portfolios/$portfolioId/positions/${pos["id"].stringValue()}")
+                    .session(userSession!!).with(csrf())
+            )
         }
         mockMvc.perform(
             mvcPost("/portfolios/$adminPortfolioId/delete")
