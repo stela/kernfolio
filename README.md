@@ -4,9 +4,14 @@ Self-hosted, multi-user portfolio optimizer that never learns how much money you
 
 ## What it does
 
-Kernfolio helps you turn your own intrinsic-value views into a mathematically optimal stock portfolio. You enter positions (with ticker search), add an intrinsic value estimate and a confidence level for the ones you have a view on, and the app computes an allocation with the **Black-Litterman** model: market-cap-implied equilibrium returns are blended with your views, weighted by Idzorek confidence, and the resulting posterior is optimized for maximum Sharpe ratio under your min/max weight constraints. Covariance is estimated with Ledoit-Wolf shrinkage or the plain sample covariance.
+Kernfolio takes the conclusions of your own equity research and does the part that is hard to do by hand: sizing the positions *together*, with the correlations between them taken into account.
 
-Each run reports expected return, volatility, Sharpe ratio and 95% CVaR, and charts the proposed allocation against your current one, the correlation matrix, and (behind a feature flag) the efficient frontier. Prices and FX rates are fetched and cached server-side; positions can be in any currency and are converted to the portfolio's base currency. The browser then turns the target weights back into concrete share counts to buy or sell.
+For each position you have a view on, you enter two numbers: the **annual return you expect** (probability-weighted across your bear/base/bull scenarios) and the **standard deviation** of that return across those scenarios. Positions without a view are fine — the market's estimate is used. (Enter positions with ticker search; prices and FX rates are fetched and cached server-side, and positions can be in any currency.)
+
+1. **Black-Litterman** blends the returns implied by market-cap weights with your views. How much a view counts depends on its spread relative to the stock's own volatility: equal to it, the view and the market meet halfway; tighter, your number dominates; wider, the market's does. The results page shows the weight each view ended up with.
+2. **Fractional Kelly sizing** then maximises long-run growth using the full covariance matrix (Ledoit-Wolf shrinkage) under your min/max position limits. Two highly correlated stocks share one risk budget; a diversifier earns extra weight. The **Kelly fraction** (1 = full, 0.5 = half) decides how much of the portfolio stays in **cash** — total exposure is an output, not fixed at 100 %.
+
+Each run reports expected return, volatility, Sharpe ratio, 95 % CVaR and the cash share, and charts the proposed allocation against your current one, the correlation matrix, and (behind a feature flag) the efficient frontier. Applying a result rebalances equities *and* your cash positions, and the browser turns the target weights back into concrete share counts to buy or sell.
 
 **Privacy by construction.** Share counts, cash amounts, and total portfolio value stay in your browser's local storage. The browser converts them to percentage weights before anything is sent, so the backend — and whoever operates it — only ever sees tickers and percentages, and cannot tell a €5,000 portfolio from a €5,000,000 one.
 

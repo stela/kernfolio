@@ -50,7 +50,7 @@ cd optimizer && uv run pytest tests/test_optimize.py  # Single test file
 ### Data Flow
 1. User enters positions (share counts in browser → browser computes `weight_pct` → only percentages sent to backend)
 2. Server stores percentage weights in PostgreSQL (absolute values like share counts, total value stay in browser localStorage)
-3. Optimization: Spring Boot loads positions + cached prices → assembles request → POST to Python `/optimize` → stores results
+3. Optimization: Spring Boot loads positions + cached prices → assembles request → POST to Python `/optimize` → stores results. A position's *view* is `expected_return` + `return_stddev` (fractions/yr, both or neither — enforced in `PositionForm.validate()`, a DB CHECK, and the optimizer's request validator) and is passed through untouched; there is no IV→return conversion any more.
 4. Results page: server renders metrics/weights, Chart.js fetches data from JSON API endpoints
 
 ### Key Patterns
@@ -61,6 +61,7 @@ cd optimizer && uv run pytest tests/test_optimize.py  # Single test file
 - **Ticker mapping**: Internal tickers ↔ yfinance format via `TickerMapper` (e.g., `GMEXICOB` ↔ `GMEXICOB.MX`)
 - **Currency**: Never hardcode EUR or any currency. Use `portfolio.baseCurrency`. FX rates stored as EUR/X pairs internally; `FxRateService.getLatestCrossRate(base, target)` computes any pair.
 - **JSONB columns**: `OptimizationParameters` and `OptimizationResults` use custom read/write converters in `JsonbConverters.kt`
+- **Views & sizing** (`optimizer/app/optimizer.py`): Black-Litterman with explicit `omega = tau * stddev²` (not Idzorek), so a view's weight against the market prior is ≈ `σ² / (σ² + stddev²)` — returned as `view_confidences`. Then fractional Kelly as a cvxpy QP: `max w·(μ−rf) − 1/(2f)·wᵀΣw`, `Σw ≤ 1`, position bounds. **Weights are fractions of the whole portfolio** and sum to `1 − cash_weight`; never renormalise them to 1. `min_weight > 0` puts a floor of `n·min_weight` under equity exposure. Tickers without market cap sit outside BL at `min_weight`. `ChartDataController.allocationData` spreads `cashWeight` over the `CASH.<CUR>` positions; runs stored before this have `cashWeight = null` and leave cash alone.
 - **Feature flags**: DB-driven via `FeatureFlagService`, available in templates as `featureFlags.isEnabled('FLAG_NAME')`
 
 ### Security
