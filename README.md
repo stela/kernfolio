@@ -115,3 +115,11 @@ The first run (and the first after a plugin major-version bump) downloads the fu
 
 - [`agent-specs/PORTFOLIO_OPTIMIZER_SPEC.md`](agent-specs/PORTFOLIO_OPTIMIZER_SPEC.md) — full product and architecture specification (algorithms, schema, security model, deployment).
 - [`CLAUDE.md`](CLAUDE.md) — contributor conventions and project-specific guidance for AI coding agents.
+
+## License
+
+Copyright © 2026 Stefan Larsson.
+
+Kernfolio is free software, licensed under the [GNU Affero General Public License v3.0](LICENSE) (`AGPL-3.0-only`). You may use, modify and redistribute it, but if you distribute a modified version — or let users interact with one over a network — you must make the corresponding source available to them under the same license.
+
+Kernfolio is provided without warranty of any kind. It is a tool for exploring portfolio allocations, **not investment advice**. Market data is fetched through third-party sources (e.g. Yahoo Finance via `yfinance`); you are responsible for complying with those providers' terms of use.
