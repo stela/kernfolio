@@ -114,6 +114,8 @@ services:
       JAVA_TOOL_OPTIONS: "-Xmx192m -Xss512k -XX:MaxMetaspaceSize=128m -XX:ReservedCodeCacheSize=48m -XX:MaxDirectMemorySize=10m"
     volumes:
       - vault_agent_certs:/vault/certs:ro
+    # Not published: the `tls` profile (grouped into `prod`) serves mTLS on 8443
+    # and only accepts Caddy's client cert, so Caddy is the sole way in.
     # No HEALTHCHECK: Paketo's default tiny runtime has no shell/wget/curl.
     # Nothing in the compose DAG waits on web being "healthy" (caddy uses a
     # plain depends_on, not service_healthy), so we accept Docker's default
@@ -127,11 +129,22 @@ services:
         condition: service_completed_successfully
 
   caddy:
-    image: caddy:2-alpine
+    # Stock Caddy rebuilt to run as uid 1000 (see caddy/Dockerfile). It listens
+    # on unprivileged 8080/8443; docker owns the privileged host ports.
+    build: ./caddy
+    image: kernfolio-caddy
     mem_limit: 64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      # Public hostname to obtain an ACME certificate for. Left at localhost,
+      # Caddy issues from its built-in CA instead.
+      KERNFOLIO_DOMAIN: "${KERNFOLIO_DOMAIN:-localhost}"
     ports:
-      - "80:80"
-      - "443:443"
+      - "80:8080"
+      - "443:8443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

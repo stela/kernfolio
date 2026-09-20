@@ -62,7 +62,7 @@ allprojects {
 
 // JVM images (web, digital twins) are produced via Spring Boot's
 // bootBuildImage task (Paketo buildpacks; see each module's build.gradle.kts
-// for the image tag). Non-JVM images (optimizer, vault-init) are still built
+// for the image tag). Non-JVM images (optimizer, vault-init, caddy) are still built
 // from Dockerfiles via `docker compose build`. The aggregate tasks below tie
 // both paths together so the user never has to remember the right sequence.
 // Gradle daemons started via IDEs or system services often have a minimal
@@ -76,7 +76,7 @@ val dockerExecutable: String = listOf(
 
 val dockerComposeBuildProd = tasks.register<Exec>("dockerComposeBuildProd") {
     description = "Build Dockerfile-based compose services for production"
-    commandLine(dockerExecutable, "compose", "build", "optimizer", "vault-init")
+    commandLine(dockerExecutable, "compose", "build", "optimizer", "vault-init", "caddy")
 }
 
 val dockerComposeBuildDev = tasks.register<Exec>("dockerComposeBuildDev") {
@@ -84,12 +84,12 @@ val dockerComposeBuildDev = tasks.register<Exec>("dockerComposeBuildDev") {
     commandLine(
         dockerExecutable, "compose",
         "-f", "docker-compose.yml", "-f", "docker-compose.dev.yml",
-        "build", "optimizer", "vault-init",
+        "build", "optimizer", "vault-init", "caddy",
     )
 }
 
 val dockerBuild = tasks.register("dockerBuild") {
-    description = "Build production Docker images (web JVM image + optimizer + vault-init)"
+    description = "Build production Docker images (web JVM image + optimizer + vault-init + caddy)"
     group = "docker"
     dependsOn(":web:bootBuildImage", dockerComposeBuildProd)
 }

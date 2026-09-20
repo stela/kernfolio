@@ -33,7 +33,9 @@ services:
 
   web:
     environment:
-      SPRING_PROFILES_ACTIVE: dev
+      # `tls`: same mTLS-on-8443 listener as prod, reached via Caddy at
+      # https://localhost. (A bare `dev` bootRun outside docker stays plain HTTP.)
+      SPRING_PROFILES_ACTIVE: dev,tls
       SPRING_CLOUD_VAULT_TOKEN: "dev-root-token"
       BPL_JVM_THREAD_COUNT: 50
       JAVA_TOOL_OPTIONS: "-Xmx192m -Xss512k -XX:MaxMetaspaceSize=128m -XX:ReservedCodeCacheSize=48m -XX:MaxDirectMemorySize=10m"
@@ -41,8 +43,13 @@ services:
       # credentials, missing user, etc.) which default to DEBUG level and are
       # otherwise swallowed by the INFO root logger.
       LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_SECURITY: DEBUG
-    ports:
-      - "8080:8080"
+
+  caddy:
+    # Only 443: there is no plain-HTTP site in Caddyfile.dev to redirect from.
+    ports: !override
+      - "443:8443"
+    volumes:
+      - ./Caddyfile.dev:/etc/caddy/Caddyfile:ro
 
   yfinance-twin:
     image: kernfolio-yfinance-twin:latest

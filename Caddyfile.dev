@@ -1,0 +1,25 @@
+{
+	http_port 8080
+	https_port 8443
+	auto_https disable_redirects
+	# The container's own trust store is irrelevant (and not writable as uid 1000).
+	skip_install_trust
+}
+
+# Dev: certificate from Caddy's built-in CA (root lives in the caddy_data
+# volume, so it survives restarts — unlike dev Vault's PKI). See the README
+# for trusting it in your browser. No plain-HTTP site; only 443 is published.
+localhost {
+	tls internal
+
+	reverse_proxy https://web:8443 {
+		transport http {
+			tls_client_auth /vault/certs/caddy-client.pem /vault/certs/caddy-client-key.pem
+			tls_trusted_ca_certs /vault/certs/ca.pem
+		}
+		# HSTS is per host, not per port: once Caddy's root is trusted, the
+		# browser would force https on every localhost port (Vault UI on 8200,
+		# the twins, unrelated projects). Keep it out of dev.
+		header_down -Strict-Transport-Security
+	}
+}
