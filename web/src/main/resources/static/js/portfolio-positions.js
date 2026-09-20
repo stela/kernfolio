@@ -96,6 +96,32 @@
             }
             return;
         }
+        // A view is a return *and* its spread — the optimizer can't weigh
+        // one without the other. (The server enforces the same rule.)
+        var view = { expectedReturn: null, returnStddev: null };
+        if (posType === 'EQUITY') {
+            var retInput = tr.querySelector('.js-expected-return');
+            var sdInput = tr.querySelector('.js-return-stddev');
+            var retPct = retInput && retInput.value !== '' ? parseFloat(retInput.value) : null;
+            var sdPct = sdInput && sdInput.value !== '' ? parseFloat(sdInput.value) : null;
+            var problem = null;
+            if ((retPct === null) !== (sdPct === null)) {
+                problem = 'Enter both the expected return and its standard deviation, or leave both empty.';
+            } else if (retPct !== null && (!isFinite(retPct) || retPct <= -100)) {
+                problem = 'Expected return must be above -100 %.';
+            } else if (sdPct !== null && (!isFinite(sdPct) || sdPct <= 0)) {
+                problem = 'Standard deviation must be greater than 0 %.';
+            }
+            if (problem) {
+                if (typeof Flash !== 'undefined') Flash.error(problem);
+                return;
+            }
+            if (retPct !== null) {
+                // UI is in percent for UX; wire format is a fraction.
+                view.expectedReturn = (retPct / 100).toString();
+                view.returnStddev = (sdPct / 100).toString();
+            }
+        }
         // Ensure FX (and, for equities, price) are loaded before computing
         // weight — otherwise we'd persist 0% for a non-base-currency position
         // or a freshly-added ticker whose price isn't in the client's map yet.
@@ -147,13 +173,9 @@
                 formData.append('ticker', tr.querySelector('.js-ticker-input').value);
                 var sectorInput = tr.querySelector('[name="sector"]');
                 if (sectorInput && sectorInput.value) formData.append('sector', sectorInput.value);
-                var ivInput = tr.querySelector('[name="intrinsicValueLocal"]');
-                if (ivInput && ivInput.value) formData.append('intrinsicValueLocal', ivInput.value);
-                var confInput = tr.querySelector('[name="confidence"]');
-                if (confInput && confInput.value) {
-                    // UI is in percent (0–100) for UX; wire format is 0–1.
-                    var confPct = parseFloat(confInput.value);
-                    if (isFinite(confPct)) formData.append('confidence', (confPct / 100).toString());
+                if (view.expectedReturn !== null) {
+                    formData.append('expectedReturn', view.expectedReturn);
+                    formData.append('returnStddev', view.returnStddev);
                 }
             }
 
@@ -184,32 +206,8 @@
         var tickerList = tr.querySelector('.js-ticker-suggest');
         var tickerStatus = tr.querySelector('.js-ticker-status');
         var sectorInput = tr.querySelector('input[name="sector"]');
-        var ivInput = tr.querySelector('.js-iv');
-        var confInput = tr.querySelector('.js-confidence');
-        var cagrHint = tr.querySelector('.js-cagr-hint');
         var fxFetchTimer = null;
         var priceFetchTimer = null;
-        // Local mirror of the row's resolved price (per-share, in the
-        // instrument's own currency). The CAGR hint needs price + IV in
-        // the SAME currency — IV is entered in the equity's local
-        // currency, so we compare it against the raw yfinance price, not
-        // the portfolio-base-converted value PortfolioEntry stores.
-        var currentPriceLocal = null;
-
-        function updateCagrHint() {
-            if (!cagrHint || typeof PortfolioEntry === 'undefined') return;
-            if (typeSelect.value !== 'EQUITY') { cagrHint.textContent = ''; return; }
-            var ivRaw = ivInput ? parseFloat(ivInput.value) : NaN;
-            if (!isFinite(ivRaw) || ivRaw <= 0) { cagrHint.textContent = ''; return; }
-            cagrHint.textContent = PortfolioEntry.formatCagrHint(
-                PortfolioEntry.computeCagr(ivRaw, currentPriceLocal));
-        }
-
-        function setCurrentPriceFromEntry(entry) {
-            currentPriceLocal = entry && entry.close ? parseFloat(entry.close) : null;
-            updateCagrHint();
-        }
-
         function setStatus(text, tone) {
             if (!tickerStatus) return;
             tickerStatus.classList.remove('text-gray-500', 'text-emerald-700', 'text-amber-700');
@@ -245,7 +243,6 @@
                 var entry = data && data[ticker];
                 return PortfolioEntry.ensurePrice(ticker, function (cached) {
                     renderPriceStatus(cached || entry, ticker);
-                    setCurrentPriceFromEntry(cached || entry);
                 });
             }).catch(function () {
                 setStatus('Could not fetch price for ' + ticker + ' right now.', 'warn');
@@ -291,7 +288,6 @@
             priceFetchTimer = setTimeout(function () {
                 PortfolioEntry.ensurePrice(t, function (entry) {
                     renderPriceStatus(entry, t);
-                    setCurrentPriceFromEntry(entry);
                 }).then(updateWeight);
             }, 400);
         }
@@ -362,7 +358,6 @@
 
         if (sharesInput) sharesInput.addEventListener('input', updateWeight);
         if (cashInput) cashInput.addEventListener('input', updateWeight);
-        if (ivInput) ivInput.addEventListener('input', updateCagrHint);
 
         updateVisibility();
         // Edit-row case: the shares / cash amount lives only in
@@ -373,10 +368,6 @@
             if (typeSelect.value === 'EQUITY' && sharesInput && tickerInput && tickerInput.value) {
                 var shares = PortfolioEntry.getShares(tickerInput.value);
                 if (shares) sharesInput.value = shares;
-                // Prime the CAGR hint from whatever price is already cached
-                // so the hint appears immediately for pre-existing IV values,
-                // without waiting for the user to edit anything.
-                PortfolioEntry.ensurePrice(tickerInput.value, setCurrentPriceFromEntry);
             } else if (typeSelect.value === 'CASH' && cashInput && currencyInput.value) {
                 var amount = PortfolioEntry.getCashAmount(currencyInput.value);
                 if (amount) cashInput.value = amount;

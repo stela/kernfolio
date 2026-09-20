@@ -15,8 +15,10 @@ data class Position(
     val currency: String,
     val weightPct: BigDecimal,
     val costBasisPct: BigDecimal? = null,
-    val intrinsicValueLocal: BigDecimal? = null,
-    val confidence: BigDecimal? = null,
+    // The user's view, straight from their research: expected annual return
+    // and the std-dev of their scenario outcomes. Fractions; both or neither.
+    val expectedReturn: BigDecimal? = null,
+    val returnStddev: BigDecimal? = null,
     val sector: String? = null,
     val notes: String? = null,
     val createdAt: Instant? = null,

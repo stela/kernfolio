@@ -59,8 +59,8 @@ class OptimizerServiceTest {
     private fun position(
         ticker: String,
         currency: String = "USD",
-        intrinsicValue: BigDecimal? = null,
-        confidence: BigDecimal? = null,
+        expectedReturn: BigDecimal? = null,
+        returnStddev: BigDecimal? = null,
         sector: String? = "Technology",
         type: String = "EQUITY",
     ) = Position(
@@ -69,8 +69,8 @@ class OptimizerServiceTest {
         ticker = ticker,
         currency = currency,
         weightPct = BigDecimal("0.05"),
-        intrinsicValueLocal = intrinsicValue,
-        confidence = confidence,
+        expectedReturn = expectedReturn,
+        returnStddev = returnStddev,
         sector = sector,
         positionType = type,
     )
@@ -102,36 +102,14 @@ class OptimizerServiceTest {
     }
 
     @Nested
-    inner class CagrConversion {
-
-        @Test
-        fun `computes correct CAGR for IV above current price`() {
-            // IV=150, P=100 -> (1.5)^(1/5) - 1 ≈ 0.08447
-            val cagr = OptimizerService.computeCagr(150.0, 100.0)
-            assertEquals(0.08447, cagr, 0.001)
-        }
-
-        @Test
-        fun `computes negative CAGR for IV below current price`() {
-            val cagr = OptimizerService.computeCagr(80.0, 100.0)
-            assertTrue(cagr < 0)
-        }
-
-        @Test
-        fun `computes zero CAGR when IV equals price`() {
-            val cagr = OptimizerService.computeCagr(100.0, 100.0)
-            assertEquals(0.0, cagr, 0.0001)
-        }
-    }
-
-    @Nested
     inner class PayloadAssembly {
 
         @Test
-        fun `includes only positions with intrinsic values in views`() {
-            val posWithIV = position("GOOG", intrinsicValue = BigDecimal("200"), confidence = BigDecimal("0.80"))
+        fun `sends the user's return and std-dev as the view, untouched`() {
+            val posWithIV = position("GOOG", expectedReturn = BigDecimal("0.1250"), returnStddev = BigDecimal("0.3000"))
             val posWithoutIV = position("AMZN")
-            val posPartialIV = position("NVDA", intrinsicValue = BigDecimal("150"))
+            // Can't be saved through PortfolioService, but must not become half a view if it exists.
+            val posPartialIV = position("NVDA", expectedReturn = BigDecimal("0.2000"))
 
             every { portfolioService.findByIdAndUserId(portfolioId, userId) } returns portfolio
             every { portfolioService.findPositionsByPortfolioId(portfolioId, userId) } returns
@@ -179,11 +157,9 @@ class OptimizerServiceTest {
             service.optimize(portfolioId, userId, "black_litterman")
 
             val request = requestSlot.captured as com.kernfolio.dto.OptimizeRequestDto
-            // Only GOOG has both IV and confidence
-            assertEquals(1, request.views.size)
-            assertTrue(request.views.containsKey("GOOG"))
-            assertEquals(1, request.confidences.size)
-            assertTrue(request.confidences.containsKey("GOOG"))
+            // Only GOOG has both a return and a std-dev
+            assertEquals(mapOf("GOOG" to 0.125), request.views)
+            assertEquals(mapOf("GOOG" to 0.30), request.viewStddevs)
         }
 
         @Test

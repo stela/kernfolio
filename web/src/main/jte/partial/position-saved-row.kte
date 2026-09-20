@@ -33,15 +33,14 @@
          fills these from /entry-data) so they follow the viewer's locale. --%>
     <td class="px-4 py-3 text-sm text-right font-mono">
         @if(position.positionType == "EQUITY")
-            <span data-iv-ticker="${position.ticker}"></span>
-            <div class="text-xs text-gray-500 font-sans" data-cagr-ticker="${position.ticker}"></div>
+            <span data-expected-return-ticker="${position.ticker}"></span>
         @else
             <span class="text-gray-400">—</span>
         @endif
     </td>
     <td class="px-4 py-3 text-sm text-right font-mono">
         @if(position.positionType == "EQUITY")
-            <span data-confidence-ticker="${position.ticker}"></span>
+            <span data-return-stddev-ticker="${position.ticker}"></span>
         @else
             <span class="text-gray-400">—</span>
         @endif

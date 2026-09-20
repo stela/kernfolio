@@ -49,8 +49,8 @@ class PortfolioApiController(
                         currency = pos.currency,
                         weightPct = pos.weightPct,
                         costBasisPct = pos.costBasisPct,
-                        intrinsicValueLocal = pos.intrinsicValueLocal,
-                        confidence = pos.confidence,
+                        expectedReturn = pos.expectedReturn,
+                        returnStddev = pos.returnStddev,
                         sector = pos.sector,
                     )
                 },

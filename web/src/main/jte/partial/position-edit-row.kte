@@ -8,8 +8,8 @@
 
 !{var isCash = position.positionType == "CASH";}
 !{var sectorValue = position.sector ?: "";}
-!{var ivValue = position.intrinsicValueLocal?.toPlainString() ?: "";}
-!{var confValue = position.confidence?.multiply(BigDecimal(100))?.stripTrailingZeros()?.toPlainString() ?: "";}
+!{var returnValue = position.expectedReturn?.multiply(BigDecimal(100))?.stripTrailingZeros()?.toPlainString() ?: "";}
+!{var stddevValue = position.returnStddev?.multiply(BigDecimal(100))?.stripTrailingZeros()?.toPlainString() ?: "";}
 
 <tr data-new-row data-edit-row
     data-submit-url="/portfolios/${portfolioId.toString()}/positions/${position.id.toString()}"
@@ -54,16 +54,20 @@
                class="js-equity-field ${if (isCash) "hidden" else ""} w-24 rounded-md border border-gray-300 px-2 py-1 text-sm">
     </td>
     <td class="px-4 py-2">
-        <input type="number" step="0.01" min="0" name="intrinsicValueLocal" placeholder="IV"
-               value="${ivValue}"
-               class="js-iv js-equity-field ${if (isCash) "hidden" else ""} w-24 rounded-md border border-gray-300 px-2 py-1 text-sm text-right">
-        <div class="js-cagr-hint js-equity-field ${if (isCash) "hidden" else ""} mt-1 text-xs text-gray-500" aria-live="polite"></div>
+        <span class="js-equity-field ${if (isCash) "hidden" else ""} inline-flex items-center gap-1">
+            <input type="number" step="any" min="-99" name="expectedReturn" placeholder="12"
+                   value="${returnValue}"
+                   title="Expected annual return, probability-weighted across your scenarios"
+                   class="js-expected-return w-20 rounded-md border border-gray-300 px-2 py-1 text-sm text-right">
+            <span class="text-xs text-gray-500">%</span>
+        </span>
     </td>
     <td class="px-4 py-2">
         <span class="js-equity-field ${if (isCash) "hidden" else ""} inline-flex items-center gap-1">
-            <input type="number" step="any" min="0" max="100" name="confidence" placeholder="80"
-                   value="${confValue}"
-                   class="js-confidence w-16 rounded-md border border-gray-300 px-2 py-1 text-sm text-right">
+            <input type="number" step="any" min="0" name="returnStddev" placeholder="25"
+                   value="${stddevValue}"
+                   title="Standard deviation of that return across your scenarios; wider means the market's estimate counts for more"
+                   class="js-return-stddev w-20 rounded-md border border-gray-300 px-2 py-1 text-sm text-right">
             <span class="text-xs text-gray-500">%</span>
         </span>
     </td>

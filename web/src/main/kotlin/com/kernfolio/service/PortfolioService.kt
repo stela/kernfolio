@@ -11,17 +11,37 @@ import java.util.UUID
 
 class PortfolioNotFoundException(message: String) : RuntimeException(message)
 
+class InvalidPositionException(message: String) : RuntimeException(message)
+
 data class PositionForm(
     val positionType: String = "EQUITY",
     val ticker: String = "",
     val currency: String = "USD",
     val weightPct: BigDecimal = BigDecimal.ZERO,
     val costBasisPct: BigDecimal? = null,
-    val intrinsicValueLocal: BigDecimal? = null,
-    val confidence: BigDecimal? = null,
+    val expectedReturn: BigDecimal? = null,
+    val returnStddev: BigDecimal? = null,
     val sector: String? = null,
     val notes: String? = null,
-)
+) {
+    // A view is a return *and* how sure you are of it: Black-Litterman can't
+    // weigh one without the other, and a silent default would be a made-up
+    // opinion. No view at all is fine — the market's estimate is used.
+    fun validate() {
+        if ((expectedReturn == null) != (returnStddev == null)) {
+            throw InvalidPositionException("Expected return and its standard deviation must be given together")
+        }
+        if (expectedReturn != null && expectedReturn <= BigDecimal.ONE.negate()) {
+            throw InvalidPositionException("Expected return must be above -100%")
+        }
+        if (returnStddev != null && returnStddev <= BigDecimal.ZERO) {
+            throw InvalidPositionException("Standard deviation must be positive")
+        }
+        if (positionType != "EQUITY" && expectedReturn != null) {
+            throw InvalidPositionException("Only equity positions can carry a view")
+        }
+    }
+}
 
 @Service
 class PortfolioService(
@@ -69,6 +89,7 @@ class PortfolioService(
     }
 
     fun addPosition(portfolioId: UUID, userId: UUID, form: PositionForm): Position {
+        form.validate()
         findByIdAndUserId(portfolioId, userId)
             ?: throw PortfolioNotFoundException("Portfolio not found")
         return positionRepository.save(
@@ -79,8 +100,8 @@ class PortfolioService(
                 currency = form.currency,
                 weightPct = form.weightPct,
                 costBasisPct = form.costBasisPct,
-                intrinsicValueLocal = form.intrinsicValueLocal,
-                confidence = form.confidence,
+                expectedReturn = form.expectedReturn,
+                returnStddev = form.returnStddev,
                 sector = form.sector,
                 notes = form.notes,
             )
@@ -104,6 +125,7 @@ class PortfolioService(
         userId: UUID,
         form: PositionForm,
     ): Position {
+        form.validate()
         val existing = findPosition(positionId, portfolioId, userId)
         return positionRepository.save(
             existing.copy(
@@ -112,8 +134,8 @@ class PortfolioService(
                 currency = form.currency,
                 weightPct = form.weightPct,
                 costBasisPct = form.costBasisPct,
-                intrinsicValueLocal = form.intrinsicValueLocal,
-                confidence = form.confidence,
+                expectedReturn = form.expectedReturn,
+                returnStddev = form.returnStddev,
                 sector = form.sector,
                 notes = form.notes,
             )

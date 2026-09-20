@@ -73,6 +73,7 @@ class BrowserFlowTest {
     @Autowired lateinit var cachedPriceRepository: CachedPriceRepository
     @Autowired lateinit var cachedFxRateRepository: CachedFxRateRepository
     @Autowired lateinit var instrumentRepository: InstrumentRepository
+    @Autowired lateinit var jdbcTemplate: org.springframework.jdbc.core.JdbcTemplate
 
     private lateinit var chrome: BrowserWebDriverContainer<*>
     private lateinit var driver: RemoteWebDriver
@@ -142,6 +143,14 @@ class BrowserFlowTest {
 
     // sv-SE uses no-break spaces for digit grouping and before "%". Fold
     // them to plain spaces so expected strings stay readable.
+    /** (expected_return, return_stddev) as stored for a ticker — what the browser actually sent. */
+    private fun positionRepositoryViewOf(ticker: String): Pair<BigDecimal, BigDecimal> =
+        jdbcTemplate.queryForObject(
+            "SELECT expected_return, return_stddev FROM positions WHERE ticker = ?",
+            { rs, _ -> rs.getBigDecimal(1) to rs.getBigDecimal(2) },
+            ticker,
+        )!!
+
     private fun visibleText(by: By): String =
         driver.findElement(by).text.replace('\u00a0', ' ').replace('\u202f', ' ')
 
@@ -896,7 +905,7 @@ class BrowserFlowTest {
 
     @Test
     @Order(38)
-    fun `intrinsic value, implied CAGR and confidence render in the browser locale`() {
+    fun `expected return and its std-dev render in the browser locale`() {
         instrumentRepository.save(Instrument("IVTEST", "IV Locale Test", "TEST", "EUR", "Test", BigDecimal("0")))
         cachedPriceRepository.upsert("IVTEST", LocalDate.now(), BigDecimal("1000.00"), "EUR")
 
@@ -915,18 +924,23 @@ class BrowserFlowTest {
         currField.sendKeys("EUR")
         newRow.findElement(By.cssSelector(".js-ticker-input")).sendKeys("IVTEST")
         newRow.findElement(By.cssSelector(".js-shares")).sendKeys("1")
-        // IV 2000 vs price 1000 → (2000/1000)^(1/5) - 1 = 14.87 %/yr.
-        newRow.findElement(By.cssSelector(".js-iv")).sendKeys("2000")
-        newRow.findElement(By.cssSelector(".js-confidence")).sendKeys("80")
+        // Entered in percent; stored and sent as fractions (-0.125 / 0.305).
+        newRow.findElement(By.cssSelector(".js-expected-return")).sendKeys("-12.5")
+        newRow.findElement(By.cssSelector(".js-return-stddev")).sendKeys("30.5")
         newRow.findElement(By.cssSelector(".js-save-position")).click()
         wait.until(ExpectedConditions.stalenessOf(newRow))
 
         val rowBy = By.xpath("//tr[.//td[contains(normalize-space(), 'IVTEST')]]")
-        wait.until { visibleText(rowBy).contains("14,87 %/yr over 5y") }
+        // sv-SE: comma decimal, space before %, and a real minus sign (U+2212).
+        wait.until { visibleText(rowBy).contains("30,5 %") }
         val rowText = visibleText(rowBy)
-        assertThat(rowText).contains("2 000,00")   // IV/share, grouped + comma decimal
-        assertThat(rowText).contains("80 %")       // confidence
-        assertThat(rowText).doesNotContain("2,000.00").doesNotContain("14.87")
+        assertThat(rowText).contains("\u221212,5 %")  // expected return
+        assertThat(rowText).contains("30,5 %")         // std-dev
+        assertThat(rowText).doesNotContain("12.5").doesNotContain("30.5")
+
+        val saved = positionRepositoryViewOf("IVTEST")
+        assertThat(saved.first).isEqualByComparingTo("-0.125")
+        assertThat(saved.second).isEqualByComparingTo("0.305")
 
         driver.findElement(By.cssSelector("form[data-confirm] button[type='submit']")).click()
         driver.switchTo().alert().accept()

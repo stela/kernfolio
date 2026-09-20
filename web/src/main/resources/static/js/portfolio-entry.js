@@ -435,21 +435,6 @@ var PortfolioEntry = (function () {
         return Format.amount(parseFloat(pd.close)) + ' ' + pd.currency;
     }
 
-    // Expected annual return implied by buying at `priceLocal` and the
-    // price converging on the user's intrinsic value over CAGR_YEARS. Both
-    // inputs are per-share in the instrument's own currency. Returns null
-    // when either is missing. Mirrors OptimizerService.computeCagr.
-    var CAGR_YEARS = 5;
-    function computeCagr(ivLocal, priceLocal) {
-        if (!isFinite(ivLocal) || !isFinite(priceLocal) || ivLocal <= 0 || priceLocal <= 0) return null;
-        return Math.pow(ivLocal / priceLocal, 1 / CAGR_YEARS) - 1;
-    }
-
-    function formatCagrHint(cagr) {
-        if (cagr == null) return '';
-        return '≈ ' + Format.pct(cagr) + '/yr over ' + CAGR_YEARS + 'y';
-    }
-
     function positionByTicker(ticker) {
         for (var i = 0; i < positions.length; i++) {
             if (positions[i].ticker === ticker) return positions[i];
@@ -457,26 +442,18 @@ var PortfolioEntry = (function () {
         return null;
     }
 
-    // IV/share, implied CAGR and confidence for saved rows. The server
-    // renders these cells empty; values come from /entry-data.
+    // The user's view (expected return, std-dev) for saved rows. The
+    // server renders these cells empty; values come from /entry-data.
     function updateValuationCells() {
-        document.querySelectorAll('[data-iv-ticker]').forEach(function (el) {
-            var pos = positionByTicker(el.dataset.ivTicker);
-            var iv = pos && pos.intrinsicValueLocal != null ? parseFloat(pos.intrinsicValueLocal) : NaN;
-            el.textContent = isFinite(iv) ? Format.amount(iv) : '—';
-        });
-        document.querySelectorAll('[data-cagr-ticker]').forEach(function (el) {
-            var pos = positionByTicker(el.dataset.cagrTicker);
-            var pd = prices[el.dataset.cagrTicker];
-            var iv = pos && pos.intrinsicValueLocal != null ? parseFloat(pos.intrinsicValueLocal) : NaN;
-            var price = pd && pd.close != null ? parseFloat(pd.close) : NaN;
-            el.textContent = formatCagrHint(computeCagr(iv, price));
-        });
-        document.querySelectorAll('[data-confidence-ticker]').forEach(function (el) {
-            var pos = positionByTicker(el.dataset.confidenceTicker);
-            var conf = pos && pos.confidence != null ? parseFloat(pos.confidence) : NaN;
-            el.textContent = isFinite(conf) ? Format.pct(conf, 0) : '—';
-        });
+        function fill(selector, datasetKey, field) {
+            document.querySelectorAll(selector).forEach(function (el) {
+                var pos = positionByTicker(el.dataset[datasetKey]);
+                var v = pos && pos[field] != null ? parseFloat(pos[field]) : NaN;
+                el.textContent = isFinite(v) ? Format.pct(v, 1) : '—';
+            });
+        }
+        fill('[data-expected-return-ticker]', 'expectedReturnTicker', 'expectedReturn');
+        fill('[data-return-stddev-ticker]', 'returnStddevTicker', 'returnStddev');
     }
 
     function getShares(ticker) {
@@ -691,8 +668,6 @@ var PortfolioEntry = (function () {
         computeWeightPct: computeWeightPct,
         computeCostBasisPct: computeCostBasisPct,
         formatWeight: formatWeight,
-        computeCagr: computeCagr,
-        formatCagrHint: formatCagrHint,
         getShares: getShares,
         getCashAmount: getCashAmount,
         updateShares: updateShares,

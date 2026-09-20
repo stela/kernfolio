@@ -258,7 +258,7 @@ class PortfolioControllerTest {
         }
 
         @Test
-        fun `POST position persists intrinsic value and confidence`() {
+        fun `POST position persists the view as return and std-dev`() {
             val testUser = createUser("alice")
             val portfolio = portfolioService.create(testUser.id!!, "Test", null, "EUR")
 
@@ -269,15 +269,59 @@ class PortfolioControllerTest {
                     .param("ticker", "AMZN")
                     .param("currency", "USD")
                     .param("weightPct", "0.20")
-                    .param("intrinsicValueLocal", "275.50")
-                    .param("confidence", "0.65")
+                    .param("expectedReturn", "-0.0750")
+                    .param("returnStddev", "0.2800")
             )
                 .andExpect(status().isOk)
 
             val positions = positionRepository.findByPortfolioId(portfolio.id!!)
             assert(positions.size == 1)
-            assertEquals(0, BigDecimal("275.50").compareTo(positions[0].intrinsicValueLocal))
-            assertEquals(0, BigDecimal("0.65").compareTo(positions[0].confidence))
+            assertEquals(0, BigDecimal("-0.0750").compareTo(positions[0].expectedReturn))
+            assertEquals(0, BigDecimal("0.2800").compareTo(positions[0].returnStddev))
+        }
+
+        @org.junit.jupiter.params.ParameterizedTest(name = "return={0} stddev={1}")
+        @org.junit.jupiter.params.provider.CsvSource(
+            "0.12,",        // return without its spread
+            ",0.30",        // spread without a return
+            "0.12,0",       // zero spread would be infinite certainty
+            "0.12,-0.10",
+            "-1.00,0.30",   // can't lose more than everything
+        )
+        fun `POST position rejects an incomplete or impossible view`(expectedReturn: String?, returnStddev: String?) {
+            val testUser = createUser("alice")
+            val portfolio = portfolioService.create(testUser.id!!, "Test", null, "EUR")
+
+            val request = post("/portfolios/${portfolio.id}/positions")
+                .with(mockUserDetails(testUser))
+                .with(csrf())
+                .param("ticker", "AMZN")
+                .param("currency", "USD")
+                .param("weightPct", "0.20")
+            expectedReturn?.let { request.param("expectedReturn", it) }
+            returnStddev?.let { request.param("returnStddev", it) }
+
+            mockMvc.perform(request).andExpect(status().isBadRequest)
+            assert(positionRepository.findByPortfolioId(portfolio.id!!).isEmpty())
+        }
+
+        @Test
+        fun `POST cash position cannot carry a view`() {
+            val testUser = createUser("alice")
+            val portfolio = portfolioService.create(testUser.id!!, "Test", null, "EUR")
+
+            mockMvc.perform(
+                post("/portfolios/${portfolio.id}/positions")
+                    .with(mockUserDetails(testUser))
+                    .with(csrf())
+                    .param("positionType", "CASH")
+                    .param("ticker", "CASH.USD")
+                    .param("currency", "USD")
+                    .param("weightPct", "0.20")
+                    .param("expectedReturn", "0.03")
+                    .param("returnStddev", "0.01")
+            )
+                .andExpect(status().isBadRequest)
         }
 
         @Test

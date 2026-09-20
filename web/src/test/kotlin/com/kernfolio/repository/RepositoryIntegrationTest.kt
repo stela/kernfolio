@@ -201,8 +201,8 @@ class RepositoryIntegrationTest {
                     currency = "JPY",
                     weightPct = BigDecimal("0.023500"),
                     costBasisPct = BigDecimal("0.019200"),
-                    intrinsicValueLocal = BigDecimal("3500.0000"),
-                    confidence = BigDecimal("0.7500"),
+                    expectedReturn = BigDecimal("-0.1250"),
+                    returnStddev = BigDecimal("0.3500"),
                 )
             )
 
@@ -210,8 +210,8 @@ class RepositoryIntegrationTest {
             val pos = positions[0]
             assertEquals(0, BigDecimal("0.023500").compareTo(pos.weightPct))
             assertEquals(0, BigDecimal("0.019200").compareTo(pos.costBasisPct))
-            assertEquals(0, BigDecimal("3500.0000").compareTo(pos.intrinsicValueLocal))
-            assertEquals(0, BigDecimal("0.7500").compareTo(pos.confidence))
+            assertEquals(0, BigDecimal("-0.1250").compareTo(pos.expectedReturn))
+            assertEquals(0, BigDecimal("0.3500").compareTo(pos.returnStddev))
         }
 
         @Test

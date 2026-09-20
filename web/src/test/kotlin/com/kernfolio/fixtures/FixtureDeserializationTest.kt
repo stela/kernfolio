@@ -138,7 +138,7 @@ class FixtureDeserializationTest {
         assertTrue(root["prices"].has("dates"))
         assertTrue(root.has("market_caps"))
         assertTrue(root.has("views"))
-        assertTrue(root.has("confidences"))
+        assertTrue(root.has("view_stddevs"))
         assertTrue(root.has("constraints"))
         assertEquals("ledoit_wolf", root["covariance_method"].stringValue())
     }

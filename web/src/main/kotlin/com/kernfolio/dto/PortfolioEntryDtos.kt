@@ -14,7 +14,7 @@ data class PositionEntryDto(
     val currency: String,
     val weightPct: BigDecimal,
     val costBasisPct: BigDecimal?,
-    val intrinsicValueLocal: BigDecimal?,
-    val confidence: BigDecimal?,
+    val expectedReturn: BigDecimal?,
+    val returnStddev: BigDecimal?,
     val sector: String?,
 )

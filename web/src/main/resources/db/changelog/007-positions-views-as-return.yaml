@@ -1,0 +1,55 @@
+databaseChangeLog:
+  - changeSet:
+      id: 007-positions-views-as-return
+      author: kernfolio
+      changes:
+        # A view used to be "intrinsic value per share + a confidence %", turned
+        # into a return with a fixed 5-year convergence. It is now the expected
+        # annual return itself plus the std-dev of the scenarios behind it, as
+        # produced by the user's own research. No conversion exists between the
+        # two, so the old values are dropped rather than migrated.
+        - dropColumn:
+            tableName: positions
+            columns:
+              - column:
+                  name: intrinsic_value_local
+              - column:
+                  name: confidence
+        - addColumn:
+            tableName: positions
+            columns:
+              - column:
+                  name: expected_return
+                  type: NUMERIC(7,4)
+              - column:
+                  name: return_stddev
+                  type: NUMERIC(7,4)
+        - sql:
+            sql: |
+              ALTER TABLE positions ADD CONSTRAINT positions_view_complete
+                  CHECK ((expected_return IS NULL) = (return_stddev IS NULL));
+              ALTER TABLE positions ADD CONSTRAINT positions_view_range
+                  CHECK (expected_return > -1 AND return_stddev > 0);
+              COMMENT ON COLUMN positions.expected_return IS 'Expected annual return as a fraction (0.12 = 12%/yr); the Black-Litterman view. Equity only, NULL = no view';
+              COMMENT ON COLUMN positions.return_stddev IS 'Std-dev of the scenario outcomes behind expected_return, as a fraction; sets the view uncertainty (omega = tau * stddev^2). Set iff expected_return is';
+      rollback:
+        - sql:
+            sql: |
+              ALTER TABLE positions DROP CONSTRAINT positions_view_range;
+              ALTER TABLE positions DROP CONSTRAINT positions_view_complete;
+        - dropColumn:
+            tableName: positions
+            columns:
+              - column:
+                  name: expected_return
+              - column:
+                  name: return_stddev
+        - addColumn:
+            tableName: positions
+            columns:
+              - column:
+                  name: intrinsic_value_local
+                  type: NUMERIC(14,4)
+              - column:
+                  name: confidence
+                  type: NUMERIC(5,4)

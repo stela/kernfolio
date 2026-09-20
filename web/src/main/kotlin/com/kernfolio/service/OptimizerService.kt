@@ -24,7 +24,6 @@ import tools.jackson.databind.ObjectMapper
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.util.UUID
-import kotlin.math.pow
 
 class OptimizationException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
 
@@ -73,10 +72,10 @@ class OptimizerService(
 
         val positions = loadEquityPositions(portfolioId, userId)
         val priceMatrix = buildPriceMatrix(positions, baseCurrency)
-        val (views, confidences) = computeViewsAndConfidences(positions)
+        val (views, viewStddevs) = computeViews(positions)
         val marketCaps = loadMarketCaps(positions)
         val sectors = buildSectorsMap(positions)
-        val request = assembleRequest(algorithm, priceMatrix, marketCaps, views, confidences, sectors, params)
+        val request = assembleRequest(algorithm, priceMatrix, marketCaps, views, viewStddevs, sectors, params)
 
         return try {
             val response = callOptimizer(request)
@@ -168,29 +167,25 @@ class OptimizerService(
         return PriceMatrix(dates = commonDates, pricesByTicker = yfinancePrices)
     }
 
-    private fun computeViewsAndConfidences(
+    // Views come straight from the user's research: expected annual return
+    // and the std-dev of their scenario outcomes. Positions without one are
+    // left to the market-implied estimate.
+    private fun computeViews(
         positions: List<Position>,
     ): Pair<Map<String, Double>, Map<String, Double>> {
         val views = mutableMapOf<String, Double>()
-        val confidences = mutableMapOf<String, Double>()
+        val stddevs = mutableMapOf<String, Double>()
 
         for (pos in positions) {
-            val iv = pos.intrinsicValueLocal ?: continue
-            val conf = pos.confidence ?: continue
+            val expectedReturn = pos.expectedReturn ?: continue
+            val stddev = pos.returnStddev ?: continue
 
-            val latestPrice = cachedPriceRepository.findLatestByTicker(pos.ticker)
-                ?: continue
-            val price = latestPrice.closePrice
-
-            if (price.compareTo(BigDecimal.ZERO) == 0) continue
-
-            val cagr = computeCagr(iv.toDouble(), price.toDouble())
             val yfinanceTicker = tickerMapper.toYfinance(pos.ticker)
-            views[yfinanceTicker] = cagr
-            confidences[yfinanceTicker] = conf.toDouble()
+            views[yfinanceTicker] = expectedReturn.toDouble()
+            stddevs[yfinanceTicker] = stddev.toDouble()
         }
 
-        return views to confidences
+        return views to stddevs
     }
 
     private fun loadMarketCaps(positions: List<Position>): Map<String, Double> {
@@ -214,7 +209,7 @@ class OptimizerService(
         priceMatrix: PriceMatrix,
         marketCaps: Map<String, Double>,
         views: Map<String, Double>,
-        confidences: Map<String, Double>,
+        viewStddevs: Map<String, Double>,
         sectors: Map<String, String>,
         params: OptimizationParameters,
     ): OptimizeRequestDto {
@@ -234,7 +229,7 @@ class OptimizerService(
             prices = prices,
             marketCaps = marketCaps,
             views = views,
-            confidences = confidences,
+            viewStddevs = viewStddevs,
             riskFreeRate = params.riskFreeRate ?: 0.03,
             tau = params.tau ?: 0.05,
             kellyFraction = params.kellyFraction ?: 0.5,
@@ -291,6 +286,10 @@ class OptimizerService(
             parameters = params,
             results = OptimizationResults(
                 optimizedWeights = internalWeights,
+                cashWeight = response.cashWeight,
+                viewConfidences = response.viewConfidences.entries.associate { (yTicker, c) ->
+                    tickerMapper.toInternal(yTicker) to c
+                },
                 metrics = OptimizationMetrics(
                     expectedAnnualReturn = response.metrics.expectedAnnualReturn,
                     annualVolatility = response.metrics.annualVolatility,
@@ -310,8 +309,5 @@ class OptimizerService(
 
     companion object {
         private const val LOOKBACK_YEARS = 5
-
-        fun computeCagr(intrinsicValue: Double, currentPrice: Double): Double =
-            (intrinsicValue / currentPrice).pow(1.0 / LOOKBACK_YEARS) - 1.0
     }
 }

@@ -11,3 +11,5 @@ databaseChangeLog:
       file: db/changelog/005-drop-positions-name.yaml
   - include:
       file: db/changelog/006-rename-positions-confidence.yaml
+  - include:
+      file: db/changelog/007-positions-views-as-return.yaml

@@ -2,6 +2,7 @@ package com.kernfolio.controller
 
 import com.kernfolio.domain.Position
 import com.kernfolio.security.KernfolioUserDetails
+import com.kernfolio.service.InvalidPositionException
 import com.kernfolio.service.PortfolioNotFoundException
 import com.kernfolio.service.PortfolioService
 import com.kernfolio.service.PositionForm
@@ -156,6 +157,8 @@ class PortfolioController(
             return "partial/position-saved-row"
         } catch (_: PortfolioNotFoundException) {
             throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        } catch (e: InvalidPositionException) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, e.message)
         }
     }
 
@@ -194,6 +197,8 @@ class PortfolioController(
             return "partial/position-saved-row"
         } catch (_: PortfolioNotFoundException) {
             throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        } catch (e: InvalidPositionException) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, e.message)
         }
     }
 

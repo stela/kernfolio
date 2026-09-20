@@ -36,7 +36,12 @@ data class OptimizationConstraints(
 )
 
 data class OptimizationResults(
+    // Fractions of the whole portfolio. Runs stored before Kelly sizing have
+    // no cashWeight and equity weights that sum to 1.
     val optimizedWeights: Map<String, Double> = emptyMap(),
+    val cashWeight: Double? = null,
+    // Weight each view got against the market prior (0..1), by internal ticker.
+    val viewConfidences: Map<String, Double>? = null,
     val metrics: OptimizationMetrics? = null,
     val efficientFrontier: List<FrontierPoint> = emptyList(),
     val correlationMatrix: Map<String, Map<String, Double>> = emptyMap(),

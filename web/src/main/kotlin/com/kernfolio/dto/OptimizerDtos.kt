@@ -18,7 +18,7 @@ data class OptimizeRequestDto(
     val prices: Map<String, List<Any>>,
     val marketCaps: Map<String, Double>,
     val views: Map<String, Double>,
-    val confidences: Map<String, Double>,
+    val viewStddevs: Map<String, Double>,
     val riskFreeRate: Double,
     val tau: Double,
     val kellyFraction: Double,
@@ -44,7 +44,10 @@ data class FrontierPointDto(
 
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy::class)
 data class OptimizeResponseDto(
+    // Fractions of the whole portfolio; they sum to 1 - cashWeight.
     val weights: Map<String, Double>,
+    val cashWeight: Double = 0.0,
+    val viewConfidences: Map<String, Double> = emptyMap(),
     val metrics: OptimizeMetricsDto,
     val efficientFrontier: List<FrontierPointDto>,
     val correlationMatrix: Map<String, Map<String, Double>>,
