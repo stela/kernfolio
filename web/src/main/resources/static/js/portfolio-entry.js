@@ -506,6 +506,24 @@ var PortfolioEntry = (function () {
         return changed;
     }
 
+    function applyCashWeights(weightsByCurrency) {
+        // Cash counterpart of applyWeights: currency→fraction of the whole
+        // portfolio, turned into an amount in that currency. Currencies
+        // whose FX rate isn't loaded are skipped and surface as drift.
+        if (totalValue <= 0) return false;
+        var changed = false;
+        Object.keys(weightsByCurrency).forEach(function (currency) {
+            var rate = getFxRateAgainstBase(currency);
+            if (rate === null) return;
+            var amount = Math.round(totalValue * weightsByCurrency[currency] * rate * 100) / 100;
+            if (!cash[currency]) cash[currency] = { amount: 0 };
+            cash[currency].amount = amount;
+            changed = true;
+        });
+        if (changed) saveToLocalStorage();
+        return changed;
+    }
+
     function updateDisplays() {
         // Update shares displays
         document.querySelectorAll('[data-shares-ticker]').forEach(function (el) {
@@ -673,6 +691,7 @@ var PortfolioEntry = (function () {
         updateShares: updateShares,
         updateCashAmount: updateCashAmount,
         applyWeights: applyWeights,
+        applyCashWeights: applyCashWeights,
         updateDisplays: updateDisplays,
         refresh: refresh,
         rebalanceNow: rebalanceNow,

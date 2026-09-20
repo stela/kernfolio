@@ -121,6 +121,126 @@ class ChartDataControllerTest {
             .andExpect(jsonPath("$.currentWeights", hasSize<Any>(3)))
     }
 
+    // ── Cash share of Kelly-sized runs ───────────────────────────────
+
+    private fun portfolioWith(user: User, vararg positions: Triple<String, String, String>): UUID {
+        val portfolioId = portfolioService.create(user.id!!, "Test", null, "EUR").id!!
+        positions.forEach { (ticker, type, weight) ->
+            positionRepository.save(
+                Position(
+                    portfolioId = portfolioId,
+                    positionType = type,
+                    ticker = ticker,
+                    currency = ticker.substringAfter("CASH.", "USD"),
+                    weightPct = BigDecimal(weight),
+                )
+            )
+        }
+        return portfolioId
+    }
+
+    /** JsonPath hands back Double or BigDecimal depending on the digits; compare as numbers. */
+    private fun near(expected: Double) = object : org.hamcrest.TypeSafeMatcher<Number>() {
+        override fun matchesSafely(actual: Number) = kotlin.math.abs(actual.toDouble() - expected) < 1e-9
+        override fun describeTo(description: org.hamcrest.Description) { description.appendText("a number near $expected") }
+    }
+
+    private fun runWith(portfolioId: UUID, cashWeight: Double?, viewConfidences: Map<String, Double>? = null) =
+        optimizationRunRepository.save(
+            OptimizationRun(
+                portfolioId = portfolioId,
+                algorithm = "black_litterman",
+                parameters = OptimizationParameters(),
+                results = OptimizationResults(
+                    optimizedWeights = mapOf("GOOG" to 0.45, "AMZN" to 0.25),
+                    cashWeight = cashWeight,
+                    viewConfidences = viewConfidences,
+                ),
+            )
+        )
+
+    @Test
+    fun `allocation-data splits the cash share over cash positions in their current proportions`() {
+        val user = createUser("alice")
+        val portfolioId = portfolioWith(
+            user,
+            Triple("GOOG", "EQUITY", "0.500000"), Triple("AMZN", "EQUITY", "0.300000"),
+            Triple("CASH.EUR", "CASH", "0.150000"), Triple("CASH.USD", "CASH", "0.050000"),
+        )
+        val run = runWith(portfolioId, cashWeight = 0.30, viewConfidences = mapOf("GOOG" to 0.62))
+
+        mockMvc.perform(get("/api/portfolios/$portfolioId/runs/${run.id}/allocation-data").with(mockUserDetails(user)))
+            .andExpect(status().isOk)
+            // sorted: AMZN, CASH.EUR, CASH.USD, GOOG — 0.30 cash split 3:1
+            .andExpect(jsonPath("$.labels", org.hamcrest.Matchers.contains("AMZN", "CASH.EUR", "CASH.USD", "GOOG")))
+            .andExpect(jsonPath("$.optimizedWeights[0]").value(0.25))
+            .andExpect(jsonPath("$.optimizedWeights[1]", near(0.225)))
+            .andExpect(jsonPath("$.optimizedWeights[2]", near(0.075)))
+            .andExpect(jsonPath("$.optimizedWeights[3]").value(0.45))
+            .andExpect(jsonPath("$.cashTargets").value(true))
+            .andExpect(jsonPath("$.unallocatedCash").value(0.0))
+            .andExpect(jsonPath("$.viewConfidences.GOOG").value(0.62))
+    }
+
+    @Test
+    fun `allocation-data splits cash evenly when the cash positions are currently empty`() {
+        val user = createUser("alice")
+        val portfolioId = portfolioWith(
+            user,
+            Triple("GOOG", "EQUITY", "0.600000"), Triple("AMZN", "EQUITY", "0.400000"),
+            Triple("CASH.EUR", "CASH", "0.000000"), Triple("CASH.USD", "CASH", "0.000000"),
+        )
+        val run = runWith(portfolioId, cashWeight = 0.30)
+
+        mockMvc.perform(get("/api/portfolios/$portfolioId/runs/${run.id}/allocation-data").with(mockUserDetails(user)))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.optimizedWeights[1]", near(0.15)))
+            .andExpect(jsonPath("$.optimizedWeights[2]", near(0.15)))
+    }
+
+    @Test
+    fun `allocation-data reports cash it has no position for as unallocated`() {
+        val user = createUser("alice")
+        val portfolioId = portfolioWith(user, Triple("GOOG", "EQUITY", "0.600000"), Triple("AMZN", "EQUITY", "0.400000"))
+        val run = runWith(portfolioId, cashWeight = 0.30)
+
+        mockMvc.perform(get("/api/portfolios/$portfolioId/runs/${run.id}/allocation-data").with(mockUserDetails(user)))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.labels", org.hamcrest.Matchers.contains("AMZN", "GOOG", "Cash (unallocated)")))
+            .andExpect(jsonPath("$.optimizedWeights[2]").value(0.30))
+            .andExpect(jsonPath("$.currentWeights[2]").value(0.0))
+            .andExpect(jsonPath("$.unallocatedCash").value(0.30))
+    }
+
+    @Test
+    fun `runs stored before Kelly sizing have no cash targets and leave cash alone`() {
+        val user = createUser("alice")
+        val portfolioId = portfolioWith(
+            user, Triple("GOOG", "EQUITY", "0.500000"), Triple("CASH.EUR", "CASH", "0.500000"),
+        )
+        val run = runWith(portfolioId, cashWeight = null)
+
+        mockMvc.perform(get("/api/portfolios/$portfolioId/runs/${run.id}/allocation-data").with(mockUserDetails(user)))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.cashTargets").value(false))
+            .andExpect(jsonPath("$.unallocatedCash").value(0.0))
+
+        mockMvc.perform(get("/api/portfolios/$portfolioId/runs/${run.id}/summary-data").with(mockUserDetails(user)))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.cashWeight").value(org.hamcrest.Matchers.nullValue()))
+    }
+
+    @Test
+    fun `summary-data carries the cash weight`() {
+        val user = createUser("alice")
+        val portfolioId = portfolioWith(user, Triple("GOOG", "EQUITY", "1.000000"))
+        val run = runWith(portfolioId, cashWeight = 0.205)
+
+        mockMvc.perform(get("/api/portfolios/$portfolioId/runs/${run.id}/summary-data").with(mockUserDetails(user)))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.cashWeight").value(0.205))
+    }
+
     @Test
     fun `frontier-data returns frontier points and optimized point`() {
         val user = createUser("bob")

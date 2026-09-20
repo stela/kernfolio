@@ -36,18 +36,38 @@ class ChartDataController(
         val userId = currentUserId(authentication)
         val (run, positions) = loadRunAndPositions(portfolioId, runId, userId)
 
-        val allTickers = (run.results.optimizedWeights.keys + positions.map { it.ticker }).distinct().sorted()
+        val cashPositions = positions.filter { it.positionType == "CASH" }
+        val cashWeight = run.results.cashWeight
+        val cashTargets = cashWeight?.let { splitCash(it, cashPositions) } ?: emptyMap()
+        // Nowhere to put it: shown as its own row, left for the user to act on.
+        val unallocatedCash = if (cashWeight != null && cashPositions.isEmpty() && cashWeight > DISPLAY_EPSILON) cashWeight else 0.0
 
-        val optimizedByTicker = run.results.optimizedWeights
+        val optimizedByTicker = run.results.optimizedWeights + cashTargets
         val currentByTicker = positions.associate { it.ticker to it.weightPct.toDouble() }
+        val allTickers = (optimizedByTicker.keys + currentByTicker.keys).distinct().sorted()
 
+        val labels = if (unallocatedCash > 0) allTickers + UNALLOCATED_CASH_LABEL else allTickers
         return ResponseEntity.ok(
             AllocationChartData(
-                labels = allTickers,
-                optimizedWeights = allTickers.map { optimizedByTicker[it] ?: 0.0 },
-                currentWeights = allTickers.map { currentByTicker[it] ?: 0.0 },
+                labels = labels,
+                optimizedWeights = allTickers.map { optimizedByTicker[it] ?: 0.0 } + listOfNotNull(unallocatedCash.takeIf { it > 0 }),
+                currentWeights = allTickers.map { currentByTicker[it] ?: 0.0 } + listOfNotNull(0.0.takeIf { unallocatedCash > 0 }),
+                cashTargets = cashWeight != null,
+                unallocatedCash = unallocatedCash,
+                viewConfidences = run.results.viewConfidences ?: emptyMap(),
             )
         )
+    }
+
+    // The optimizer decides how much cash, not in which currency: keep the
+    // user's current split between their cash positions.
+    private fun splitCash(cashWeight: Double, cashPositions: List<com.kernfolio.domain.Position>): Map<String, Double> {
+        if (cashPositions.isEmpty()) return emptyMap()
+        val currentTotal = cashPositions.sumOf { it.weightPct.toDouble() }
+        return cashPositions.associate { pos ->
+            val share = if (currentTotal > 0) pos.weightPct.toDouble() / currentTotal else 1.0 / cashPositions.size
+            pos.ticker to cashWeight * share
+        }
     }
 
     @GetMapping("/frontier-data")
@@ -87,6 +107,7 @@ class ChartDataController(
                 annualVolatility = metrics?.annualVolatility,
                 sharpeRatio = metrics?.sharpeRatio,
                 cvar95 = metrics?.cvar95,
+                cashWeight = run.results.cashWeight,
             )
         )
     }
@@ -120,6 +141,11 @@ class ChartDataController(
                 fractional = fractional,
             )
         )
+    }
+
+    private companion object {
+        const val UNALLOCATED_CASH_LABEL = "Cash (unallocated)"
+        const val DISPLAY_EPSILON = 0.00005
     }
 
     private fun loadRun(portfolioId: UUID, runId: UUID, userId: UUID): com.kernfolio.domain.OptimizationRun {

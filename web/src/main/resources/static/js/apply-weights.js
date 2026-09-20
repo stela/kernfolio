@@ -5,10 +5,14 @@
  * positions (from /entry-data), then POSTs a weights-by-position-id
  * map to the existing /rebalance endpoint.
  *
- * Cash positions are left untouched: the optimizer runs only on
- * equities, so its weights sum to 1.0 over the equity subset. Zeroing
- * cash here would overallocate; omitting cash from the rebalance
- * request preserves its stored weight via the partial-update path.
+ * Weights are fractions of the whole portfolio: the equities sum to
+ * less than 1 when the Kelly sizing wants cash held. /allocation-data
+ * has already spread that cash share over the portfolio's CASH.<CUR>
+ * positions (cashTargets), so they are rebalanced like any other row.
+ * If the portfolio has no cash position there is nowhere to put it:
+ * the equities are applied and the user is told what is left over.
+ * Runs from before Kelly sizing carry no cash targets; their cash
+ * positions are left untouched, as before.
  *
  * Equity positions the optimizer dropped below its floor are
  * explicitly zeroed so the user's view ends up matching the table.
@@ -84,7 +88,15 @@
         var byPositionId = {};
         var byTicker = {};
         var equityTickers = [];
+        var cashByCurrency = {};
         entryData.positions.forEach(function (pos) {
+            if (pos.positionType === 'CASH') {
+                var cashTarget = optimizedByTicker[pos.ticker];
+                if (!allocationData.cashTargets || typeof cashTarget !== 'number') return;
+                byPositionId[pos.id] = cashTarget.toFixed(6);
+                cashByCurrency[pos.currency] = cashTarget;
+                return;
+            }
             if (pos.positionType !== 'EQUITY') return;
             var target = optimizedByTicker[pos.ticker];
             // undefined → ticker not in allocation-data at all (shouldn't
@@ -96,7 +108,10 @@
             byTicker[pos.ticker] = target;
             equityTickers.push(pos.ticker);
         });
-        return { byPositionId: byPositionId, byTicker: byTicker, equityTickers: equityTickers };
+        return {
+            byPositionId: byPositionId, byTicker: byTicker, equityTickers: equityTickers,
+            cashByCurrency: cashByCurrency, unallocatedCash: allocationData.unallocatedCash || 0,
+        };
     }
 
     btn.addEventListener('click', function () {
@@ -120,6 +135,12 @@
             var priceFetches = (typeof PortfolioEntry !== 'undefined' && PortfolioEntry.ensurePrice)
                 ? maps.equityTickers.map(function (t) { return PortfolioEntry.ensurePrice(t); })
                 : [];
+            // Same for the cash legs: an amount in CUR needs the CUR rate.
+            if (typeof PortfolioEntry !== 'undefined' && PortfolioEntry.ensureFxRate) {
+                Object.keys(maps.cashByCurrency).forEach(function (cur) {
+                    priceFetches.push(PortfolioEntry.ensureFxRate(cur));
+                });
+            }
             return Promise.all(priceFetches).then(function () {
                 return Http.fetch('/api/portfolios/' + portfolioId + '/rebalance', {
                     method: 'POST',
@@ -129,6 +150,7 @@
             }).then(function () {
                 if (typeof PortfolioEntry !== 'undefined' && PortfolioEntry.applyWeights) {
                     PortfolioEntry.applyWeights(maps.byTicker);
+                    if (PortfolioEntry.applyCashWeights) PortfolioEntry.applyCashWeights(maps.cashByCurrency);
                     // Refresh re-reads /entry-data and re-runs the drift
                     // check so anything that didn't reconcile (e.g. an
                     // equity whose price never loaded) becomes visible.
@@ -146,6 +168,16 @@
                         '<a href="/portfolios/' + portfolioId + '" ' +
                         'class="text-sm font-medium text-blue-600 hover:text-blue-500">' +
                         'View updated portfolio</a>';
+                    if (maps.unallocatedCash > 0.00005) {
+                        // No cash position to hold it; say so rather than
+                        // leaving the portfolio silently under 100 %.
+                        var note = document.createElement('p');
+                        note.className = 'mt-1 text-sm text-amber-700';
+                        note.textContent = Format.pct(maps.unallocatedCash) +
+                            ' is meant to stay in cash, but this portfolio has no cash position. ' +
+                            'Add one to hold it.';
+                        wrapper.appendChild(note);
+                    }
                 }
             });
         }).catch(function (err) {

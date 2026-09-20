@@ -20,6 +20,8 @@ document.addEventListener('DOMContentLoaded', function () {
         setText('metric-volatility', Format.pct(data.annualVolatility || 0));
         setText('metric-sharpe', Format.amount(data.sharpeRatio || 0));
         setText('metric-cvar95', Format.pct(data.cvar95 || 0));
+        // Runs from before Kelly sizing were always fully invested.
+        setText('metric-cash', data.cashWeight == null ? '—' : Format.pct(data.cashWeight));
     });
 
     var tbody = document.getElementById('weights-tbody');
@@ -48,6 +50,8 @@ document.addEventListener('DOMContentLoaded', function () {
             tr.appendChild(cell(Format.pct(optimized), 'text-right'));
             tr.appendChild(cell(Format.pct(current), 'text-right'));
             tr.appendChild(cell(flat ? Format.pct(0) : Format.signedPct(delta), 'text-right font-medium ' + tone));
+            var viewWeight = data.viewConfidences ? data.viewConfidences[ticker] : null;
+            tr.appendChild(cell(typeof viewWeight === 'number' ? Format.pct(viewWeight, 0) : '—', 'text-right text-gray-500'));
             tbody.appendChild(tr);
         });
     });

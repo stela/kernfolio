@@ -126,7 +126,12 @@ function discreteAllocation(weights, basePrices, totalValue, fractionalFlags) {
         if (fractionalFlags && fractionalFlags[t]) continue;
         spent += resultShares[t] * (basePrices[t] || 0);
     }
-    var remaining = totalValue - spent;
+    // Weights are fractions of the whole portfolio and may sum to less
+    // than 1: the rest is cash the optimizer wants held, not money to
+    // round shares up with. Only the equity budget is up for grabs.
+    var equityBudget = 0;
+    for (var i = 0; i < tickers.length; i++) equityBudget += (weights[tickers[i]] || 0) * totalValue;
+    var remaining = equityBudget - spent;
 
     // Step 3: Greedy largest-remainder for integer instruments only
     var integerTickers = tickers.filter(function (t) {
@@ -147,7 +152,8 @@ function discreteAllocation(weights, basePrices, totalValue, fractionalFlags) {
         }
     }
 
-    return { shares: resultShares, leftoverCash: remaining };
+    // Everything not in shares: the intended cash share plus rounding leftovers.
+    return { shares: resultShares, leftoverCash: remaining + (totalValue - equityBudget) };
 }
 
 function computeTrades(targetShares, currentHoldings) {
@@ -200,7 +206,7 @@ function renderAllocation(container, result, trades, basePrices, totalValue, bas
     html += '<h3 class="text-sm font-medium text-gray-700 mb-2">Discrete Allocation</h3>';
     html += '<p class="text-xs text-gray-500 mb-3">Total value: ' +
         Format.amount(totalValue) + ' ' + esc(baseCurrency) +
-        ' &mdash; Leftover cash: ' + Format.amount(result.leftoverCash) + ' ' + esc(baseCurrency) + '</p>';
+        ' &mdash; Cash after buying: ' + Format.amount(result.leftoverCash) + ' ' + esc(baseCurrency) + '</p>';
 
     html += '<table class="min-w-full divide-y divide-gray-200">';
     html += '<thead class="bg-gray-50"><tr>';

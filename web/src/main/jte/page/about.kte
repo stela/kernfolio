@@ -19,19 +19,18 @@
                     <p class="mt-2">
                         Kernfolio is a portfolio optimization tool for investors who want
                         quantitative allocation advice without handing their financial data
-                        to a third party. You define your positions, enter your views on
-                        intrinsic values, and Kernfolio computes optimal weights using
-                        established financial models.
+                        to a third party. You define your positions, enter the return you
+                        expect from each and how uncertain you are about it, and Kernfolio
+                        sizes the positions with the correlations between them taken into
+                        account.
                     </p>
                 </section>
 
                 <section>
-                    <h2 class="text-lg font-semibold text-gray-900">Optimization Algorithms</h2>
+                    <h2 class="text-lg font-semibold text-gray-900">How it optimizes</h2>
                     <ul class="mt-2 list-disc list-inside space-y-1">
-                        <li><strong>Black-Litterman</strong> &mdash; Combines market equilibrium with your personal views on expected returns, weighted by your confidence level (Idzorek method).</li>
-                        <li><strong>Max Sharpe Ratio</strong> &mdash; Finds the portfolio on the efficient frontier with the highest risk-adjusted return.</li>
-                        <li><strong>Minimum Variance</strong> &mdash; Minimizes portfolio volatility regardless of expected returns.</li>
-                        <li><strong>Risk Parity</strong> &mdash; Equalizes risk contribution across all holdings.</li>
+                        <li><strong>Black-Litterman</strong> &mdash; Blends the returns implied by market-cap weights with your own expected returns. The wider the spread of your scenarios compared with the stock's own volatility, the more the market's estimate counts.</li>
+                        <li><strong>Fractional Kelly sizing</strong> &mdash; Sizes positions for long-run growth using the full covariance matrix, so correlated holdings share one risk budget. The Kelly fraction decides how much stays in cash.</li>
                     </ul>
                     <p class="mt-2">
                         Covariance estimation uses Ledoit-Wolf shrinkage for robustness with
