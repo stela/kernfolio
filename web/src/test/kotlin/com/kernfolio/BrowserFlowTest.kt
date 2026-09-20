@@ -804,8 +804,11 @@ class BrowserFlowTest {
         wait.until(ExpectedConditions.stalenessOf(newRow))
 
         wait.until { (totalInput.getAttribute("value") ?: "") == "500" }
-        val progress1 = driver.findElement(By.id("allocation-progress-text"))
-        assertThat(progress1.text).contains("100% allocated")
+        // The progress text renders only after the save + rebalance round
+        // trips finish, which is later than the total-input bump above.
+        wait.until {
+            driver.findElement(By.id("allocation-progress-text")).text.contains("100% allocated")
+        }
 
         // Manually set a larger total so the next position lands below 100%
         // and the progress meter shows a non-zero "remaining".
@@ -827,7 +830,9 @@ class BrowserFlowTest {
             t.contains("50.00%") && t.contains("remaining")
         }
         val progress2 = driver.findElement(By.id("allocation-progress-text")).text
-        assertThat(progress2).contains("1000.00 EUR")
+        // Amounts are locale-formatted in the browser ("1,000.00" in en-US),
+        // so tolerate an optional grouping separator.
+        assertThat(progress2).containsPattern("1[,.\\s\u00a0]?000[.,]00 EUR")
 
         // Over-allocating via a new equity position should bump the total up
         // again so filled matches.
@@ -844,8 +849,9 @@ class BrowserFlowTest {
         wait.until(ExpectedConditions.stalenessOf(newRow))
 
         wait.until { (totalInput.getAttribute("value") ?: "").startsWith("3000") }
-        assertThat(driver.findElement(By.id("allocation-progress-text")).text)
-            .contains("100% allocated")
+        wait.until {
+            driver.findElement(By.id("allocation-progress-text")).text.contains("100% allocated")
+        }
 
         // Clean up
         driver.findElement(By.cssSelector("form[data-confirm] button[type='submit']")).click()

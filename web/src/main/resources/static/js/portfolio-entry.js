@@ -118,7 +118,12 @@ var PortfolioEntry = (function () {
 
     function rebalanceNow() {
         rebalanceTimer = null;
-        if (!loaded || !portfolioId || !positions || positions.length === 0) return;
+        if (!loaded || !portfolioId) return;
+        // `positions` is the pre-save snapshot, so it's still empty right
+        // after the first position of a fresh portfolio is saved. Nothing
+        // to rebalance, but we must refresh or the new row's displays and
+        // the allocation progress never render.
+        if (!positions || positions.length === 0) return refresh();
         if (totalValue <= 0) return;
 
         var weights = {};
