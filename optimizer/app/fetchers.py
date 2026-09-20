@@ -2,7 +2,7 @@
 
 import os
 
-import httpx
+import httpx2
 import pandas as pd
 import yfinance as yf
 from fastapi import HTTPException
@@ -151,15 +151,15 @@ async def fetch_fx_rates(request: FxRateFetchRequest) -> FxRateFetchResponse:
     )
 
     try:
-        async with httpx.AsyncClient() as client:
+        async with httpx2.AsyncClient() as client:
             resp = await client.get(url, timeout=30.0)
             resp.raise_for_status()
-    except httpx.HTTPStatusError as exc:
+    except httpx2.HTTPStatusError as exc:
         raise HTTPException(
             status_code=502,
             detail=f"Frankfurter API returned {exc.response.status_code}",
         ) from exc
-    except httpx.HTTPError as exc:
+    except httpx2.HTTPError as exc:
         raise HTTPException(
             status_code=502,
             detail=f"Failed to reach Frankfurter API: {exc}",

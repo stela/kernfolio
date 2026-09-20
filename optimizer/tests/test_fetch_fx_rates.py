@@ -1,10 +1,10 @@
-"""Tests for POST /fetch-fx-rates with mocked httpx."""
+"""Tests for POST /fetch-fx-rates with mocked httpx2."""
 
 import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
+import httpx2
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -32,13 +32,13 @@ FX_REQUEST = {
 }
 
 
-def _mock_httpx_client(response_json, status_code=200):
-    """Create a mock httpx.AsyncClient context manager."""
+def _mock_httpx2_client(response_json, status_code=200):
+    """Create a mock httpx2.AsyncClient context manager."""
     mock_response = MagicMock()
     mock_response.status_code = status_code
     mock_response.json.return_value = response_json
     if status_code >= 400:
-        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+        mock_response.raise_for_status.side_effect = httpx2.HTTPStatusError(
             message=f"HTTP {status_code}",
             request=MagicMock(),
             response=mock_response,
@@ -53,9 +53,9 @@ def _mock_httpx_client(response_json, status_code=200):
     return mock_client
 
 
-@patch("app.fetchers.httpx.AsyncClient")
+@patch("app.fetchers.httpx2.AsyncClient")
 def test_fetch_fx_rates_success(mock_client_cls):
-    mock_client_cls.return_value = _mock_httpx_client(SAMPLE_FRANKFURTER_RESPONSE)
+    mock_client_cls.return_value = _mock_httpx2_client(SAMPLE_FRANKFURTER_RESPONSE)
     resp = client.post("/fetch-fx-rates", json=FX_REQUEST)
     assert resp.status_code == 200
     data = resp.json()
@@ -65,7 +65,7 @@ def test_fetch_fx_rates_success(mock_client_cls):
     assert data["rates"]["2024-01-02"]["USD"] == 1.1050
 
 
-@patch("app.fetchers.httpx.AsyncClient")
+@patch("app.fetchers.httpx2.AsyncClient")
 def test_fetch_fx_rates_matches_fixture(mock_client_cls):
     with open(FIXTURES / "fx-rates.json") as f:
         fixture = json.load(f)
@@ -76,7 +76,7 @@ def test_fetch_fx_rates_matches_fixture(mock_client_cls):
         "end_date": "2026-03-15",
         "rates": fixture["rates"],
     }
-    mock_client_cls.return_value = _mock_httpx_client(frankfurter_response)
+    mock_client_cls.return_value = _mock_httpx2_client(frankfurter_response)
     resp = client.post("/fetch-fx-rates", json={
         "base": "EUR",
         "currencies": ["USD", "CAD", "JPY", "GBP", "MXN", "HKD"],
@@ -88,18 +88,18 @@ def test_fetch_fx_rates_matches_fixture(mock_client_cls):
     assert data["rates"] == fixture["rates"]
 
 
-@patch("app.fetchers.httpx.AsyncClient")
+@patch("app.fetchers.httpx2.AsyncClient")
 def test_fetch_fx_rates_upstream_error(mock_client_cls):
-    mock_client_cls.return_value = _mock_httpx_client({}, status_code=500)
+    mock_client_cls.return_value = _mock_httpx2_client({}, status_code=500)
     resp = client.post("/fetch-fx-rates", json=FX_REQUEST)
     assert resp.status_code == 502
     assert "500" in resp.json()["detail"]
 
 
-@patch("app.fetchers.httpx.AsyncClient")
+@patch("app.fetchers.httpx2.AsyncClient")
 def test_fetch_fx_rates_connection_error(mock_client_cls):
     mock_client = AsyncMock()
-    mock_client.get = AsyncMock(side_effect=httpx.ConnectError("Connection refused"))
+    mock_client.get = AsyncMock(side_effect=httpx2.ConnectError("Connection refused"))
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
     mock_client.__aexit__ = AsyncMock(return_value=False)
     mock_client_cls.return_value = mock_client
@@ -108,7 +108,7 @@ def test_fetch_fx_rates_connection_error(mock_client_cls):
     assert "Frankfurter" in resp.json()["detail"]
 
 
-@patch("app.fetchers.httpx.AsyncClient")
+@patch("app.fetchers.httpx2.AsyncClient")
 def test_fetch_fx_rates_configurable_url(mock_client_cls, monkeypatch):
     monkeypatch.setenv("FRANKFURTER_BASE_URL", "http://localhost:8082")
     # Reload the module to pick up the new env var
@@ -116,7 +116,7 @@ def test_fetch_fx_rates_configurable_url(mock_client_cls, monkeypatch):
     import app.fetchers
     importlib.reload(app.fetchers)
 
-    mock_client = _mock_httpx_client(SAMPLE_FRANKFURTER_RESPONSE)
+    mock_client = _mock_httpx2_client(SAMPLE_FRANKFURTER_RESPONSE)
     mock_client_cls.return_value = mock_client
     resp = client.post("/fetch-fx-rates", json=FX_REQUEST)
     assert resp.status_code == 200
