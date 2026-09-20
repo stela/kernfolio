@@ -20,6 +20,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 cd optimizer && uv run pytest              # Direct pytest
 cd optimizer && uv run pytest tests/test_optimize.py  # Single test file
 
+# Dependency vulnerability scans (NOT part of build/check — run explicitly)
+./gradlew dependencyCheckAggregate         # OWASP Dependency-Check, all JVM modules -> build/reports/dependency-check-report.html
+./gradlew :optimizer:audit                 # pip-audit via uv
+# Plugin is applied + configured once in the root build.gradle.kts (failBuildOnCVSS = 5.0).
+# Needs nvd.apiKey in ~/.gradle/gradle.properties. Use Aggregate, not per-module dependencyCheckAnalyze.
+
 # Docker images (JVM images via bootBuildImage/Paketo; optimizer + vault-init via Dockerfile)
 ./gradlew :web:bootBuildImage              # just the web image (kernfolio-web:latest)
 ./gradlew dockerBuild                      # production set: web + optimizer + vault-init

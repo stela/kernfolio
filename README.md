@@ -90,6 +90,27 @@ For tighter iteration loops, scope to one module or one test:
 ./gradlew :optimizer:test
 ```
 
+### Dependency vulnerability scans
+
+Neither scan is part of `build` or `check` — run them explicitly (e.g. before a release, or after a long pause in development):
+
+```
+./gradlew dependencyCheckAggregate   # OWASP Dependency-Check across all JVM modules
+./gradlew :optimizer:audit           # pip-audit against the optimizer's Python deps
+```
+
+`dependencyCheckAggregate` writes one de-duplicated report for `web` and both digital twins to `build/reports/dependency-check-report.html` (plus `.json`), and fails on any finding with CVSS ≥ 5.0. The plugin is applied and configured once in the root `build.gradle.kts`.
+
+Set an NVD API key in `~/.gradle/gradle.properties` — without one the NVD download is rate-limited to the point of being unusable. OSS Index credentials are optional:
+
+```
+nvd.apiKey=<your key from https://nvd.nist.gov/developers/request-an-api-key>
+ossIndex.username=<optional>
+ossIndex.password=<optional>
+```
+
+The first run (and the first after a plugin major-version bump) downloads the full NVD dataset and takes several minutes; later runs are incremental.
+
 ## Further reading
 
 - [`agent-specs/PORTFOLIO_OPTIMIZER_SPEC.md`](agent-specs/PORTFOLIO_OPTIMIZER_SPEC.md) — full product and architecture specification (algorithms, schema, security model, deployment).

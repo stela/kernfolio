@@ -4,7 +4,25 @@ plugins {
     kotlin("plugin.jpa") version "2.3.20" apply false
     id("org.springframework.boot") version "4.0.5" apply false
     id("io.spring.dependency-management") version "1.1.7" apply false
-    id("org.owasp.dependencycheck") version "12.2.0" apply false
+    id("org.owasp.dependencycheck") version "13.0.0"
+}
+
+// Applied at the root so `./gradlew dependencyCheckAggregate` scans every
+// subproject in one pass and writes a single de-duplicated report to
+// build/reports/. Not wired into `check`/`build` — run it explicitly.
+dependencyCheck {
+    failBuildOnCVSS = 5.0f
+    formats = listOf("HTML", "JSON")
+    nvd {
+        apiKey = findProperty("nvd.apiKey") as String?
+    }
+    analyzers {
+        assemblyEnabled = false
+        ossIndex {
+            username = providers.gradleProperty("ossIndex.username").orNull
+            password = providers.gradleProperty("ossIndex.password").orNull
+        }
+    }
 }
 
 allprojects {
@@ -63,21 +81,6 @@ val dockerBuildDev = tasks.register("dockerBuildDev") {
 
 subprojects {
     pluginManager.withPlugin("org.jetbrains.kotlin.jvm") {
-        apply(plugin = "org.owasp.dependencycheck")
-        extensions.configure<org.owasp.dependencycheck.gradle.extension.DependencyCheckExtension> {
-            failBuildOnCVSS = 5.0f
-            formats = listOf("HTML", "JSON")
-            nvd {
-                apiKey = findProperty("nvd.apiKey") as String?
-            }
-            analyzers {
-                assemblyEnabled = false
-                ossIndex {
-                    username = providers.gradleProperty("ossIndex.username").orNull
-                    password = providers.gradleProperty("ossIndex.password").orNull
-                }
-            }
-        }
         extensions.configure<JavaPluginExtension> {
             toolchain {
                 languageVersion.set(JavaLanguageVersion.of(25))

@@ -1307,7 +1307,7 @@ Backup uses Vault-issued short-lived DB credentials:
 ### 13.2 Recommended
 
 - [ ] Security headers: X-Content-Type-Options, X-Frame-Options, Referrer-Policy, Permissions-Policy
-- [ ] Dependency vulnerability scanning (Gradle: OWASP Dependency-Check; Python: pip-audit)
+- [ ] Dependency vulnerability scanning (Gradle: OWASP Dependency-Check via root-level `./gradlew dependencyCheckAggregate`, fails on CVSS ≥ 5.0; Python: pip-audit via `./gradlew :optimizer:audit`). Run on demand — not wired into `build`/`check`.
 - [ ] Audit log for admin actions (user creation, feature flag changes)
 - [ ] Note: `localStorage` is not encrypted — if the user's device is compromised, portfolio values are visible. This is an acceptable tradeoff for a self-hosted app with strict CSP (no XSS vector to exfiltrate localStorage)
 
