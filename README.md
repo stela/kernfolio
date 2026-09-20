@@ -28,23 +28,32 @@ Two steps, because the JVM images are produced by Gradle (Spring Boot's `bootBui
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up # run stack
 ```
 
-Open http://localhost:8080.
+Open https://localhost. Caddy terminates TLS there with a certificate from its own built-in CA, so the browser warns until you trust that CA's root (once — it lives in the `caddy_data` volume and survives restarts):
+
+```
+docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt caddy-dev-root.crt
+sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain caddy-dev-root.crt   # macOS
+```
+
+or just click through the warning. The web app itself is not published: it serves mTLS on 8443 inside the compose network and only accepts Caddy's client certificate, exactly as in production.
 
 Services, ports, and resource footprint:
 
 | Service | Port | `mem_limit` | Typical RSS | Image | Image size |
 | --- | --- | --- | --- | --- | --- |
-| web | 8080 | 512 MiB | ~345 MiB | `kernfolio-web:latest` (buildpack) | ~472 MB |
+| web | 8443 (internal only, mTLS) | 512 MiB | ~345 MiB | `kernfolio-web:latest` (buildpack) | ~472 MB |
 | optimizer | 8000 | 512 MiB | ~370 MiB | `kernfolio-optimizer:latest` (python:3.14-slim) | ~505 MB |
 | postgres | 5432 | 256 MiB | ~48 MiB | `postgres:18-alpine` | ~281 MB |
 | vault | 8200 | 512 MiB | ~70 MiB | `hashicorp/vault:1.19` | ~488 MB |
 | yfinance-twin | 8081 | 256 MiB | ~140 MiB | `kernfolio-yfinance-twin:latest` (buildpack) | ~353 MB |
 | frankfurter-twin | 8082 | 256 MiB | ~125 MiB | `kernfolio-frankfurter-twin:latest` (buildpack) | ~352 MB |
-| caddy | 80, 443 | 64 MiB | ~15 MiB | `caddy:2-alpine` | ~60 MB |
+| caddy | 443 (dev); 80 + 443 (prod) | 64 MiB | ~17 MiB | `kernfolio-caddy:latest` (caddy:2-alpine, non-root) | ~104 MB |
 
 Full dev stack budget: ~2.4 GiB of container memory, observed steady-state ~1.1 GiB. JVM services size their heap + metaspace + code cache explicitly through `JAVA_TOOL_OPTIONS` (see `docker-compose.yml` / `docker-compose.dev.yml`) so Paketo's memory calculator defers to the explicit values.
 
-All inter-service traffic is mTLS with certificates issued by Vault's PKI engine.
+All inter-service traffic — including Caddy → web — is mTLS with certificates issued by Vault's PKI engine. Caddy runs as uid 1000 with all capabilities dropped; it listens on 8080/8443 inside its container and Docker publishes those as 80/443.
+
+> **Upgrading an existing checkout:** Caddy used to run as root, so `caddy_data` / `caddy_config` volumes created before this change are root-owned and the new container can't write to them. Remove them once: `docker volume rm kernfolio_caddy_data kernfolio_caddy_config`. (In production, do this before first obtaining a certificate, or `chown -R 1000:1000` the volume contents instead.)
 
 ### First login and inviting users
 
@@ -54,21 +63,21 @@ Kernfolio is invite-only by default. On the very first startup (no users in the 
 docker logs kernfolio-web-1 2>&1 | grep "Admin invite code"
 ```
 
-Visit http://localhost:8080/register with that code to create the first admin account. If you've already created an admin and lost access, `docker compose down -v` wipes `pgdata` and triggers a fresh bootstrap with a new code on next startup.
+Visit https://localhost/register with that code to create the first admin account. If you've already created an admin and lost access, `docker compose down -v` wipes `pgdata` and triggers a fresh bootstrap with a new code on next startup.
 
 Once signed in as admin:
 
-- **Invite further users** at http://localhost:8080/admin/users. The form takes an optional email address: leave it empty to generate a code you hand to the invitee out of band, or fill it in to have the app email the code via the SMTP settings in Vault KV (`secret/kernfolio`). Invitees redeem the code at `/register`, same flow as the initial admin.
-- **Open self-registration** (no invite required) by enabling the `SELF_REGISTRATION` feature flag at http://localhost:8080/admin/flags. While the flag is on, `/register` accepts registrations with or without an invite code.
+- **Invite further users** at https://localhost/admin/users. The form takes an optional email address: leave it empty to generate a code you hand to the invitee out of band, or fill it in to have the app email the code via the SMTP settings in Vault KV (`secret/kernfolio`). Invitees redeem the code at `/register`, same flow as the initial admin.
+- **Open self-registration** (no invite required) by enabling the `SELF_REGISTRATION` feature flag at https://localhost/admin/flags. While the flag is on, `/register` accepts registrations with or without an invite code.
 
 ## Production
 
 ```
-./gradlew dockerBuild                            # build web + optimizer + vault-init
-VAULT_APP_TOKEN=<your-vault-token> docker compose up -d
+./gradlew dockerBuild                            # build web + optimizer + vault-init + caddy
+VAULT_APP_TOKEN=<your-vault-token> KERNFOLIO_DOMAIN=<your.domain> docker compose up -d
 ```
 
-Uses `docker-compose.yml` only. Vault runs with file storage and must be initialized and unsealed by an operator on first boot. Caddy terminates TLS on ports 80/443 and reverse-proxies to the web service over mTLS. Copy `.env.example` to `.env` and set `VAULT_APP_TOKEN` before `docker compose up`.
+Uses `docker-compose.yml` only. Vault runs with file storage and must be initialized and unsealed by an operator on first boot. Caddy terminates TLS on 443 (port 80 only redirects to https) and reverse-proxies to the web service over mTLS. With `KERNFOLIO_DOMAIN` set to a public hostname that resolves to the host, Caddy obtains and renews a certificate via ACME; left unset it serves `localhost` from its built-in CA. Copy `.env.example` to `.env` and set `VAULT_APP_TOKEN` and `KERNFOLIO_DOMAIN` before `docker compose up`.
 
 ## Build & test
 

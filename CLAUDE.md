@@ -13,7 +13,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ./gradlew :web:test                        # All tests (needs Docker for Testcontainers)
 ./gradlew :web:test --tests "com.kernfolio.service.OptimizerServiceTest"  # Single test class
 ./gradlew :web:test --tests "*.OptimizerServiceTest.CAGR*"               # Test name pattern
-./gradlew :web:bootRun                     # Run app (needs PostgreSQL + optimizer running)
+./gradlew :web:bootRun                     # Run app (needs PostgreSQL + optimizer running); plain HTTP on 8080 — the `tls` profile is docker-only
 
 # Optimizer module (Python/FastAPI)
 ./gradlew :optimizer:test                  # Runs pytest via uv
@@ -29,9 +29,9 @@ cd optimizer && uv run pytest tests/test_optimize.py  # Single test file
 # non-BOM ones (bouncycastle, spring-cloud-context/commons) are `constraints` in web/build.gradle.kts.
 # Re-check and delete them on every Spring Boot / Spring Cloud bump — a stale pin once held Jackson *below* the BOM.
 
-# Docker images (JVM images via bootBuildImage/Paketo; optimizer + vault-init via Dockerfile)
+# Docker images (JVM images via bootBuildImage/Paketo; optimizer + vault-init + caddy via Dockerfile)
 ./gradlew :web:bootBuildImage              # just the web image (kernfolio-web:latest)
-./gradlew dockerBuild                      # production set: web + optimizer + vault-init
+./gradlew dockerBuild                      # production set: web + optimizer + vault-init + caddy
 ./gradlew dockerBuildDev                   # dev set: above + yfinance-twin + frankfurter-twin
 
 # Tailwind CSS is built automatically during :web:processResources
@@ -83,27 +83,29 @@ cd optimizer && uv run pytest tests/test_optimize.py  # Single test file
 
 ### Running the Application
 
-Vault is always on. Vault connection, KV import, database engine, and mTLS cert paths are declared directly in `application.yml` — there is no separate `vault` profile; the previous split into `application-vault.yml` was folded back into the main config once Vault became mandatory. Tests disable Vault via a Gradle `systemProperty` in `web/build.gradle.kts`; `VaultProfileIntegrationTest` opts back in via `@SpringBootTest(properties = ...)`.
+Vault is always on. Vault connection, KV/database engine settings, and mTLS cert paths (`vault.certs.*`) are declared directly in `application.yml` — there is no separate `vault` profile. The `vault://` config imports and the datasource URL live in `application-dev.yml` / `application-prod.yml`; server-side TLS lives in `application-tls.yml`. Tests disable Vault via a Gradle `systemProperty` in `web/build.gradle.kts`; `VaultProfileIntegrationTest` opts back in via `@SpringBootTest(properties = ...)`.
 
-JVM images (`kernfolio-web`, `kernfolio-yfinance-twin`, `kernfolio-frankfurter-twin`) are produced by Spring Boot's `bootBuildImage` task (Paketo buildpacks) — the compose files reference them by tag, not by `build:` stanza. Non-JVM images (`optimizer`, `vault-init`) are still built from Dockerfiles via `docker compose build`. `./gradlew dockerBuild(Dev)` orchestrates both paths. `docker compose up` will *not* build missing JVM images; run the Gradle task first.
+JVM images (`kernfolio-web`, `kernfolio-yfinance-twin`, `kernfolio-frankfurter-twin`) are produced by Spring Boot's `bootBuildImage` task (Paketo buildpacks) — the compose files reference them by tag, not by `build:` stanza. Non-JVM images (`optimizer`, `vault-init`, `caddy`) are still built from Dockerfiles via `docker compose build`. `./gradlew dockerBuild(Dev)` orchestrates both paths. `docker compose up` will *not* build missing JVM images; run the Gradle task first.
 
 **Development (full stack):**
 ```bash
 ./gradlew dockerBuildDev
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up
-# Browse to http://localhost:8080
+# Browse to https://localhost  (Caddy's built-in CA — trust its root once, see README, or click through)
 ```
-Starts: Vault (dev mode, token `dev-root-token`, port 8200), vault-init (seeds secrets + PKI certs), PostgreSQL (5432), optimizer (8000), web (8080), digital twins (8081, 8082). Spring profile: `dev` (via `SPRING_PROFILES_ACTIVE` in `docker-compose.dev.yml`). Dynamic DB credentials come from Vault's database engine; mTLS certs are issued by Vault PKI and shared via the `vault_agent_certs` volume.
+Starts: Vault (dev mode, token `dev-root-token`, port 8200), vault-init (seeds secrets + PKI certs), PostgreSQL (5432), optimizer (8000), digital twins (8081, 8082), Caddy (443). web is **not** published — it serves mTLS on 8443 inside the compose network and is reached only through Caddy, same as prod. Spring profiles: `dev,tls` (via `SPRING_PROFILES_ACTIVE` in `docker-compose.dev.yml`). Dynamic DB credentials come from Vault's database engine; mTLS certs are issued by Vault PKI and shared via the `vault_agent_certs` volume.
 
 **Production:**
 ```bash
 ./gradlew dockerBuild
-VAULT_APP_TOKEN=<real-token> docker compose up -d
-# Browse to https://localhost (Caddy TLS on ports 80/443)
+VAULT_APP_TOKEN=<real-token> KERNFOLIO_DOMAIN=<public-hostname> docker compose up -d
+# Browse to https://<public-hostname> (ACME cert). Without KERNFOLIO_DOMAIN: https://localhost, Caddy's built-in CA.
 ```
-Uses `docker-compose.yml` only. Vault runs with file storage (persistent); the operator is responsible for initializing and unsealing it on first boot. Caddy terminates TLS (ports 80/443) and reverse-proxies to web via mTLS. All inter-service communication is mTLS with Vault PKI-issued certificates. Spring profile: `prod`.
+Uses `docker-compose.yml` only. Vault runs with file storage (persistent); the operator is responsible for initializing and unsealing it on first boot. Caddy terminates TLS on 443 (80 only redirects) and reverse-proxies to `https://web:8443` via mTLS. All inter-service communication is mTLS with Vault PKI-issued certificates. Spring profile: `prod`, which pulls in `tls` through `spring.profiles.group`.
 
 **Runtime resource budget:** full dev stack runs in ~1.1 GiB steady-state RSS against ~2.4 GiB of `mem_limit`. The JVM services (web, twins) use explicit `JAVA_TOOL_OPTIONS` (e.g. `-Xmx192m -Xss512k -XX:MaxMetaspaceSize=128m -XX:ReservedCodeCacheSize=48m -XX:MaxDirectMemorySize=10m` for web) to suppress Paketo's chunky default reservations. See the README Quickstart table for per-service sizing.
+
+**Front door (Caddy → web):** Caddy is rebuilt from `caddy/Dockerfile` to run as uid 1000 with `cap_drop: ALL`; it listens on 8080/8443 and Docker publishes those as 80/443 (dev: 443 only, via `ports: !override`). The *external* cert is never from Vault — Vault's PKI is Ed25519, which browsers reject, and dev Vault regenerates its root on every restart. Instead `{$KERNFOLIO_DOMAIN:localhost}` gets ACME for a real domain or Caddy's built-in CA for `localhost` (root persisted in `caddy_data`). `Caddyfile.dev` strips HSTS, because HSTS is per host and would force https on every `localhost` port once the root is trusted. The *internal* hop uses Vault certs: Caddy presents `caddy-client.pem`, web serves `app.pem` (SANs `app`, `web`, `localhost`). `ClientCertCnFilter` answers 403 by setting the status directly — `sendError()` would ERROR-dispatch to `/error`, which Spring Security turns into a 302 to `/login`. `caddy validate` needs `/vault/certs` mounted (it loads the client key pair). The `caddy_data`/`caddy_config` volumes must be owned by uid 1000; ones created by the old root-running Caddy have to be removed once.
 
 **No HEALTHCHECK on JVM services:** Paketo's default tiny runtime (`run-noble-java-tiny`) is distroless-style — no shell, no wget/curl/nc. The compose DAG doesn't require those services to report healthy (caddy uses a plain `depends_on`). Postgres, Vault, and optimizer keep their working healthchecks.
 
@@ -112,6 +114,7 @@ Uses `docker-compose.yml` only. Vault runs with file storage (persistent); the o
 |---------|---------|-------|
 | `dev` | Local dev stack with digital twins for market data. | Disables the scheduled market-data job; precompiled JTE templates. |
 | `prod` | Production runtime. | Precompiled JTE templates. |
+| `tls` | Server-side mTLS for the Caddy → web hop (`application-tls.yml`). | Port 8443, `client-auth: need`, `ClientCertCnFilter` only admits `CN=caddy`, trusts `X-Forwarded-*`. Grouped into `prod`; listed next to `dev` in the dev compose overlay. Off in tests and bare `bootRun`; covered by `WebMtlsIntegrationTest`. |
 | `test` | `@SpringBootTest` with H2. | Disables Liquibase, scheduler; only used by `KernfolioApplicationTest`. |
 
 (Vault is not a profile — it's on by default in `application.yml`.)
@@ -120,7 +123,7 @@ Uses `docker-compose.yml` only. Vault runs with file storage (persistent); the o
 
 Vault is the origin for three separate classes of secret material, all seeded by the one-shot `vault-init` container running `vault/init/setup.sh`:
 
-**PKI (two-tier chain):** root CA (`CN=Kernfolio Dev CA`) → intermediate CA (`CN=Kernfolio Dev Intermediate CA`) → leaf certs for each service (`app`, `optimizer`, `caddy`, `postgres`). Leaf files on the volume are written as **leaf + intermediate bundled** so servers present a full chain at handshake; trust anchors only need `ca.pem` (root). Trying to trust only `ca.pem` without the intermediate bundled in the leaf file gives `PKIX path building failed: unable to find valid certification path to requested target`.
+**PKI (two-tier chain):** root CA (`CN=Kernfolio Dev CA`) → intermediate CA (`CN=Kernfolio Dev Intermediate CA`) → leaf certs for each service (`app` — web's server cert, SANs `app,web,localhost`, plus its `app-client` identity towards the optimizer; `optimizer`; `caddy` — client-only, for the hop to web; `postgres`). All Ed25519: fine for Tomcat/JSSE, Netty, Go, OpenSSL — not for browsers. Leaf files on the volume are written as **leaf + intermediate bundled** so servers present a full chain at handshake; trust anchors only need `ca.pem` (root). Trying to trust only `ca.pem` without the intermediate bundled in the leaf file gives `PKIX path building failed: unable to find valid certification path to requested target`.
 
 `setup.sh` is **idempotent** about root and intermediate: it reads the existing cert first and only generates if absent. Regenerating unconditionally is a trap because Vault's `pki/root/generate/internal` **appends** a new issuer rather than overwriting, and `default` stays pinned to the first-ever root. Subsequent `sign-intermediate` calls then sign with the stale default while `ca.pem` on disk gets overwritten by the newer root — the chain fragments silently, and services see `PKIX path validation failed: Path does not chain with any of the trust anchors`. Leaf certs are re-issued every run (short-lived, cheap).
 
