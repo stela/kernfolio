@@ -5,23 +5,11 @@ plugins {
     kotlin("plugin.spring")
     id("org.springframework.boot")
     id("io.spring.dependency-management")
-    id("gg.jte.gradle") version "3.2.3"
-}
-
-// Override Jackson version ahead of next Spring Boot release
-extra["jackson.version"] = "3.1.0"
-
-configurations.all {
-    resolutionStrategy.eachDependency {
-        if (requested.group == "com.fasterxml.jackson.core" && requested.name == "jackson-annotations") {
-            useVersion("2.21")
-            because("Jackson 3.1.0 requires jackson-annotations 2.21")
-        }
-    }
+    id("gg.jte.gradle") version "3.2.4"
 }
 
 dependencies {
-    implementation("org.springframework.cloud:spring-cloud-starter-vault-config:5.0.1")
+    implementation("org.springframework.cloud:spring-cloud-starter-vault-config:5.0.2")
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.boot:spring-boot-starter-data-jdbc")
     implementation("org.springframework.boot:spring-boot-starter-security")
@@ -32,12 +20,23 @@ dependencies {
     implementation("org.jetbrains.kotlin:kotlin-reflect")
     implementation("org.springframework.boot:spring-boot-liquibase")
     implementation("org.liquibase:liquibase-core")
-    implementation("gg.jte:jte:3.2.3")
-    implementation("gg.jte:jte-kotlin:3.2.3")
-    implementation("gg.jte:jte-spring-boot-starter-4:3.2.3")
+    implementation("gg.jte:jte:3.2.4")
+    implementation("gg.jte:jte-kotlin:3.2.4")
+    implementation("gg.jte:jte-spring-boot-starter-4:3.2.4")
     implementation("org.webjars.npm:chart.js:4.5.1")
     implementation("org.postgresql:postgresql")
     implementation("org.springframework.boot:spring-boot-starter-mail")
+
+    constraints {
+        implementation("org.bouncycastle:bcprov-jdk18on:1.86") {
+            because("spring-cloud-starter 5.0.2 pulls 1.81.1, which has known CVEs; drop once Spring Cloud catches up")
+        }
+        listOf("spring-cloud-context", "spring-cloud-commons").forEach {
+            implementation("org.springframework.cloud:$it:5.0.3") {
+                because("CVE-2026-59284 in 5.0.2; drop once spring-cloud-starter-vault-config 5.0.3 is out")
+            }
+        }
+    }
 
     developmentOnly("org.springframework.boot:spring-boot-devtools")
 

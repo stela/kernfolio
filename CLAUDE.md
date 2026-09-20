@@ -21,10 +21,13 @@ cd optimizer && uv run pytest              # Direct pytest
 cd optimizer && uv run pytest tests/test_optimize.py  # Single test file
 
 # Dependency vulnerability scans (NOT part of build/check — run explicitly)
-./gradlew dependencyCheckAggregate         # OWASP Dependency-Check, all JVM modules -> build/reports/dependency-check-report.html
+./gradlew dependencyCheckAggregate         # OWASP Dependency-Check, all JVM modules -> build/reports/dependency-check/dependency-check-report.html
 ./gradlew :optimizer:audit                 # pip-audit via uv
 # Plugin is applied + configured once in the root build.gradle.kts (failBuildOnCVSS = 5.0).
 # Needs nvd.apiKey in ~/.gradle/gradle.properties. Use Aggregate, not per-module dependencyCheckAnalyze.
+# CVE-driven overrides of Spring Boot BOM versions live in the root gradle.properties (jackson.version etc.);
+# non-BOM ones (bouncycastle, spring-cloud-context/commons) are `constraints` in web/build.gradle.kts.
+# Re-check and delete them on every Spring Boot / Spring Cloud bump — a stale pin once held Jackson *below* the BOM.
 
 # Docker images (JVM images via bootBuildImage/Paketo; optimizer + vault-init via Dockerfile)
 ./gradlew :web:bootBuildImage              # just the web image (kernfolio-web:latest)
@@ -40,7 +43,7 @@ cd optimizer && uv run pytest tests/test_optimize.py  # Single test file
 **Hybrid multi-module app**: Kotlin Spring Boot web server + Python FastAPI optimization microservice + PostgreSQL.
 
 ### Modules
-- **`web/`** — Spring Boot 4.0.5, Kotlin 2.3.20, Java 25. Server-rendered UI (JTE 3.2.3 `.kte` templates + vanilla JS). Spring Data JDBC (not JPA/Hibernate).
+- **`web/`** — Spring Boot 4.1.1, Kotlin 2.4.20, Java 25. Server-rendered UI (JTE 3.2.4 `.kte` templates + vanilla JS). Spring Data JDBC (not JPA/Hibernate).
 - **`optimizer/`** — FastAPI, Python 3.14+. Stateless: receives all data in request body, no DB access. Endpoints: `/optimize`, `/fetch-prices`, `/fetch-fx-rates`, `/health`.
 - **`digital-twins/`** — Mock yfinance and Frankfurter APIs for local dev.
 
@@ -64,7 +67,7 @@ cd optimizer && uv run pytest tests/test_optimize.py  # Single test file
 - **Nonce-based CSP**: `CspNonceFilter` generates a per-request nonce. Every `<script>` and `<link rel="stylesheet">` tag must include `nonce="${nonce}"`. CSP header: `script-src 'self' 'nonce-...'`. No `unsafe-eval` or `unsafe-inline`. All client-side JS must be in static `.js` files, never inline. Do not use JS frameworks that require `eval()` / `new Function()`.
 - **No dynamic data in HTML**: Never embed server data in HTML `data-*` attributes for JavaScript consumption. Use JSON API endpoints instead (XSS prevention). Chart JS files parse IDs from URL path via `ChartUtils.getIdsFromUrl()`.
 - **Privacy**: Backend never sees total portfolio value, share counts, or cash amounts. Only percentage weights.
-- **Vault** (mandatory): `spring-cloud-starter-vault-config:5.0.1` is always active via the default `vault` profile. Provides dynamic PostgreSQL credentials (Vault database engine, `app` role), KV v2 secrets under `secret/kernfolio`, and PKI-issued mTLS certificates for inter-service traffic. Dev stack uses `vault server -dev`; production uses file storage and requires operator init/unseal.
+- **Vault** (mandatory): `spring-cloud-starter-vault-config:5.0.2` is always active via the default `vault` profile. Provides dynamic PostgreSQL credentials (Vault database engine, `app` role), KV v2 secrets under `secret/kernfolio`, and PKI-issued mTLS certificates for inter-service traffic. Dev stack uses `vault server -dev`; production uses file storage and requires operator init/unseal.
 
 ### Testing
 - **Unit tests**: MockK for mocking, no Spring context

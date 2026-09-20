@@ -1,28 +1,54 @@
 plugins {
-    kotlin("jvm") version "2.3.20" apply false
-    kotlin("plugin.spring") version "2.3.20" apply false
-    kotlin("plugin.jpa") version "2.3.20" apply false
-    id("org.springframework.boot") version "4.0.5" apply false
+    kotlin("jvm") version "2.4.20" apply false
+    kotlin("plugin.spring") version "2.4.20" apply false
+    kotlin("plugin.jpa") version "2.4.20" apply false
+    id("org.springframework.boot") version "4.1.1" apply false
     id("io.spring.dependency-management") version "1.1.7" apply false
     id("org.owasp.dependencycheck") version "13.0.0"
 }
 
 // Applied at the root so `./gradlew dependencyCheckAggregate` scans every
 // subproject in one pass and writes a single de-duplicated report to
-// build/reports/. Not wired into `check`/`build` — run it explicitly.
+// build/reports/dependency-check/. Not wired into `check`/`build` — run it explicitly.
 dependencyCheck {
     failBuildOnCVSS = 5.0f
     formats = listOf("HTML", "JSON")
     nvd {
         apiKey = findProperty("nvd.apiKey") as String?
     }
+    // Skip classpaths that never reach the image: Kotlin compiler / build
+    // tooling, the JTE template compiler, and developmentOnly (devtools).
+    // (An allow-list via scanConfigurations makes the aggregate task scan no
+    // jars at all, so this has to be a deny-list.)
+    skipConfigurations = listOf(
+        "kotlinCompilerClasspath",
+        "kotlinBuildToolsApiClasspath",
+        "kotlinCompilerPluginClasspathMain",
+        "kotlinCompilerPluginClasspathTest",
+        "kotlinKlibCommonizerClasspath",
+        "kotlinInternalAbiValidation",
+        "kotlinAbiValidationCompatClasspath",
+        "jteKotlinCompiler",
+        "developmentOnly",
+    )
     analyzers {
         assemblyEnabled = false
+        // WebJars embed package.json files; the node analyzers only produce
+        // "no lock file" noise for them.
+        nodePackage { enabled = false }
+        nodeAudit { enabled = false }
         ossIndex {
             username = providers.gradleProperty("ossIndex.username").orNull
             password = providers.gradleProperty("ossIndex.password").orNull
         }
     }
+}
+
+// The plugin declares build-file inputs only, so after one passing run Gradle
+// would report UP-TO-DATE and skip the scan even though new CVEs have been
+// published since. Always re-run.
+tasks.withType<org.owasp.dependencycheck.gradle.tasks.AbstractAnalyze>().configureEach {
+    outputs.upToDateWhen { false }
 }
 
 allprojects {

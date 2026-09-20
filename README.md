@@ -12,7 +12,7 @@ Privacy is built in: share counts, cash amounts, and total portfolio value never
 
 | Module | Stack | Purpose |
 | --- | --- | --- |
-| `web/` | Kotlin 2.3.20 / Spring Boot 4.0.5 / Java 25, JTE + vanilla JS + Chart.js | Server-rendered UI, PostgreSQL persistence, auth, feature flags |
+| `web/` | Kotlin 2.4.20 / Spring Boot 4.1.1 / Java 25, JTE + vanilla JS + Chart.js | Server-rendered UI, PostgreSQL persistence, auth, feature flags |
 | `optimizer/` | Python 3.14+ / FastAPI | Stateless math microservice (`/optimize`, `/fetch-prices`, `/fetch-fx-rates`) |
 | `digital-twins/` | Spring Boot | Fake yfinance & Frankfurter APIs for local development |
 | `vault/`, `postgres/`, `scripts/` | HashiCorp Vault 1.19 + Postgres 18 config | Dynamic DB credentials, mTLS PKI, ops scripts |
@@ -99,7 +99,7 @@ Neither scan is part of `build` or `check` — run them explicitly (e.g. before 
 ./gradlew :optimizer:audit           # pip-audit against the optimizer's Python deps
 ```
 
-`dependencyCheckAggregate` writes one de-duplicated report for `web` and both digital twins to `build/reports/dependency-check-report.html` (plus `.json`), and fails on any finding with CVSS ≥ 5.0. The plugin is applied and configured once in the root `build.gradle.kts`.
+`dependencyCheckAggregate` writes one de-duplicated report for `web` and both digital twins to `build/reports/dependency-check/dependency-check-report.html` (plus `.json`), and fails on any finding with CVSS ≥ 5.0. The plugin is applied and configured once in the root `build.gradle.kts`.
 
 Set an NVD API key in `~/.gradle/gradle.properties` — without one the NVD download is rate-limited to the point of being unusable. OSS Index credentials are optional:
 
