@@ -2,6 +2,12 @@ spring:
   application:
     name: kernfolio
 
+  profiles:
+    group:
+      # prod always serves mTLS on 8443 (application-tls.yml); dev opts in via
+      # SPRING_PROFILES_ACTIVE=dev,tls in docker-compose.dev.yml.
+      prod: tls
+
   cloud:
     vault:
       enabled: true
@@ -25,9 +31,10 @@ spring:
 # missing files as "no mTLS" and falls back to plain HTTP.
 vault:
   certs:
-    ca: /vault/certs/ca.pem
-    cert: /vault/certs/app-client.pem
-    key: /vault/certs/app-client-key.pem
+    dir: /vault/certs
+    ca: ${vault.certs.dir}/ca.pem
+    cert: ${vault.certs.dir}/app-client.pem
+    key: ${vault.certs.dir}/app-client-key.pem
 
 gg:
   jte:

@@ -1,0 +1,31 @@
+# Server-side mTLS for the Caddy -> web hop. Pulled in by the `prod` profile
+# group (see application.yml) and listed explicitly next to `dev` in
+# docker-compose.dev.yml. A bare `dev` run (./gradlew :web:bootRun) and the
+# tests don't activate it, so they keep plain HTTP on 8080 / a random port
+# and never need the cert files to exist.
+server:
+  port: 8443
+  ssl:
+    bundle: web-server
+    # Any cert chaining to the Vault CA completes the handshake;
+    # ClientCertCnFilter then narrows that to kernfolio.tls.allowed-client-cns.
+    client-auth: need
+  # Caddy is the only peer that can connect, so its X-Forwarded-* headers are
+  # trustworthy. Without this, redirects and the invite-email link would point
+  # at web:8443 instead of the external https host.
+  forward-headers-strategy: native
+
+spring:
+  ssl:
+    bundle:
+      pem:
+        web-server:
+          keystore:
+            certificate: ${vault.certs.dir}/app.pem
+            private-key: ${vault.certs.dir}/app-key.pem
+          truststore:
+            certificate: ${vault.certs.dir}/ca.pem
+
+kernfolio:
+  tls:
+    allowed-client-cns: caddy
