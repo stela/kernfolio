@@ -895,17 +895,17 @@ Users enter portfolio positions in the browser. Absolute values (shares held, ca
 ```javascript
 // Stored under key: "kernfolio_portfolio_{portfolioId}"
 {
-    "totalValue": 195000,
+    "totalValue": 1000000,
     "baseCurrency": "EUR",
     "holdings": {
-        "GOOG": { "type": "EQUITY", "shares": 25, "costBasis": 6200, "currency": "USD" },
-        "AMZN": { "type": "EQUITY", "shares": 40, "costBasis": 7500, "currency": "USD" },
-        "CSU.TO": { "type": "EQUITY", "shares": 6, "costBasis": 18000, "currency": "CAD" }
+        "GOOG": { "type": "EQUITY", "shares": 1000, "costBasis": 344410, "currency": "USD" },
+        "AMZN": { "type": "EQUITY", "shares": 1000, "costBasis": 253710, "currency": "USD" },
+        "CSU.TO": { "type": "EQUITY", "shares": 150, "costBasis": 426464, "currency": "CAD" }
     },
     "cash": {
-        "USD": { "amount": 2100 },
-        "JPY": { "amount": 350000 },
-        "EUR": { "amount": 800 }
+        "USD": { "amount": 81000 },
+        "JPY": { "amount": 12800000 },
+        "EUR": { "amount": 70800 }
     }
 }
 ```
