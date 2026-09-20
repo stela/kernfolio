@@ -1,21 +1,26 @@
 # Kernfolio
 
-Self-hosted portfolio optimizer for individual investors.
+Self-hosted, multi-user portfolio optimizer that never learns how much money you have. Each user's portfolios are isolated from every other user's in the database, and only percentage weights — never share counts, cash, or total value — leave the browser.
 
 ## What it does
 
-Kernfolio helps you turn your own intrinsic-value views into a mathematically optimal stock portfolio. You enter positions, add an intrinsic value estimate and a confidence level for each one, and the app computes optimal allocations using Black-Litterman (with Idzorek confidence), Mean-Variance Markowitz, CVaR, and Hierarchical Risk Parity.
+Kernfolio helps you turn your own intrinsic-value views into a mathematically optimal stock portfolio. You enter positions (with ticker search), add an intrinsic value estimate and a confidence level for the ones you have a view on, and the app computes an allocation with the **Black-Litterman** model: market-cap-implied equilibrium returns are blended with your views, weighted by Idzorek confidence, and the resulting posterior is optimized for maximum Sharpe ratio under your min/max weight constraints. Covariance is estimated with Ledoit-Wolf shrinkage or the plain sample covariance.
 
-Privacy is built in: share counts, cash amounts, and total portfolio value never leave your browser. The backend only ever sees tickers and percentage weights.
+Each run reports expected return, volatility, Sharpe ratio and 95% CVaR, and charts the proposed allocation against your current one, the correlation matrix, and (behind a feature flag) the efficient frontier. Prices and FX rates are fetched and cached server-side; positions can be in any currency and are converted to the portfolio's base currency. The browser then turns the target weights back into concrete share counts to buy or sell.
+
+**Privacy by construction.** Share counts, cash amounts, and total portfolio value stay in your browser's local storage. The browser converts them to percentage weights before anything is sent, so the backend — and whoever operates it — only ever sees tickers and percentages, and cannot tell a €5,000 portfolio from a €5,000,000 one.
+
+**Multi-user, strictly separated.** One instance serves many users. Registration is invite-only by default (or open, via a feature flag), and an admin manages users and flags. Isolation is enforced in PostgreSQL itself with row-level security on portfolios, positions and optimization runs — every connection is scoped to the signed-in user — rather than relying only on application-level filtering. Database credentials are short-lived and issued by Vault, and all traffic between services is mutual TLS.
 
 ## Architecture
 
 | Module | Stack | Purpose |
 | --- | --- | --- |
 | `web/` | Kotlin 2.4.20 / Spring Boot 4.1.1 / Java 25, JTE + vanilla JS + Chart.js | Server-rendered UI, PostgreSQL persistence, auth, feature flags |
-| `optimizer/` | Python 3.14+ / FastAPI | Stateless math microservice (`/optimize`, `/fetch-prices`, `/fetch-fx-rates`) |
+| `optimizer/` | Python 3.14+ / FastAPI | Stateless math and market-data microservice (`/optimize`, `/fetch-prices`, `/fetch-fx-rates`, `/search-tickers`) |
 | `digital-twins/` | Spring Boot | Fake yfinance & Frankfurter APIs for local development |
 | `vault/`, `postgres/`, `scripts/` | HashiCorp Vault 1.19 + Postgres 18 config | Dynamic DB credentials, mTLS PKI, ops scripts |
+| `caddy/`, `Caddyfile*` | Caddy 2 (non-root) | Public HTTPS front door; reverse-proxies to `web` over mTLS |
 
 ## Quickstart
 
@@ -33,6 +38,7 @@ Open https://localhost. Caddy terminates TLS there with a certificate from its o
 ```
 docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt caddy-dev-root.crt
 sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain caddy-dev-root.crt   # macOS
+sudo cp caddy-dev-root.crt /usr/local/share/ca-certificates/ && sudo update-ca-certificates                       # Debian/Ubuntu (Firefox/Chrome keep their own stores)
 ```
 
 or just click through the warning. The web app itself is not published: it serves mTLS on 8443 inside the compose network and only accepts Caddy's client certificate, exactly as in production.
@@ -86,11 +92,11 @@ Single command covers every submodule — Kotlin units + Testcontainers integrat
 ```
 ./gradlew test                    # run every test in every module
 ./gradlew build                   # compile + test + package everything
-./gradlew dockerBuild             # production Docker images (web + optimizer + vault-init)
+./gradlew dockerBuild             # production Docker images (web + optimizer + vault-init + caddy)
 ./gradlew dockerBuildDev          # dev-stack images (above + both digital twins)
 ```
 
-`:web:test` needs Docker running (Testcontainers spins up PostgreSQL). `:optimizer:test` shells out to `uv run pytest` — `uv` must be on your `PATH`.
+`:web:test` needs Docker running (Testcontainers spins up PostgreSQL, Vault, and a Chrome container for the browser tests). `:optimizer:test` shells out to `uv run pytest` — `uv` must be on your `PATH`.
 
 For tighter iteration loops, scope to one module or one test:
 
