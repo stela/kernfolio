@@ -92,7 +92,7 @@ fi
 
 # Ed25519 role — used by all non-Java services
 vault write pki_int/roles/kernfolio-service \
-  allowed_domains="app,optimizer,postgres,caddy,localhost" \
+  allowed_domains="app,web,optimizer,postgres,caddy,localhost" \
   allow_subdomains=false \
   allow_bare_domains=true \
   allow_localhost=true \
@@ -116,8 +116,11 @@ issue_cert() {
   jq -r '.data.private_key' /tmp/cert.json > "$key_file"
 }
 
-# App (Spring Boot) — Ed25519 (Netty 4.2+ supports EdDSA auto-detection)
-issue_cert "kernfolio-service" "app" "localhost" /vault/certs/app.pem /vault/certs/app-key.pem
+# App (Spring Boot) — Ed25519. app.pem is web's server cert for the Caddy -> web
+# mTLS hop (application-tls.yml); Caddy dials the compose service name, hence
+# the `web` SAN. app-client.pem is web's identity towards the optimizer
+# (Netty 4.2+ supports EdDSA auto-detection).
+issue_cert "kernfolio-service" "app" "web,localhost" /vault/certs/app.pem /vault/certs/app-key.pem
 issue_cert "kernfolio-service" "app" "" /vault/certs/app-client.pem /vault/certs/app-client-key.pem
 
 # Optimizer (Python/uvicorn) — Ed25519
