@@ -1,20 +1,14 @@
 @import com.kernfolio.config.FeatureFlagAccessor
 @import com.kernfolio.domain.OptimizationRun
 @import com.kernfolio.domain.Portfolio
-@import com.kernfolio.domain.Position
-@import java.time.ZoneId
-@import java.time.format.DateTimeFormatter
 
 @param portfolio: Portfolio
 @param run: OptimizationRun
-@param positions: List<Position>
 @param featureFlags: FeatureFlagAccessor
 @param nonce: String
 @param csrfToken: String
 @param csrfHeaderName: String
 
-!{val fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(ZoneId.systemDefault())}
-!{val positionWeights = positions.associateBy({ it.ticker }, { it.weightPct.toDouble() * 100 })}
 
 @template.layout.base(
     title = "Results - " + portfolio.name + " - Kernfolio",
@@ -43,30 +37,31 @@
                     <span class="ml-2 text-gray-400">(${run.computationMs}ms)</span>
                 @endif
                 @if(run.createdAt != null)
-                    <span class="ml-2 text-gray-400">&mdash; ${fmt.format(run.createdAt)}</span>
+                    <!-- Filled by results-summary.js in the viewer's locale + timezone. -->
+                    <span class="ml-2 text-gray-400">&mdash; <span id="run-created-at"></span></span>
                 @endif
             </p>
         </div>
 
         <!-- Metrics cards -->
         @if(run.results.metrics != null)
-            !{val m = run.results.metrics!!}
+            <!-- Values are filled by results-summary.js from /summary-data. -->
             <div class="grid grid-cols-2 gap-4 sm:grid-cols-4 mb-8">
                 <div class="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
                     <p class="text-xs font-medium uppercase text-gray-500">Expected Return</p>
-                    <p class="mt-1 text-xl font-semibold">${"%.2f".format((m.expectedAnnualReturn ?: 0.0) * 100)}%</p>
+                    <p id="metric-expected-return" class="mt-1 text-xl font-semibold"></p>
                 </div>
                 <div class="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
                     <p class="text-xs font-medium uppercase text-gray-500">Volatility</p>
-                    <p class="mt-1 text-xl font-semibold">${"%.2f".format((m.annualVolatility ?: 0.0) * 100)}%</p>
+                    <p id="metric-volatility" class="mt-1 text-xl font-semibold"></p>
                 </div>
                 <div class="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
                     <p class="text-xs font-medium uppercase text-gray-500">Sharpe Ratio</p>
-                    <p class="mt-1 text-xl font-semibold">${"%.2f".format(m.sharpeRatio ?: 0.0)}</p>
+                    <p id="metric-sharpe" class="mt-1 text-xl font-semibold"></p>
                 </div>
                 <div class="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
                     <p class="text-xs font-medium uppercase text-gray-500">CVaR 95%</p>
-                    <p class="mt-1 text-xl font-semibold">${"%.2f".format((m.cvar95 ?: 0.0) * 100)}%</p>
+                    <p id="metric-cvar95" class="mt-1 text-xl font-semibold"></p>
                 </div>
             </div>
         @endif
@@ -116,19 +111,9 @@
                         <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500">Delta</th>
                     </tr>
                 </thead>
-                <tbody class="divide-y divide-gray-200">
-                    @for(entry in run.results.optimizedWeights)
-                        !{val optimizedPct = entry.value * 100}
-                        !{val currentPct = positionWeights.getOrDefault(entry.key, 0.0)}
-                        !{val delta = optimizedPct - currentPct}
-                        <tr>
-                            <td class="px-4 py-2 text-sm font-mono font-medium">${entry.key}</td>
-                            <td class="px-4 py-2 text-sm text-right">${"%.2f".format(optimizedPct)}%</td>
-                            <td class="px-4 py-2 text-sm text-right">${"%.2f".format(currentPct)}%</td>
-                            <td class="px-4 py-2 text-sm text-right font-medium ${if(delta > 0) "text-green-600" else if(delta < 0) "text-red-600" else "text-gray-400"}">${if(delta > 0) "+" else ""}${"%.2f".format(delta)}%</td>
-                        </tr>
-                    @endfor
-                </tbody>
+                <!-- Rows are rendered by results-summary.js from /allocation-data
+                     so the percentages follow the viewer's locale. -->
+                <tbody id="weights-tbody" class="divide-y divide-gray-200"></tbody>
             </table>
         </div>
 
@@ -149,6 +134,7 @@
     `,
     scripts = @`
         <script src="/js/charts/chart-utils.js" nonce="${nonce}"></script>
+        <script src="/js/results-summary.js" nonce="${nonce}"></script>
         <script src="/js/charts/allocation-pie.js" nonce="${nonce}"></script>
         <script src="/js/charts/allocation-bar.js" nonce="${nonce}"></script>
         @if(featureFlags.isEnabled("SHOW_EFFICIENT_FRONTIER"))

@@ -4,6 +4,7 @@ import com.kernfolio.dto.AllocationChartData
 import com.kernfolio.dto.DiscreteAllocationData
 import com.kernfolio.dto.FrontierChartData
 import com.kernfolio.dto.FrontierPointData
+import com.kernfolio.dto.RunSummaryData
 import com.kernfolio.repository.InstrumentRepository
 import com.kernfolio.repository.OptimizationRunRepository
 import com.kernfolio.security.KernfolioUserDetails
@@ -67,6 +68,27 @@ class ChartDataController(
         }
 
         return ResponseEntity.ok(FrontierChartData(frontier = frontier, optimized = optimized))
+    }
+
+    @GetMapping("/summary-data")
+    fun summaryData(
+        @PathVariable portfolioId: UUID,
+        @PathVariable runId: UUID,
+        authentication: Authentication,
+    ): ResponseEntity<RunSummaryData> {
+        val userId = currentUserId(authentication)
+        val run = loadRun(portfolioId, runId, userId)
+        val metrics = run.results.metrics
+
+        return ResponseEntity.ok(
+            RunSummaryData(
+                createdAt = run.createdAt,
+                expectedAnnualReturn = metrics?.expectedAnnualReturn,
+                annualVolatility = metrics?.annualVolatility,
+                sharpeRatio = metrics?.sharpeRatio,
+                cvar95 = metrics?.cvar95,
+            )
+        )
     }
 
     @GetMapping("/discrete-data")

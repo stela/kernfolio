@@ -1,11 +1,9 @@
 @import com.kernfolio.domain.Position
-@import java.util.Locale
 @import java.util.UUID
 
 @param position: Position
 @param displayName: String
 @param portfolioId: UUID
-@param cagr: Double? = null
 
 <tr>
     <td class="px-4 py-3 text-sm">${position.positionType}</td>
@@ -17,15 +15,13 @@
             <span data-shares-ticker="${position.ticker}"></span>
         @elseif(position.positionType == "CASH")
             <span data-cash-currency="${position.currency}"></span>
-        @else
-            ${String.format(Locale.ROOT, "%.2f", position.weightPct.toDouble() * 100)}%
         @endif
     </td>
     <td class="px-4 py-3 text-sm text-right">
         <div>
             <span data-weight-ticker="${position.ticker}"
                   data-weight-type="${position.positionType}"
-                  data-weight-currency="${position.currency}">${String.format(Locale.ROOT, "%.2f", position.weightPct.toDouble() * 100)}%</span>
+                  data-weight-currency="${position.currency}"></span>
         </div>
         <div class="text-xs text-gray-400 font-mono mt-0.5"
              data-weight-breakdown-ticker="${position.ticker}"
@@ -33,21 +29,19 @@
              data-weight-breakdown-currency="${position.currency}"></div>
     </td>
     <td class="px-4 py-3 text-sm text-gray-500">${position.sector}</td>
+    <%-- Numbers are formatted in the browser (PortfolioEntry.updateDisplays
+         fills these from /entry-data) so they follow the viewer's locale. --%>
     <td class="px-4 py-3 text-sm text-right font-mono">
-        !{var iv = position.intrinsicValueLocal;}
-        @if(iv != null)
-            ${String.format(Locale.ROOT, "%,.2f", iv.toDouble())}
-            @if(cagr != null)
-                <div class="text-xs text-gray-500 font-sans">≈ ${String.format(Locale.ROOT, "%.2f", cagr * 100)}%/yr over 5y</div>
-            @endif
+        @if(position.positionType == "EQUITY")
+            <span data-iv-ticker="${position.ticker}"></span>
+            <div class="text-xs text-gray-500 font-sans" data-cagr-ticker="${position.ticker}"></div>
         @else
             <span class="text-gray-400">—</span>
         @endif
     </td>
     <td class="px-4 py-3 text-sm text-right font-mono">
-        !{var conf = position.confidence;}
-        @if(conf != null)
-            ${String.format(Locale.ROOT, "%.0f", conf.toDouble() * 100)}%
+        @if(position.positionType == "EQUITY")
+            <span data-confidence-ticker="${position.ticker}"></span>
         @else
             <span class="text-gray-400">—</span>
         @endif

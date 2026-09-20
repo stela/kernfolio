@@ -44,11 +44,11 @@ document.addEventListener('DOMContentLoaded', function () {
                     scales: {
                         x: {
                             title: { display: true, text: 'Risk (Volatility %)' },
-                            ticks: { callback: function (v) { return v + '%'; } }
+                            ticks: { callback: function (v) { return Format.pctCompact(v / 100); } }
                         },
                         y: {
                             title: { display: true, text: 'Expected Return (%)' },
-                            ticks: { callback: function (v) { return v + '%'; } }
+                            ticks: { callback: function (v) { return Format.pctCompact(v / 100); } }
                         }
                     },
                     plugins: {
@@ -56,7 +56,7 @@ document.addEventListener('DOMContentLoaded', function () {
                         tooltip: {
                             callbacks: {
                                 label: function (ctx) {
-                                    return ctx.dataset.label + ': Risk ' + ctx.parsed.x.toFixed(2) + '%, Return ' + ctx.parsed.y.toFixed(2) + '%';
+                                    return ctx.dataset.label + ': Risk ' + Format.pct(ctx.parsed.x / 100) + ', Return ' + Format.pct(ctx.parsed.y / 100);
                                 }
                             }
                         }

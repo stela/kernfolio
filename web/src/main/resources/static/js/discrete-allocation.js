@@ -199,8 +199,8 @@ function renderAllocation(container, result, trades, basePrices, totalValue, bas
     html += '<div class="mb-6">';
     html += '<h3 class="text-sm font-medium text-gray-700 mb-2">Discrete Allocation</h3>';
     html += '<p class="text-xs text-gray-500 mb-3">Total value: ' +
-        formatNum(totalValue) + ' ' + esc(baseCurrency) +
-        ' &mdash; Leftover cash: ' + formatNum(result.leftoverCash) + ' ' + esc(baseCurrency) + '</p>';
+        Format.amount(totalValue) + ' ' + esc(baseCurrency) +
+        ' &mdash; Leftover cash: ' + Format.amount(result.leftoverCash) + ' ' + esc(baseCurrency) + '</p>';
 
     html += '<table class="min-w-full divide-y divide-gray-200">';
     html += '<thead class="bg-gray-50"><tr>';
@@ -214,14 +214,14 @@ function renderAllocation(container, result, trades, basePrices, totalValue, bas
         var shares = result.shares[t];
         var price = basePrices[t] || 0;
         var value = shares * price;
-        var weight = totalValue > 0 ? (value / totalValue * 100) : 0;
+        var weight = totalValue > 0 ? value / totalValue : 0;
 
         html += '<tr>';
         html += td(esc(t), 'font-mono font-medium');
-        html += td(formatShares(shares), 'text-right');
-        html += td(formatNum(price), 'text-right');
-        html += td(formatNum(value), 'text-right');
-        html += td(formatNum(weight) + '%', 'text-right');
+        html += td(Format.qty(shares), 'text-right');
+        html += td(Format.amount(price), 'text-right');
+        html += td(Format.amount(value), 'text-right');
+        html += td(Format.pct(weight), 'text-right');
         html += '</tr>';
     }
     html += '</tbody></table></div>';
@@ -247,10 +247,10 @@ function renderAllocation(container, result, trades, basePrices, totalValue, bas
             html += '<tr class="' + rowCls + '">';
             html += '<td class="px-4 py-2 text-sm"><span class="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ' + badgeCls + '">' + trade.action + '</span></td>';
             html += td(esc(trade.ticker), 'font-mono font-medium');
-            html += td(formatShares(trade.current), 'text-right');
-            html += td(formatShares(trade.target), 'text-right');
-            html += td((isBuy ? '+' : '') + formatShares(trade.delta), 'text-right font-medium ' + deltaCls);
-            html += td(formatNum(estValue) + ' ' + esc(baseCurrency), 'text-right');
+            html += td(Format.qty(trade.current), 'text-right');
+            html += td(Format.qty(trade.target), 'text-right');
+            html += td((isBuy ? '+' : '') + Format.qty(trade.delta), 'text-right font-medium ' + deltaCls);
+            html += td(Format.amount(estValue) + ' ' + esc(baseCurrency), 'text-right');
             html += '</tr>';
         }
         html += '</tbody></table></div>';
@@ -267,15 +267,6 @@ function th(label, right) {
 
 function td(content, extraCls) {
     return '<td class="px-4 py-2 text-sm ' + (extraCls || '') + '">' + content + '</td>';
-}
-
-function formatNum(value) {
-    return value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
-function formatShares(value) {
-    if (Number.isInteger(value)) return String(value);
-    return value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 });
 }
 
 function esc(str) {

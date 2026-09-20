@@ -195,23 +195,14 @@
         // currency, so we compare it against the raw yfinance price, not
         // the portfolio-base-converted value PortfolioEntry stores.
         var currentPriceLocal = null;
-        var CAGR_YEARS = 5;
 
         function updateCagrHint() {
-            if (!cagrHint) return;
+            if (!cagrHint || typeof PortfolioEntry === 'undefined') return;
             if (typeSelect.value !== 'EQUITY') { cagrHint.textContent = ''; return; }
             var ivRaw = ivInput ? parseFloat(ivInput.value) : NaN;
             if (!isFinite(ivRaw) || ivRaw <= 0) { cagrHint.textContent = ''; return; }
-            if (!isFinite(currentPriceLocal) || currentPriceLocal <= 0) {
-                cagrHint.textContent = '';
-                return;
-            }
-            var cagr = Math.pow(ivRaw / currentPriceLocal, 1 / CAGR_YEARS) - 1;
-            var pct = (cagr * 100).toLocaleString(undefined, {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-            });
-            cagrHint.textContent = '≈ ' + pct + '%/yr over ' + CAGR_YEARS + 'y';
+            cagrHint.textContent = PortfolioEntry.formatCagrHint(
+                PortfolioEntry.computeCagr(ivRaw, currentPriceLocal));
         }
 
         function setCurrentPriceFromEntry(entry) {
@@ -232,10 +223,7 @@
             if (entry) {
                 var parts = [ticker];
                 if (entry.close) {
-                    parts.push(parseFloat(entry.close).toLocaleString(undefined, {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                    }));
+                    parts.push(Format.amount(parseFloat(entry.close)));
                 }
                 if (entry.currency) parts.push(entry.currency);
                 setStatus(parts.join(' · '), 'ok');

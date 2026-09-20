@@ -50,6 +50,8 @@ class BrowserFlowTest {
     companion object {
         private val wireMockServer = WireMockServer(options().dynamicPort()).apply { start() }
 
+        private const val BROWSER_LOCALE = "sv-SE"
+
         @JvmStatic
         @DynamicPropertySource
         fun props(registry: DynamicPropertyRegistry) {
@@ -87,6 +89,12 @@ class BrowserFlowTest {
 
         val chromeOptions = ChromeOptions().apply {
             addArguments("--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu")
+            // Pin a non-US locale. All user-visible numbers are formatted in
+            // the browser (format.js), so under sv-SE anything that bypasses
+            // the formatter — server-rendered or raw toFixed — shows up with
+            // a "." decimal and fails the exact-string assertions below.
+            addArguments("--lang=$BROWSER_LOCALE")
+            setExperimentalOption("prefs", mapOf("intl.accept_languages" to BROWSER_LOCALE))
             val logPrefs = LoggingPreferences()
             logPrefs.enable(LogType.BROWSER, Level.ALL)
             setCapability("goog:loggingPrefs", logPrefs)
@@ -94,10 +102,16 @@ class BrowserFlowTest {
 
         chrome = BrowserWebDriverContainer<Nothing>()
             .withCapabilities(chromeOptions)
+        chrome.withEnv("LANG", "sv_SE.UTF-8")
+        chrome.withEnv("LANGUAGE", "sv_SE:sv")
         chrome.start()
 
         driver = RemoteWebDriver(chrome.seleniumAddress, chromeOptions)
         wait = WebDriverWait(driver, Duration.ofSeconds(15))
+
+        // Fail loudly if the pin silently fell back to the image default.
+        val resolved = driver.executeScript("return new Intl.NumberFormat().resolvedOptions().locale") as String
+        check(resolved.startsWith("sv")) { "Browser locale not pinned: expected sv-SE, got $resolved" }
     }
 
     @AfterAll
@@ -125,6 +139,11 @@ class BrowserFlowTest {
     private fun waitForPortfolioDetail() {
         wait.until { driver.currentUrl?.matches(Regex(".*/portfolios/[0-9a-f-]{36}$")) == true }
     }
+
+    // sv-SE uses no-break spaces for digit grouping and before "%". Fold
+    // them to plain spaces so expected strings stay readable.
+    private fun visibleText(by: By): String =
+        driver.findElement(by).text.replace('\u00a0', ' ').replace('\u202f', ' ')
 
     private fun assertPageContains(text: String) {
         assertThat(driver.pageSource).contains(text)
@@ -434,9 +453,21 @@ class BrowserFlowTest {
         ) as Boolean
         assertThat(pieRendered).isTrue()
 
-        // Verify weights table
+        // Metric cards and the weights table are filled client-side from
+        // the JSON API, formatted in the (sv-SE) browser locale. Values
+        // come from fixtures/wiremock/__files/optimize-response.json.
+        wait.until { visibleText(By.id("metric-expected-return")) == "9,20 %" }
+        assertThat(visibleText(By.id("metric-volatility"))).isEqualTo("17,80 %")
+        assertThat(visibleText(By.id("metric-sharpe"))).isEqualTo("0,32")
+        // Minus sign is U+2212 in sv-SE, so match on the digits.
+        assertThat(visibleText(By.id("metric-cvar95"))).endsWith("2,80 %")
+        assertThat(visibleText(By.id("run-created-at"))).isNotBlank()
+
         assertPageContains("Optimized Weights")
-        assertPageContains("GOOG")
+        wait.until { visibleText(By.id("weights-tbody")).contains("GOOG") }
+        val weightsText = visibleText(By.id("weights-tbody"))
+        assertThat(weightsText).containsPattern("\\d+,\\d{2} %")
+        assertThat(weightsText).doesNotContainPattern("\\d+\\.\\d{2}\\s?%")
     }
 
     @Test
@@ -716,7 +747,7 @@ class BrowserFlowTest {
 
         driver.findElement(By.id("total-value-input")).sendKeys("100000")
 
-        // Each case is rigged to land at exactly 10.00% so an exact string
+        // Each case is rigged to land at exactly 10,00 % (sv-SE) so an exact string
         // match suffices. Covers the four quadrants: cash × equity × base ×
         // foreign currency. EURSEK=11.00, so SEK amounts/prices are 11× the
         // EUR equivalent.
@@ -760,9 +791,16 @@ class BrowserFlowTest {
                     By.xpath("//tr[.//td[contains(normalize-space(), '${c.rowClue}')]]")
                 )
             )
-            assertThat(savedRow.text)
-                .`as`("weight for ${c.type} ${c.currency} (${c.rowClue})")
-                .contains("10.00%")
+            // Weights are rendered client-side once the post-save refresh
+            // lands, so wait for the text rather than asserting immediately.
+            val rowBy = By.xpath("//tr[.//td[contains(normalize-space(), '${c.rowClue}')]]")
+            try {
+                wait.until { visibleText(rowBy).contains("10,00 %") }
+            } catch (e: org.openqa.selenium.TimeoutException) {
+                throw AssertionError(
+                    "weight for ${c.type} ${c.currency} (${c.rowClue}): expected \"10,00 %\" in \"${visibleText(rowBy)}\"", e
+                )
+            }
         }
 
         // Clean up so this portfolio doesn't clutter later tests.
@@ -807,7 +845,7 @@ class BrowserFlowTest {
         // The progress text renders only after the save + rebalance round
         // trips finish, which is later than the total-input bump above.
         wait.until {
-            driver.findElement(By.id("allocation-progress-text")).text.contains("100% allocated")
+            visibleText(By.id("allocation-progress-text")).contains("100 % allocated")
         }
 
         // Manually set a larger total so the next position lands below 100%
@@ -826,13 +864,10 @@ class BrowserFlowTest {
 
         // Filled is now 500 EUR cash + 500 EUR equity = 1000 of 2000.
         wait.until {
-            val t = driver.findElement(By.id("allocation-progress-text")).text
-            t.contains("50.00%") && t.contains("remaining")
+            val t = visibleText(By.id("allocation-progress-text"))
+            t.contains("50,00 %") && t.contains("remaining")
         }
-        val progress2 = driver.findElement(By.id("allocation-progress-text")).text
-        // Amounts are locale-formatted in the browser ("1,000.00" in en-US),
-        // so tolerate an optional grouping separator.
-        assertThat(progress2).containsPattern("1[,.\\s\u00a0]?000[.,]00 EUR")
+        assertThat(visibleText(By.id("allocation-progress-text"))).contains("1 000,00 EUR")
 
         // Over-allocating via a new equity position should bump the total up
         // again so filled matches.
@@ -850,10 +885,49 @@ class BrowserFlowTest {
 
         wait.until { (totalInput.getAttribute("value") ?: "").startsWith("3000") }
         wait.until {
-            driver.findElement(By.id("allocation-progress-text")).text.contains("100% allocated")
+            visibleText(By.id("allocation-progress-text")).contains("100 % allocated")
         }
 
         // Clean up
+        driver.findElement(By.cssSelector("form[data-confirm] button[type='submit']")).click()
+        driver.switchTo().alert().accept()
+        waitForUrl("/dashboard")
+    }
+
+    @Test
+    @Order(38)
+    fun `intrinsic value, implied CAGR and confidence render in the browser locale`() {
+        instrumentRepository.save(Instrument("IVTEST", "IV Locale Test", "TEST", "EUR", "Test", BigDecimal("0")))
+        cachedPriceRepository.upsert("IVTEST", LocalDate.now(), BigDecimal("1000.00"), "EUR")
+
+        navigateTo("/portfolios/new")
+        fillField("name", "IV Locale Test")
+        fillField("baseCurrency", "EUR")
+        driver.findElement(By.cssSelector("button[type='submit']")).click()
+        waitForPortfolioDetail()
+
+        driver.findElement(By.id("add-position-btn")).click()
+        val newRow = wait.until(
+            ExpectedConditions.presenceOfElementLocated(By.cssSelector("tr[data-new-row]"))
+        )
+        val currField = newRow.findElement(By.cssSelector(".js-currency"))
+        currField.clear()
+        currField.sendKeys("EUR")
+        newRow.findElement(By.cssSelector(".js-ticker-input")).sendKeys("IVTEST")
+        newRow.findElement(By.cssSelector(".js-shares")).sendKeys("1")
+        // IV 2000 vs price 1000 → (2000/1000)^(1/5) - 1 = 14.87 %/yr.
+        newRow.findElement(By.cssSelector(".js-iv")).sendKeys("2000")
+        newRow.findElement(By.cssSelector(".js-confidence")).sendKeys("80")
+        newRow.findElement(By.cssSelector(".js-save-position")).click()
+        wait.until(ExpectedConditions.stalenessOf(newRow))
+
+        val rowBy = By.xpath("//tr[.//td[contains(normalize-space(), 'IVTEST')]]")
+        wait.until { visibleText(rowBy).contains("14,87 %/yr over 5y") }
+        val rowText = visibleText(rowBy)
+        assertThat(rowText).contains("2 000,00")   // IV/share, grouped + comma decimal
+        assertThat(rowText).contains("80 %")       // confidence
+        assertThat(rowText).doesNotContain("2,000.00").doesNotContain("14.87")
+
         driver.findElement(By.cssSelector("form[data-confirm] button[type='submit']")).click()
         driver.switchTo().alert().accept()
         waitForUrl("/dashboard")

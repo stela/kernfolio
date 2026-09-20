@@ -6,10 +6,10 @@
  * stores absolute values in localStorage, and sends only percentages to the backend.
  *
  * ── Locale note ─────────────────────────────────────────────────────────
- * Numbers shown to the user are formatted via `toLocaleString` (see
- * formatAmount / formatPct / formatQty). `toFixed` is locale-blind and
- * reserved for serialization only (JSON bodies, hidden form fields) where
- * the server parser is dot-strict.
+ * Numbers shown to the user are formatted via the shared `Format` helpers
+ * (format.js), which follow the browser locale. `toFixed` is locale-blind
+ * and reserved for serialization only (JSON bodies, hidden form fields)
+ * where the server parser is dot-strict.
  *
  * `parseFloat` is also locale-blind — it always expects "." as the decimal
  * separator. We rely on every input to parseFloat in this file being
@@ -392,51 +392,25 @@ var PortfolioEntry = (function () {
             return;
         }
         var filled = filledInBaseCurrency();
-        var pct = (filled / totalValue) * 100;
+        var fraction = filled / totalValue;
         // CSS lengths must use a dot — `width: 12,50%` is invalid.
-        bar.style.width = Math.min(Math.max(pct, 0), 100).toFixed(2) + '%';
+        bar.style.width = (Math.min(Math.max(fraction, 0), 1) * 100).toFixed(2) + '%';
         if (filled <= 0) {
-            text.textContent = 'No positions saved yet — 0% allocated of ' +
-                formatAmount(totalValue) + ' ' + baseCurrency + '.';
+            text.textContent = 'No positions saved yet — ' + Format.pct(0, 0) + ' allocated of ' +
+                Format.amount(totalValue) + ' ' + baseCurrency + '.';
         } else if (Math.abs(filled - totalValue) < 0.01) {
-            text.textContent = '100% allocated (' + formatAmount(totalValue) + ' ' + baseCurrency + ').';
+            text.textContent = Format.pct(1, 0) + ' allocated (' + Format.amount(totalValue) + ' ' + baseCurrency + ').';
         } else if (filled < totalValue) {
             var remaining = totalValue - filled;
-            var remainingPct = 100 - pct;
-            text.textContent = formatPct(pct) + ' allocated — ' +
-                formatAmount(remaining) + ' ' + baseCurrency +
-                ' (' + formatPct(remainingPct) + ') remaining.';
+            text.textContent = Format.pct(fraction) + ' allocated — ' +
+                Format.amount(remaining) + ' ' + baseCurrency +
+                ' (' + Format.pct(1 - fraction) + ') remaining.';
         } else {
             // Shouldn't happen post-save because we auto-bump, but covers
             // transient in-flight states.
-            text.textContent = 'Over-allocated by ' + formatAmount(filled - totalValue) + ' ' + baseCurrency + '.';
+            text.textContent = 'Over-allocated by ' + Format.amount(filled - totalValue) + ' ' + baseCurrency + '.';
         }
         container.classList.remove('hidden');
-    }
-
-    // Locale-aware formatters. Numbers shown to the user go through these
-    // so that e.g. a de-DE browser sees "1.234,56" instead of "1,234.56".
-    // `toFixed` is locale-blind (always emits "."), so reserve it for
-    // serialization (form fields, JSON bodies) where the server parser is
-    // dot-strict.
-    function formatAmount(value, digits) {
-        if (!isFinite(value)) return '';
-        if (digits == null) digits = 2;
-        return value.toLocaleString(undefined, {
-            minimumFractionDigits: digits,
-            maximumFractionDigits: digits,
-        });
-    }
-    function formatPct(value, digits) {
-        if (digits == null) digits = 2;
-        return formatAmount(value, digits) + '%';
-    }
-    function formatQty(value) {
-        // Whole shares render compactly ("100"); fractional shares (ETFs,
-        // reinvested dividends) up to 4 decimals, trailing zeros stripped.
-        if (!isFinite(value)) return '';
-        if (Number.isInteger(value)) return value.toLocaleString();
-        return value.toLocaleString(undefined, { maximumFractionDigits: 4 });
     }
 
     function formatWeight(ticker, positionType, currency) {
@@ -445,7 +419,7 @@ var PortfolioEntry = (function () {
         // misleading ("did my 200 EUR turn into nothing?").
         if (totalValue <= 0) return '—';
         var w = computeWeightPct(ticker, positionType, currency);
-        return formatPct(w * 100);
+        return Format.pct(w);
     }
 
     // The native-currency price for equity rows. Surfaces the per-share
@@ -458,7 +432,51 @@ var PortfolioEntry = (function () {
         if (positionType !== 'EQUITY') return '';
         var pd = prices[ticker];
         if (!pd || pd.close == null || !pd.currency) return '';
-        return formatAmount(parseFloat(pd.close)) + ' ' + pd.currency;
+        return Format.amount(parseFloat(pd.close)) + ' ' + pd.currency;
+    }
+
+    // Expected annual return implied by buying at `priceLocal` and the
+    // price converging on the user's intrinsic value over CAGR_YEARS. Both
+    // inputs are per-share in the instrument's own currency. Returns null
+    // when either is missing. Mirrors OptimizerService.computeCagr.
+    var CAGR_YEARS = 5;
+    function computeCagr(ivLocal, priceLocal) {
+        if (!isFinite(ivLocal) || !isFinite(priceLocal) || ivLocal <= 0 || priceLocal <= 0) return null;
+        return Math.pow(ivLocal / priceLocal, 1 / CAGR_YEARS) - 1;
+    }
+
+    function formatCagrHint(cagr) {
+        if (cagr == null) return '';
+        return '≈ ' + Format.pct(cagr) + '/yr over ' + CAGR_YEARS + 'y';
+    }
+
+    function positionByTicker(ticker) {
+        for (var i = 0; i < positions.length; i++) {
+            if (positions[i].ticker === ticker) return positions[i];
+        }
+        return null;
+    }
+
+    // IV/share, implied CAGR and confidence for saved rows. The server
+    // renders these cells empty; values come from /entry-data.
+    function updateValuationCells() {
+        document.querySelectorAll('[data-iv-ticker]').forEach(function (el) {
+            var pos = positionByTicker(el.dataset.ivTicker);
+            var iv = pos && pos.intrinsicValueLocal != null ? parseFloat(pos.intrinsicValueLocal) : NaN;
+            el.textContent = isFinite(iv) ? Format.amount(iv) : '—';
+        });
+        document.querySelectorAll('[data-cagr-ticker]').forEach(function (el) {
+            var pos = positionByTicker(el.dataset.cagrTicker);
+            var pd = prices[el.dataset.cagrTicker];
+            var iv = pos && pos.intrinsicValueLocal != null ? parseFloat(pos.intrinsicValueLocal) : NaN;
+            var price = pd && pd.close != null ? parseFloat(pd.close) : NaN;
+            el.textContent = formatCagrHint(computeCagr(iv, price));
+        });
+        document.querySelectorAll('[data-confidence-ticker]').forEach(function (el) {
+            var pos = positionByTicker(el.dataset.confidenceTicker);
+            var conf = pos && pos.confidence != null ? parseFloat(pos.confidence) : NaN;
+            el.textContent = isFinite(conf) ? Format.pct(conf, 0) : '—';
+        });
     }
 
     function getShares(ticker) {
@@ -514,11 +532,11 @@ var PortfolioEntry = (function () {
     function updateDisplays() {
         // Update shares displays
         document.querySelectorAll('[data-shares-ticker]').forEach(function (el) {
-            el.textContent = formatQty(getShares(el.dataset.sharesTicker));
+            el.textContent = Format.qty(getShares(el.dataset.sharesTicker));
         });
         // Update cash displays
         document.querySelectorAll('[data-cash-currency]').forEach(function (el) {
-            el.textContent = formatAmount(getCashAmount(el.dataset.cashCurrency));
+            el.textContent = Format.amount(getCashAmount(el.dataset.cashCurrency));
         });
         // Recompute weight cells live: the server-rendered `weight_pct`
         // is the last value persisted at save time, which goes stale as
@@ -538,6 +556,7 @@ var PortfolioEntry = (function () {
             el.textContent = formatWeightBreakdown(ticker, type, currency);
         });
 
+        updateValuationCells();
         updateFreshnessIndicator();
         updateAllocationProgress();
 
@@ -599,8 +618,8 @@ var PortfolioEntry = (function () {
             if (drift > 0.01) {
                 drifted.push({
                     ticker: pos.ticker,
-                    backendWeight: formatPct(backendWeight * 100),
-                    currentWeight: formatPct(currentWeight * 100),
+                    backendWeight: Format.pct(backendWeight),
+                    currentWeight: Format.pct(currentWeight),
                 });
             }
         }
@@ -672,6 +691,8 @@ var PortfolioEntry = (function () {
         computeWeightPct: computeWeightPct,
         computeCostBasisPct: computeCostBasisPct,
         formatWeight: formatWeight,
+        computeCagr: computeCagr,
+        formatCagrHint: formatCagrHint,
         getShares: getShares,
         getCashAmount: getCashAmount,
         updateShares: updateShares,

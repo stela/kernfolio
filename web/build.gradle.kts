@@ -61,6 +61,7 @@ val tailwindBuild = tasks.register<Exec>("tailwindBuild") {
     val outputCss = file("src/main/resources/static/css/tailwind.css")
     inputs.file(inputCss)
     inputs.files(fileTree("src/main/jte") { include("**/*.kte") })
+    inputs.files(fileTree("src/main/resources/static/js") { include("**/*.js") })
     outputs.file(outputCss)
     commandLine("tailwindcss", "-i", inputCss.path, "-o", outputCss.path, "--minify")
 }

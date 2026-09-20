@@ -24,7 +24,7 @@ document.addEventListener('DOMContentLoaded', function () {
                         tooltip: {
                             callbacks: {
                                 label: function (ctx) {
-                                    return ctx.label + ': ' + ctx.parsed.toFixed(2) + '%';
+                                    return ctx.label + ': ' + Format.pct(ctx.parsed / 100);
                                 }
                             }
                         }

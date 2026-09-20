@@ -33,7 +33,7 @@ document.addEventListener('DOMContentLoaded', function () {
                         y: {
                             beginAtZero: true,
                             ticks: {
-                                callback: function (value) { return value + '%'; }
+                                callback: function (value) { return Format.pctCompact(value / 100); }
                             },
                             title: { display: true, text: 'Weight (%)' }
                         },
@@ -46,7 +46,7 @@ document.addEventListener('DOMContentLoaded', function () {
                         tooltip: {
                             callbacks: {
                                 label: function (ctx) {
-                                    return ctx.dataset.label + ': ' + ctx.parsed.y.toFixed(2) + '%';
+                                    return ctx.dataset.label + ': ' + Format.pct(ctx.parsed.y / 100);
                                 }
                             }
                         }

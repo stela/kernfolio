@@ -22,3 +22,13 @@ data class DiscreteAllocationData(
     val tickers: List<String>,
     val fractional: Map<String, Boolean>,
 )
+
+// Headline numbers for the results page. Sent raw (fractions, ISO instant)
+// — the browser formats them in the viewer's locale and timezone.
+data class RunSummaryData(
+    val createdAt: java.time.Instant?,
+    val expectedAnnualReturn: Double?,
+    val annualVolatility: Double?,
+    val sharpeRatio: Double?,
+    val cvar95: Double?,
+)

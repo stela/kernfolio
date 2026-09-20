@@ -1,9 +1,7 @@
 package com.kernfolio.controller
 
 import com.kernfolio.domain.Position
-import com.kernfolio.repository.CachedPriceRepository
 import com.kernfolio.security.KernfolioUserDetails
-import com.kernfolio.service.OptimizerService
 import com.kernfolio.service.PortfolioNotFoundException
 import com.kernfolio.service.PortfolioService
 import com.kernfolio.service.PositionForm
@@ -24,7 +22,6 @@ import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.ResponseBody
 import org.springframework.web.server.ResponseStatusException
-import java.math.BigDecimal
 import java.util.UUID
 
 data class PortfolioForm(
@@ -39,26 +36,7 @@ data class PortfolioForm(
 @Controller
 class PortfolioController(
     private val portfolioService: PortfolioService,
-    private val cachedPriceRepository: CachedPriceRepository,
 ) {
-    // 5-year CAGR from the latest cached price vs the stored intrinsic
-    // value — mirrors OptimizerService.computeCagr. Returns null for
-    // CASH positions, missing IV, or when we have no price yet.
-    private fun cagrFor(position: Position): Double? {
-        if (position.positionType != "EQUITY") return null
-        val iv = position.intrinsicValueLocal ?: return null
-        val latest = cachedPriceRepository.findLatestByTicker(position.ticker) ?: return null
-        val price = latest.closePrice
-        if (price.compareTo(BigDecimal.ZERO) == 0) return null
-        return OptimizerService.computeCagr(iv.toDouble(), price.toDouble())
-    }
-
-    private fun cagrMap(positions: List<Position>): Map<UUID, Double> =
-        positions.mapNotNull { pos ->
-            val id = pos.id ?: return@mapNotNull null
-            cagrFor(pos)?.let { id to it }
-        }.toMap()
-
     @GetMapping("/portfolios/new")
     fun newPortfolio(model: Model): String {
         model.addAttribute("portfolioForm", PortfolioForm())
@@ -95,7 +73,6 @@ class PortfolioController(
         model.addAttribute("portfolio", portfolio)
         model.addAttribute("positions", positions)
         model.addAttribute("displayNames", portfolioService.displayNames(positions))
-        model.addAttribute("cagrByPositionId", cagrMap(positions))
         model.addAttribute("positionForm", PositionForm())
         return "page/portfolio-detail"
     }
@@ -176,7 +153,6 @@ class PortfolioController(
             model.addAttribute("position", position)
             model.addAttribute("displayName", portfolioService.displayNameFor(position))
             model.addAttribute("portfolioId", id)
-            model.addAttribute("cagr", cagrFor(position))
             return "partial/position-saved-row"
         } catch (_: PortfolioNotFoundException) {
             throw ResponseStatusException(HttpStatus.NOT_FOUND)
@@ -215,7 +191,6 @@ class PortfolioController(
             model.addAttribute("position", position)
             model.addAttribute("displayName", portfolioService.displayNameFor(position))
             model.addAttribute("portfolioId", id)
-            model.addAttribute("cagr", cagrFor(position))
             return "partial/position-saved-row"
         } catch (_: PortfolioNotFoundException) {
             throw ResponseStatusException(HttpStatus.NOT_FOUND)

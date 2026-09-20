@@ -92,10 +92,8 @@ class OptimizationController(
         if (run.portfolioId != id) {
             throw ResponseStatusException(HttpStatus.NOT_FOUND)
         }
-        val positions = portfolioService.findPositionsByPortfolioId(id, userId)
         model.addAttribute("portfolio", portfolio)
         model.addAttribute("run", run)
-        model.addAttribute("positions", positions)
         return "page/results"
     }
 

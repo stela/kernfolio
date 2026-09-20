@@ -162,6 +162,83 @@ class ChartDataControllerTest {
     }
 
     @Test
+    fun `summary-data returns raw metrics and ISO timestamp for client-side formatting`() {
+        val user = createUser("summary")
+        val portfolio = portfolioService.create(user.id!!, "Test", null, "EUR")
+
+        val run = optimizationRunRepository.save(
+            OptimizationRun(
+                portfolioId = portfolio.id!!,
+                algorithm = "black_litterman",
+                parameters = OptimizationParameters(),
+                results = OptimizationResults(
+                    optimizedWeights = mapOf("GOOG" to 1.0),
+                    metrics = OptimizationMetrics(
+                        expectedAnnualReturn = 0.09,
+                        annualVolatility = 0.17,
+                        sharpeRatio = 0.35,
+                        cvar95 = -0.03,
+                    ),
+                ),
+            )
+        )
+
+        mockMvc.perform(
+            get("/api/portfolios/${portfolio.id}/runs/${run.id}/summary-data")
+                .with(mockUserDetails(user))
+        )
+            .andExpect(status().isOk)
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+            .andExpect(jsonPath("$.expectedAnnualReturn").value(closeTo(0.09, 0.001)))
+            .andExpect(jsonPath("$.annualVolatility").value(closeTo(0.17, 0.001)))
+            .andExpect(jsonPath("$.sharpeRatio").value(closeTo(0.35, 0.001)))
+            .andExpect(jsonPath("$.cvar95").value(closeTo(-0.03, 0.001)))
+            .andExpect(jsonPath("$.createdAt").isString)
+    }
+
+    @Test
+    fun `summary-data returns null metrics when the run has none`() {
+        val user = createUser("nometrics")
+        val portfolio = portfolioService.create(user.id!!, "Test", null, "EUR")
+        val run = optimizationRunRepository.save(
+            OptimizationRun(
+                portfolioId = portfolio.id!!,
+                algorithm = "black_litterman",
+                parameters = OptimizationParameters(),
+                results = OptimizationResults(optimizedWeights = mapOf("GOOG" to 1.0)),
+            )
+        )
+
+        mockMvc.perform(
+            get("/api/portfolios/${portfolio.id}/runs/${run.id}/summary-data")
+                .with(mockUserDetails(user))
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.sharpeRatio").value(org.hamcrest.Matchers.nullValue()))
+    }
+
+    @Test
+    fun `summary-data returns 404 for another user's portfolio`() {
+        val owner = createUser("owner")
+        val other = createUser("intruder")
+        val portfolio = portfolioService.create(owner.id!!, "Private", null, "EUR")
+        val run = optimizationRunRepository.save(
+            OptimizationRun(
+                portfolioId = portfolio.id!!,
+                algorithm = "black_litterman",
+                parameters = OptimizationParameters(),
+                results = OptimizationResults(optimizedWeights = mapOf("GOOG" to 1.0)),
+            )
+        )
+
+        mockMvc.perform(
+            get("/api/portfolios/${portfolio.id}/runs/${run.id}/summary-data")
+                .with(mockUserDetails(other))
+        )
+            .andExpect(status().isNotFound)
+    }
+
+    @Test
     fun `returns 404 when run does not belong to portfolio`() {
         val user = createUser("charlie")
         val userId = user.id!!
