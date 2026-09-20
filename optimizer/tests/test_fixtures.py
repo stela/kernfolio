@@ -177,7 +177,7 @@ def test_optimize_request_schema():
     assert "dates" in data["prices"]
     assert "market_caps" in data
     assert "views" in data
-    assert "confidences" in data
+    assert "view_stddevs" in data
     assert "constraints" in data
     assert data["covariance_method"] == "ledoit_wolf"
 
@@ -187,8 +187,8 @@ def test_optimize_request_views_subset_of_prices():
     price_tickers = set(data["prices"].keys()) - {"dates"}
     for ticker in data["views"]:
         assert ticker in price_tickers, f"View ticker {ticker} not in prices"
-    for ticker in data["confidences"]:
-        assert ticker in price_tickers, f"Confidence ticker {ticker} not in prices"
+    for ticker in data["view_stddevs"]:
+        assert ticker in price_tickers, f"View std-dev ticker {ticker} not in prices"
 
 
 def test_optimize_request_prices_all_same_length():

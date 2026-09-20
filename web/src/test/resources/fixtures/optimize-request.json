@@ -26730,15 +26730,15 @@
     "HOOD": 0.14,
     "4975.T": 0.1
   },
-  "confidences": {
-    "GOOG": 0.8,
-    "NVDA": 0.7,
-    "LULU": 0.75,
-    "CSU.TO": 0.85,
-    "BRK-B": 0.9,
-    "MOH": 0.65,
-    "HOOD": 0.5,
-    "4975.T": 0.6
+  "view_stddevs": {
+    "GOOG": 0.25,
+    "NVDA": 0.45,
+    "LULU": 0.35,
+    "CSU.TO": 0.22,
+    "BRK-B": 0.15,
+    "MOH": 0.3,
+    "HOOD": 0.6,
+    "4975.T": 0.3
   },
   "risk_free_rate": 0.035,
   "tau": 0.05,

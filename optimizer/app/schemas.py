@@ -1,6 +1,6 @@
 """Pydantic request/response schemas for the Kernfolio Optimizer API."""
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 # ── /fetch-prices ─────────────────────────────────────────────────────
@@ -79,14 +79,25 @@ class OptimizeRequest(BaseModel):
     algorithm: str
     prices: dict[str, list[str] | list[float]]
     market_caps: dict[str, float]
+    # Expected annual return per ticker (fraction), and the std-dev of the
+    # user's scenario outcomes for that return. Every view needs both.
     views: dict[str, float]
-    confidences: dict[str, float]
+    view_stddevs: dict[str, float]
     risk_free_rate: float
-    tau: float
-    kelly_fraction: float
+    tau: float = Field(gt=0)
+    # 1.0 = full Kelly, 0.5 = half Kelly. Lower holds more cash.
+    kelly_fraction: float = Field(gt=0, le=1)
     constraints: Constraints
     sectors: dict[str, str]
     covariance_method: str
+
+    @model_validator(mode="after")
+    def _views_have_positive_stddevs(self) -> "OptimizeRequest":
+        for ticker in self.views:
+            stddev = self.view_stddevs.get(ticker)
+            if stddev is None or stddev <= 0:
+                raise ValueError(f"View on {ticker} needs a positive view_stddevs entry")
+        return self
 
 
 class FrontierPoint(BaseModel):
@@ -104,7 +115,11 @@ class OptimizeMetrics(BaseModel):
 
 
 class OptimizeResponse(BaseModel):
+    # Fractions of the whole portfolio: weights sum to 1 - cash_weight.
     weights: dict[str, float]
+    cash_weight: float
+    # Weight each view got against the market prior (0..1), for display.
+    view_confidences: dict[str, float]
     metrics: OptimizeMetrics
     efficient_frontier: list[FrontierPoint]
     correlation_matrix: dict[str, dict[str, float]]

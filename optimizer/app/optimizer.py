@@ -1,10 +1,11 @@
-"""Black-Litterman + Mean-Variance optimization logic."""
+"""Black-Litterman views + fractional-Kelly sizing."""
 
 import time
 
+import cvxpy as cp
 import numpy as np
 import pandas as pd
-from pypfopt import BlackLittermanModel, EfficientFrontier, risk_models
+from pypfopt import BlackLittermanModel, EfficientFrontier, black_litterman, risk_models
 
 from app.schemas import (
     Constraints,
@@ -38,14 +39,34 @@ def _run_black_litterman(
     cov_matrix: pd.DataFrame,
     market_caps: dict[str, float],
     views: dict[str, float],
-    confidences: dict[str, float],
+    view_stddevs: dict[str, float],
     risk_free_rate: float,
     tau: float,
-) -> tuple[pd.Series, pd.DataFrame]:
-    """Run Black-Litterman with Idzorek confidence. Returns posterior returns and covariance."""
-    # Filter views/confidences to tickers present in this universe
+) -> tuple[pd.Series, pd.DataFrame, dict[str, float]]:
+    """Blend market-implied returns with the user's views.
+
+    Returns (posterior returns, posterior covariance, implied confidence per view).
+
+    A view is an expected annual return plus the std-dev of the user's own
+    scenario outcomes. That spread is the same kind of quantity as the
+    asset's volatility, whereas BL's prior uncertainty about the *mean* is
+    tau * Sigma — so the view uncertainty is scaled by tau as well
+    (He-Litterman convention): omega_k = tau * s_k^2. The weight a view gets
+    against the market prior is then about sigma_k^2 / (sigma_k^2 + s_k^2):
+    a spread equal to the stock's own volatility is a 50/50 blend.
+    """
+    # Filter views to tickers present in this universe
     filtered_views = {t: v for t, v in views.items() if t in cov_matrix.columns}
-    view_confidences = [confidences[t] for t in filtered_views]
+    if not filtered_views:
+        # No opinions: the market-implied prior is the answer. (risk_aversion=1
+        # is what BlackLittermanModel itself defaults to below.)
+        prior = black_litterman.market_implied_prior_returns(
+            pd.Series(market_caps)[list(cov_matrix.columns)], 1, cov_matrix, risk_free_rate
+        )
+        return prior, cov_matrix, {}
+
+    view_variances = [view_stddevs[t] ** 2 for t in filtered_views]
+    omega = np.diag([tau * v for v in view_variances])
 
     bl = BlackLittermanModel(
         cov_matrix,
@@ -54,68 +75,49 @@ def _run_black_litterman(
         risk_free_rate=risk_free_rate,
         tau=tau,
         absolute_views=filtered_views,
-        omega="idzorek",
-        view_confidences=view_confidences,
+        omega=omega,
     )
 
-    posterior_returns = bl.bl_returns()
-    posterior_cov = bl.bl_cov()
-    return posterior_returns, posterior_cov
+    implied_confidences = {
+        t: float(cov_matrix.loc[t, t] / (cov_matrix.loc[t, t] + var))
+        for t, var in zip(filtered_views, view_variances)
+    }
+    return bl.bl_returns(), bl.bl_cov(), implied_confidences
 
 
-def _run_efficient_frontier(
+def _run_kelly(
     expected_returns: pd.Series,
     cov_matrix: pd.DataFrame,
     constraints: Constraints,
     risk_free_rate: float,
-) -> tuple[dict[str, float], tuple[float, float, float]]:
-    """Run max-Sharpe MVO. Returns (clean_weights, (ret, vol, sharpe))."""
-    ef = EfficientFrontier(
-        expected_returns,
-        cov_matrix,
-        weight_bounds=(constraints.min_weight, constraints.max_weight),
-    )
-    ef.max_sharpe(risk_free_rate=risk_free_rate)
-    weights = ef.clean_weights()
-    performance = ef.portfolio_performance(
-        verbose=False, risk_free_rate=risk_free_rate
-    )
-    return dict(weights), performance
-
-
-def _merge_weights(
-    bl_weights: dict[str, float],
-    no_mc_tickers: list[str],
-    min_weight: float,
-    max_weight: float,
+    kelly_fraction: float,
+    budget: float,
 ) -> dict[str, float]:
-    """Merge BL-optimized weights with min-weight allocations for tickers without market caps."""
-    if not no_mc_tickers:
-        return bl_weights
+    """Fractional-Kelly sizing with the full covariance matrix.
 
-    satellite_total = len(no_mc_tickers) * min_weight
-    core_budget = 1.0 - satellite_total
+    maximise  w.(mu - rf) - 1/(2f) * w' Sigma w
+    s.t.      sum(w) <= budget,  min_weight <= w <= max_weight
 
-    bl_sum = sum(bl_weights.values())
-    merged = {}
-    if bl_sum > 0:
-        for ticker, w in bl_weights.items():
-            scaled = w * core_budget / bl_sum
-            merged[ticker] = max(min_weight, min(max_weight, scaled))
-    else:
-        equal = core_budget / len(bl_weights)
-        for ticker in bl_weights:
-            merged[ticker] = equal
+    Unconstrained this is w = f * Sigma^-1 (mu - rf): the max-Sharpe mix,
+    scaled. Unlike max_sharpe(), total exposure is an output — whatever is
+    not allocated stays in cash.
+    """
+    tickers = list(expected_returns.index)
+    mu = expected_returns.to_numpy(dtype=float) - risk_free_rate
+    sigma = cov_matrix.loc[tickers, tickers].to_numpy(dtype=float)
 
-    for ticker in no_mc_tickers:
-        merged[ticker] = min_weight
+    w = cp.Variable(len(tickers))
+    objective = cp.Maximize(mu @ w - (1.0 / (2.0 * kelly_fraction)) * cp.quad_form(w, cp.psd_wrap(sigma)))
+    problem = cp.Problem(
+        objective,
+        [cp.sum(w) <= budget, w >= constraints.min_weight, w <= constraints.max_weight],
+    )
+    problem.solve()
+    if w.value is None or problem.status not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
+        raise ValueError(f"Kelly sizing failed (solver status: {problem.status})")
 
-    # Normalize to sum to 1.0
-    total = sum(merged.values())
-    if total > 0:
-        merged = {t: w / total for t, w in merged.items()}
-
-    return merged
+    # Same clean-up pypfopt's clean_weights() applies: drop solver dust.
+    return {t: (0.0 if abs(v) < 1e-4 else float(v)) for t, v in zip(tickers, w.value)}
 
 
 def _compute_cvar_95(prices_df: pd.DataFrame, weights: dict[str, float]) -> float:
@@ -139,7 +141,13 @@ def _compute_frontier_points(
     risk_free_rate: float,
     n_points: int = 50,
 ) -> list[FrontierPoint]:
-    """Compute ~n_points on the efficient frontier."""
+    """Compute ~n_points on the fully-invested efficient frontier.
+
+    Context for the chart only. It needs weights that can sum to 1.0 within
+    the bounds; Kelly sizing doesn't, so an infeasible frontier is just empty.
+    """
+    if len(expected_returns) * constraints.max_weight < 1.0:
+        return []
     # Find return range
     ef_min = EfficientFrontier(
         expected_returns,
@@ -207,13 +215,12 @@ def run_optimization(request: OptimizeRequest) -> OptimizeResponse:
     n_assets = len(prices_df.columns)
     if n_assets < 1:
         raise ValueError("Portfolio optimization requires at least 1 asset; got 0")
-    max_w = request.constraints.max_weight
-    if n_assets * max_w < 1.0:
-        min_feasible = 1.0 / n_assets
+    min_w = request.constraints.min_weight
+    if n_assets * min_w > 1.0:
         raise ValueError(
             f"Constraints are infeasible: {n_assets} asset(s) with "
-            f"max_weight={max_w} cannot sum to 1.0. Increase max_weight to "
-            f"at least {min_feasible:.2f} or add more assets."
+            f"min_weight={min_w} already exceed 100%. Lower min_weight to "
+            f"at most {1.0 / n_assets:.4f} or remove positions."
         )
 
     cov_matrix = _compute_covariance(prices_df, request.covariance_method)
@@ -227,29 +234,29 @@ def run_optimization(request: OptimizeRequest) -> OptimizeResponse:
         prices_mc = prices_df[mc_tickers]
         cov_mc = cov_matrix.loc[mc_tickers, mc_tickers]
 
-        posterior_returns, posterior_cov = _run_black_litterman(
+        posterior_returns, posterior_cov, view_confidences = _run_black_litterman(
             prices_mc,
             cov_mc,
             request.market_caps,
             request.views,
-            request.confidences,
+            request.view_stddevs,
             request.risk_free_rate,
             request.tau,
         )
 
-        bl_weights, performance = _run_efficient_frontier(
+        # Tickers without a market cap can't take part in BL; they are held
+        # at min_weight and the Kelly budget is what remains.
+        satellite_total = len(no_mc_tickers) * min_w
+        weights = _run_kelly(
             posterior_returns,
             posterior_cov,
             request.constraints,
             request.risk_free_rate,
+            request.kelly_fraction,
+            budget=1.0 - satellite_total,
         )
-
-        weights = _merge_weights(
-            bl_weights,
-            no_mc_tickers,
-            request.constraints.min_weight,
-            request.constraints.max_weight,
-        )
+        for ticker in no_mc_tickers:
+            weights[ticker] = min_w
 
         frontier_points = _compute_frontier_points(
             posterior_returns,
@@ -259,6 +266,17 @@ def run_optimization(request: OptimizeRequest) -> OptimizeResponse:
         )
     else:
         raise ValueError(f"Unsupported algorithm: {request.algorithm}")
+
+    # Weights are fractions of the whole portfolio; the rest is cash earning rf.
+    cash_weight = max(0.0, 1.0 - sum(weights.values()))
+    w_bl = pd.Series({t: weights[t] for t in posterior_returns.index})
+    expected_return = float(w_bl @ posterior_returns) + cash_weight * request.risk_free_rate
+    # Satellites carry no modelled return; count them at rf like cash.
+    expected_return += sum(weights[t] for t in no_mc_tickers) * request.risk_free_rate
+    w_all = pd.Series({t: weights.get(t, 0.0) for t in all_tickers})
+    volatility = float(np.sqrt(w_all @ cov_matrix.loc[all_tickers, all_tickers] @ w_all))
+    sharpe = (expected_return - request.risk_free_rate) / volatility if volatility > 0 else 0.0
+    performance = (expected_return, volatility, sharpe)
 
     cvar_95 = _compute_cvar_95(prices_df, weights)
     correlation = _compute_correlation_matrix(prices_df)
@@ -273,6 +291,8 @@ def run_optimization(request: OptimizeRequest) -> OptimizeResponse:
             sharpe_ratio=round(performance[2], 4),
             cvar_95=round(cvar_95, 6),
         ),
+        cash_weight=round(cash_weight, 6),
+        view_confidences={t: round(c, 4) for t, c in sorted(view_confidences.items())},
         efficient_frontier=frontier_points,
         correlation_matrix=correlation,
         computation_ms=elapsed_ms,

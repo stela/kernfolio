@@ -262,7 +262,8 @@ def build_optimize_request(
         if params[4] > 0
     }
 
-    # Views and confidences for a subset of tickers (partial views)
+    # Views for a subset of tickers (partial views): expected annual return,
+    # plus the std-dev of the scenario outcomes behind it.
     views = {
         "GOOG": 0.09,
         "NVDA": 0.15,
@@ -273,15 +274,15 @@ def build_optimize_request(
         "HOOD": 0.14,
         "4975.T": 0.10,
     }
-    confidences = {
-        "GOOG": 0.80,
-        "NVDA": 0.70,
-        "LULU": 0.75,
-        "CSU.TO": 0.85,
-        "BRK-B": 0.90,
-        "MOH": 0.65,
-        "HOOD": 0.50,
-        "4975.T": 0.60,
+    view_stddevs = {
+        "GOOG": 0.25,
+        "NVDA": 0.45,
+        "LULU": 0.35,
+        "CSU.TO": 0.22,
+        "BRK-B": 0.15,
+        "MOH": 0.30,
+        "HOOD": 0.60,
+        "4975.T": 0.30,
     }
 
     return {
@@ -289,7 +290,7 @@ def build_optimize_request(
         "prices": opt_prices,
         "market_caps": market_caps,
         "views": views,
-        "confidences": confidences,
+        "view_stddevs": view_stddevs,
         "risk_free_rate": 0.035,
         "tau": 0.05,
         "kelly_fraction": 0.5,
@@ -327,6 +328,8 @@ def build_golden_optimize_response(tickers: list[str]) -> dict:
             "sharpe_ratio": 0.32,
             "cvar_95": -0.028,
         },
+        "cash_weight": 0.0,
+        "view_confidences": {},
         "efficient_frontier": frontier,
         "correlation_matrix": {},
         "computation_ms": 0,

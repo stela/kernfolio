@@ -40,6 +40,8 @@
     "sharpe_ratio": 0.32,
     "cvar_95": -0.028
   },
+  "cash_weight": 0.0,
+  "view_confidences": {},
   "efficient_frontier": [
     {
       "risk": 0.05,
