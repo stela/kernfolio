@@ -55,7 +55,7 @@ dependencies {
     testRuntimeOnly("com.h2database:h2")
 }
 
-val tailwindBuild by tasks.registering(Exec::class) {
+val tailwindBuild = tasks.register<Exec>("tailwindBuild") {
     description = "Build Tailwind CSS from source"
     val inputCss = file("src/main/resources/static/css/input.css")
     val outputCss = file("src/main/resources/static/css/tailwind.css")

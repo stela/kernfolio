@@ -30,12 +30,12 @@ val dockerExecutable: String = listOf(
     "/usr/bin/docker",
 ).firstOrNull { java.io.File(it).canExecute() } ?: "docker"
 
-val dockerComposeBuildProd by tasks.registering(Exec::class) {
+val dockerComposeBuildProd = tasks.register<Exec>("dockerComposeBuildProd") {
     description = "Build Dockerfile-based compose services for production"
     commandLine(dockerExecutable, "compose", "build", "optimizer", "vault-init")
 }
 
-val dockerComposeBuildDev by tasks.registering(Exec::class) {
+val dockerComposeBuildDev = tasks.register<Exec>("dockerComposeBuildDev") {
     description = "Build Dockerfile-based compose services for dev"
     commandLine(
         dockerExecutable, "compose",
@@ -44,13 +44,13 @@ val dockerComposeBuildDev by tasks.registering(Exec::class) {
     )
 }
 
-val dockerBuild by tasks.registering {
+val dockerBuild = tasks.register("dockerBuild") {
     description = "Build production Docker images (web JVM image + optimizer + vault-init)"
     group = "docker"
     dependsOn(":web:bootBuildImage", dockerComposeBuildProd)
 }
 
-val dockerBuildDev by tasks.registering {
+val dockerBuildDev = tasks.register("dockerBuildDev") {
     description = "Build every Docker image used by the dev stack"
     group = "docker"
     dependsOn(

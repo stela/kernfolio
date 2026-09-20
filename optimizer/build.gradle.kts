@@ -2,7 +2,7 @@ plugins {
     base
 }
 
-val uvSync by tasks.registering(Exec::class) {
+val uvSync = tasks.register<Exec>("uvSync") {
     description = "Install Python dependencies via uv"
     workingDir = projectDir
     commandLine("uv", "sync", "--frozen", "--extra", "dev")
@@ -11,14 +11,14 @@ val uvSync by tasks.registering(Exec::class) {
     outputs.dir(".venv")
 }
 
-val test by tasks.registering(Exec::class) {
+val test = tasks.register<Exec>("test") {
     description = "Run pytest via uv"
     dependsOn(uvSync)
     workingDir = projectDir
     commandLine("uv", "run", "pytest")
 }
 
-val audit by tasks.registering(Exec::class) {
+val audit = tasks.register<Exec>("audit") {
     description = "Run pip-audit via uv"
     dependsOn(uvSync)
     workingDir = projectDir
