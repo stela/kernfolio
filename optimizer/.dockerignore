@@ -1,0 +1,6 @@
+# BuildKit only sends what the Dockerfile COPYs, but `COPY app/ app/` would
+# still pick up local bytecode, and a broader COPY would pull in the venv.
+.venv
+**/__pycache__
+.pytest_cache
+tests
