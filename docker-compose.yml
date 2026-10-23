@@ -88,7 +88,9 @@ services:
     volumes:
       - openbao_certs:/openbao/certs:ro
     healthcheck:
-      test: ["CMD", "curl", "--cacert", "/openbao/certs/ca.pem", "--cert", "/openbao/certs/optimizer-client.pem", "--key", "/openbao/certs/optimizer-client-key.pem", "-f", "https://localhost:8000/health"]
+      # python:3.14-slim has no curl/wget. Verifies the server cert against the
+      # OpenBao CA (optimizer.pem carries a `localhost` SAN).
+      test: ["CMD", "python", "-c", "import ssl, urllib.request; urllib.request.urlopen('https://localhost:8000/health', context=ssl.create_default_context(cafile='/openbao/certs/ca.pem'), timeout=5)"]
       interval: 30s
       timeout: 10s
       retries: 3

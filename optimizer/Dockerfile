@@ -32,6 +32,11 @@ COPY app/ app/
 COPY run_mtls.py ./
 ENV PATH="/opt/optimizer/.venv/bin:$PATH"
 
+# Run unprivileged. The app only reads its code and the mounted certs (all
+# world-readable); the home dir is for yfinance's tz/cookie cache.
+RUN useradd --system --uid 10001 --user-group --create-home --shell /usr/sbin/nologin optimizer
+USER optimizer
+
 EXPOSE 8000
 
 # run_mtls.py enables TLS when OpenBao-issued certs are mounted at /openbao/certs

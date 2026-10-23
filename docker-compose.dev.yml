@@ -22,10 +22,7 @@ services:
     ports:
       - "8000:8000"
     healthcheck:
-      # Server speaks TLS (see run_mtls.py). The cert's SAN is `optimizer`,
-      # not `localhost`, and client auth is not required, so we skip
-      # verification for the local health probe.
-      test: ["CMD-SHELL", "python -c \"import ssl, urllib.request; urllib.request.urlopen('https://localhost:8000/health', context=ssl._create_unverified_context())\""]
+      # Same probe as docker-compose.yml, just more frequent.
       interval: 10s
       timeout: 5s
       retries: 5
