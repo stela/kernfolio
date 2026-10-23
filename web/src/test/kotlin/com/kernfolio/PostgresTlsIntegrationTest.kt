@@ -1,6 +1,5 @@
 package com.kernfolio
 
-import com.kernfolio.config.PemSslSocketFactory
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.BeforeAll
@@ -49,7 +48,8 @@ class PostgresTlsIntegrationTest {
                 login.clientCert?.let {
                     setProperty("sslcert", TestPki.cert(it).toString())
                     setProperty("sslkey", TestPki.key(it).toString())
-                    setProperty("sslfactory", login.socketFactory.name)
+                    setProperty("pemKeyAlgorithm", "Ed25519")
+                    login.socketFactory?.let { factory -> setProperty("sslfactory", factory.name) }
                 }
             }
             val url = postgres.jdbcUrl.replace("//localhost:", "//$host:")
@@ -66,7 +66,8 @@ class PostgresTlsIntegrationTest {
         val clientCert: String?,
         val user: String = KernfolioPostgresContainer.SUPERUSER,
         val sslMode: String = "verify-full",
-        val socketFactory: Class<*> = PemSslSocketFactory::class.java,
+        /** null: pgjdbc's default, as in application-db-tls.yml. */
+        val socketFactory: Class<*>? = null,
     )
 
     @Test

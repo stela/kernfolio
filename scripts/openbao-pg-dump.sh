@@ -26,8 +26,9 @@ CERT_DIR="${OPENBAO_CERT_DIR:-/openbao/certs}"
 export PGSSLMODE=verify-full
 export PGSSLROOTCERT="$CERT_DIR/ca.pem"
 export PGSSLCERT="$CERT_DIR/app-client.pem"
-# libpq refuses a key readable by group/others; the shared one is 0644 so
-# web (another uid) can read it. Use a private copy.
+# The key belongs to web's uid (0600), so run this as root in a container that
+# mounts openbao_certs. libpq wants the key owned by the current user, hence
+# a private copy.
 PGSSLKEY="$(mktemp)"
 trap 'rm -f "$PGSSLKEY"' EXIT
 install -m 600 "$CERT_DIR/app-client-key.pem" "$PGSSLKEY"

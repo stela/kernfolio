@@ -8,6 +8,7 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.attribute.PosixFilePermissions
 
 /**
  * Certificates for the mTLS integration tests, issued by a real OpenBao PKI set
@@ -81,7 +82,9 @@ object TestPki {
         altNames?.let { body["alt_names"] = it }
         val data = write("$mount/issue/kernfolio-service", body)
         Files.writeString(cert(stem), data["certificate"].asString() + "\n" + data["issuing_ca"].asString() + "\n")
+        // 0600 like openbao/init/setup.sh writes keys (pgjdbc and libpq insist).
         Files.writeString(key(stem), data["private_key"].asString())
+        Files.setPosixFilePermissions(key(stem), PosixFilePermissions.fromString("rw-------"))
     }
 
     private fun write(path: String, body: Map<String, Any>): JsonNode {

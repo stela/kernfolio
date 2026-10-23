@@ -49,7 +49,7 @@ object ForcedClientCert {
     }
 }
 
-/** pgjdbc `sslfactory` like PemSslSocketFactory, but with [ForcedClientCert]. */
+/** pgjdbc `sslfactory` presenting `sslcert` via [ForcedClientCert]. */
 class ForcedClientCertSocketFactory(info: Properties) : WrappedFactory() {
     init {
         factory = ForcedClientCert.sslContext(

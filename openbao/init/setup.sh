@@ -4,6 +4,33 @@ set -e
 export BAO_ADDR="${BAO_ADDR:-http://openbao:8200}"
 export BAO_TOKEN="${BAO_TOKEN:-dev-root-token}"
 
+# ── File ownership on the openbao_certs volume ───────────────────────
+# Each private key is owned by the one service that uses it, mode 0600, so
+# no other container mounting the volume can read it (libpq and pgjdbc also
+# insist on that). This script runs as root with only CAP_CHOWN (see
+# docker-compose.yml); the uids are pinned via `user:` there.
+CERTS=/openbao/certs
+OPENBAO_UID=100     # openbao/openbao image: openbao server + openbao-db-init
+WEB_UID=1002        # Paketo buildpack image (web)
+CADDY_UID=1000      # caddy/Dockerfile
+OPTIMIZER_UID=10001 # optimizer/Dockerfile
+POSTGRES_UID=70     # postgres:18-alpine
+POSTGRES_GID=70     # also given to openbao-db-init (group_add) for pg_root_password
+
+# place <dest> <uid> <gid> <mode>: write stdin to <dest> with that owner and
+# mode. Goes through a temp file and rename: with no DAC_OVERRIDE, root can't
+# open another user's 0600 file for writing, but it may replace it in the
+# root-owned directory.
+place() {
+  local dest="$1" tmp="$1.tmp.$$"
+  cat > "$tmp"
+  chmod "$4" "$tmp"
+  chown "$2:$3" "$tmp"
+  mv -f "$tmp" "$dest"
+}
+
+umask 077
+
 echo "=== OpenBao init: waiting for OpenBao ==="
 until bao status >/dev/null 2>&1; do sleep 1; done
 
@@ -37,9 +64,10 @@ else
     # random bytes when you're already talking to OpenBao; format=hex avoids
     # base64 post-processing. 16 bytes = 32 hex chars = 128 bits of entropy.
     pg_root_password="$(bao write -field=random_bytes sys/tools/random/16 format=hex)"
-    printf '%s' "$pg_root_password" > "$PG_ROOT_PASSWORD_FILE"
-    chmod 644 "$PG_ROOT_PASSWORD_FILE"
 fi
+# root:postgres 0640: readable by postgres and, via group_add, openbao-db-init.
+# (Re-placed on every run so volumes from before this layout get fixed too.)
+printf '%s' "$pg_root_password" | place "$PG_ROOT_PASSWORD_FILE" 0 "$POSTGRES_GID" 0640
 bao kv put secret/kernfolio/pg-root password="$pg_root_password" >/dev/null
 
 # ── PKI secrets engine ───────────────────────────────────────────────
@@ -52,20 +80,21 @@ echo "=== Enabling PKI engine ==="
 bao secrets enable pki 2>/dev/null || true
 bao secrets tune -max-lease-ttl=87600h pki
 
-if bao read -field=certificate pki/cert/ca >/openbao/certs/ca.pem 2>/dev/null \
-   && [ -s /openbao/certs/ca.pem ]; then
+if ca_pem="$(bao read -field=certificate pki/cert/ca 2>/dev/null)" && [ -n "$ca_pem" ]; then
     echo "=== Reusing existing root CA ==="
 else
     echo "=== Generating root CA ==="
-    bao write -field=certificate pki/root/generate/internal \
+    ca_pem="$(bao write -field=certificate pki/root/generate/internal \
       common_name="Kernfolio Dev CA" \
       key_type=ed25519 \
-      ttl=87600h > /openbao/certs/ca.pem
+      ttl=87600h)"
 
     bao write pki/config/urls \
       issuing_certificates="${BAO_ADDR}/v1/pki/ca" \
       crl_distribution_points="${BAO_ADDR}/v1/pki/crl"
 fi
+
+printf '%s\n' "$ca_pem" | place "$CERTS/ca.pem" 0 0 0644
 
 # Enable intermediate PKI for issuing certs
 bao secrets enable -path=pki_int pki 2>/dev/null || true
@@ -107,42 +136,39 @@ echo "=== Issuing service certificates ==="
 # The cert file is leaf + issuing intermediate so servers present a full
 # chain. ca.pem holds only the root — without the intermediate in the
 # server's cert, clients get PKIX path-building failures at handshake.
+# issue_cert <cn> <alt_names> <file stem> <key owner uid>: <stem>.pem is public
+# (root, 0644); <stem>-key.pem belongs to <key owner uid>, 0600.
 issue_cert() {
-  local role="$1" cn="$2" alt="$3" cert_file="$4" key_file="$5"
+  local cn="$1" alt="$2" stem="$3" owner="$4"
   local args="common_name=${cn} ttl=720h"
   [ -n "$alt" ] && args="${args} alt_names=${alt}"
-  bao write -format=json "pki_int/issue/${role}" private_key_format=pkcs8 $args > /tmp/cert.json
-  jq -r '.data.certificate, .data.issuing_ca' /tmp/cert.json > "$cert_file"
-  jq -r '.data.private_key' /tmp/cert.json > "$key_file"
+  bao write -format=json "pki_int/issue/kernfolio-service" private_key_format=pkcs8 $args > /tmp/cert.json
+  jq -r '.data.certificate, .data.issuing_ca' /tmp/cert.json | place "$CERTS/$stem.pem" 0 0 0644
+  jq -r '.data.private_key' /tmp/cert.json | place "$CERTS/$stem-key.pem" "$owner" 0 0600
+  rm -f /tmp/cert.json
 }
 
 # App (Spring Boot) — Ed25519. app.pem is web's server cert for the Caddy -> web
 # mTLS hop (application-tls.yml); Caddy dials the compose service name, hence
 # the `web` SAN. app-client.pem is web's identity towards the optimizer
 # (Netty 4.2+ supports EdDSA auto-detection).
-issue_cert "kernfolio-service" "app" "web,localhost" /openbao/certs/app.pem /openbao/certs/app-key.pem
-issue_cert "kernfolio-service" "app" "" /openbao/certs/app-client.pem /openbao/certs/app-client-key.pem
+issue_cert app "web,localhost" app "$WEB_UID"
+issue_cert app "" app-client "$WEB_UID"
 
 # Optimizer (Python/uvicorn) — Ed25519
-issue_cert "kernfolio-service" "optimizer" "localhost" /openbao/certs/optimizer.pem /openbao/certs/optimizer-key.pem
-issue_cert "kernfolio-service" "optimizer" "" /openbao/certs/optimizer-client.pem /openbao/certs/optimizer-client-key.pem
+# optimizer-client is only used by the optimizer's own healthcheck.
+issue_cert optimizer "localhost" optimizer "$OPTIMIZER_UID"
+issue_cert optimizer "" optimizer-client "$OPTIMIZER_UID"
 
 # Caddy (Go) — Ed25519
-issue_cert "kernfolio-service" "caddy" "" /openbao/certs/caddy-client.pem /openbao/certs/caddy-client-key.pem
+issue_cert caddy "" caddy-client "$CADDY_UID"
 
-# PostgreSQL (OpenSSL) — Ed25519. Server cert only; postgres copies the key
-# to a postgres-owned 0600 file at start (postgres/docker-entrypoint-tls.sh).
-issue_cert "kernfolio-service" "postgres" "localhost" /openbao/certs/postgres.pem /openbao/certs/postgres-key.pem
+# PostgreSQL (OpenSSL) — Ed25519. Server cert only.
+issue_cert postgres "localhost" postgres "$POSTGRES_UID"
 
 # Postgres superuser client identity. pg_hba.conf requires
 # clientcert=verify-full for user `kernfolio`, i.e. the cert CN must equal the
 # user name. Used by the OpenBao database engine and by openbao-db-init.
-issue_cert "kernfolio-service" "kernfolio" "" /openbao/certs/postgres-admin-client.pem /openbao/certs/postgres-admin-client-key.pem
-
-# Private keys that only their owner (uid 100, OpenBao + init) reads stay 0600.
-# The other keys are read by services running under other uids and stay 0644
-# on this internal volume.
-chmod 600 /openbao/certs/postgres-key.pem /openbao/certs/postgres-admin-client-key.pem
-chmod 644 /openbao/certs/postgres.pem /openbao/certs/ca.pem
+issue_cert kernfolio "" postgres-admin-client "$OPENBAO_UID"
 
 echo "=== OpenBao init complete ==="

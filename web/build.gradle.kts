@@ -87,8 +87,8 @@ tasks.withType<Test> {
     systemProperty("spring.cloud.vault.enabled", "false")
     systemProperty("spring.cloud.vault.config.lifecycle.enabled", "false")
     // The mTLS integration tests run repo files from outside this module: the
-    // optimizer image, the postgres TLS config and compose's optimizer
-    // healthcheck. Declare them so edits there re-run the tests instead of
+    // optimizer image, the postgres TLS config, the openbao-init image and
+    // script, and compose's optimizer healthcheck. Declare them so edits there re-run the tests instead of
     // leaving a stale up-to-date result.
     inputs.files(
         rootProject.fileTree("optimizer") {
@@ -96,6 +96,7 @@ tasks.withType<Test> {
             exclude("**/__pycache__/**")
         },
         rootProject.fileTree("postgres"),
+        rootProject.fileTree("openbao") { include("Dockerfile", "init/**") },
         rootProject.file("docker-compose.yml"),
     ).withPropertyName("repoFilesUnderTest").withPathSensitivity(PathSensitivity.RELATIVE)
 }

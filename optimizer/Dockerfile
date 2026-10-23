@@ -32,9 +32,11 @@ COPY app/ app/
 COPY run_mtls.py ./
 ENV PATH="/opt/optimizer/.venv/bin:$PATH"
 
-# Run unprivileged. The app only reads its code and the mounted certs (all
-# world-readable); the home dir is for yfinance's tz/cookie cache.
-RUN useradd --system --uid 10001 --user-group --create-home --shell /usr/sbin/nologin optimizer
+# Run unprivileged. The app only reads its code and the mounted certs; its two
+# private keys are given to uid 10001 by openbao/init/setup.sh. The home dir is
+# for yfinance's tz/cookie cache.
+RUN groupadd --system --gid 10001 optimizer \
+    && useradd --system --uid 10001 --gid optimizer --create-home --shell /usr/sbin/nologin optimizer
 USER optimizer
 
 EXPOSE 8000

@@ -27,11 +27,20 @@ class KernfolioPostgresContainer(val superuserPassword: String = "kernfolio") :
         withCopyFileToContainer(repoFile("postgres/docker-entrypoint-tls.sh", 0b111_101_101), "/usr/local/bin/docker-entrypoint-tls.sh")
         withCopyFileToContainer(repoFile("postgres/pg_hba_mtls.conf"), "/etc/postgresql/pg_hba.conf")
         withCopyFileToContainer(repoFile("postgres/init-extensions.sql"), "/docker-entrypoint-initdb.d/init-extensions.sql")
-        for (file in listOf("ca.pem", "postgres.pem", "postgres-key.pem")) {
-            withCopyFileToContainer(MountableFile.forHostPath(TestPki.dir.resolve(file)), "/openbao/certs/$file")
+        for (file in listOf("ca.pem", "postgres.pem")) {
+            withCopyFileToContainer(MountableFile.forHostPath(TestPki.dir.resolve(file), 0b110_100_100), "/openbao/certs/$file")
         }
-        // As in compose. Overriding the entrypoint also drops the image's CMD.
-        withCreateContainerCmdModifier { it.withEntrypoint("/usr/local/bin/docker-entrypoint-tls.sh") }
+        // On the volume the key is postgres-owned 0600 (openbao/init/setup.sh).
+        // Testcontainers copies files as root, so install it with that owner
+        // first, then start through the real entrypoint, as in compose.
+        withCopyFileToContainer(MountableFile.forHostPath(TestPki.key("postgres"), 0b110_000_000), "/tmp/postgres-key.pem")
+        withCreateContainerCmdModifier {
+            it.withEntrypoint(
+                "sh", "-c",
+                "install -o postgres -g postgres -m 600 /tmp/postgres-key.pem /openbao/certs/postgres-key.pem " +
+                    "&& exec /usr/local/bin/docker-entrypoint-tls.sh",
+            )
+        }
         // Once for initdb's temporary server, once for the real one.
         waitingFor(Wait.forLogMessage(".*database system is ready to accept connections.*\\s", 2))
     }

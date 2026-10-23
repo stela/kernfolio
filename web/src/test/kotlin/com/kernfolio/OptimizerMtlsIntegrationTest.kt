@@ -45,7 +45,9 @@ class OptimizerMtlsIntegrationTest {
         private val optimizer = GenericContainer(image).apply {
             withExposedPorts(8000)
             for (file in listOf("ca.pem", "optimizer.pem", "optimizer-key.pem", "optimizer-client.pem", "optimizer-client-key.pem")) {
-                // Readable by the image's unprivileged user, as on the openbao_certs volume.
+                // On the volume the keys belong to the optimizer's uid at 0600; here
+                // they're root-owned copies, so readable (uvicorn doesn't check).
+                // OpenBaoInitIntegrationTest covers the real ownership.
                 withCopyFileToContainer(MountableFile.forHostPath(TestPki.dir.resolve(file), 0b110_100_100), "/openbao/certs/$file")
             }
             // run_mtls.py starts 2 workers; the parent logs "Uvicorn running on

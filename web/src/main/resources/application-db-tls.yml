@@ -9,10 +9,10 @@ spring:
         sslmode: verify-full
         sslrootcert: ${openbao.certs.dir}/ca.pem
         sslcert: ${openbao.certs.dir}/app-client.pem
+        # PKCS#8 PEM, owned by web's uid at 0600 (openbao/init/setup.sh), which
+        # pgjdbc requires for PEM keys. pgjdbc assumes RSA unless told.
         sslkey: ${openbao.certs.dir}/app-client-key.pem
-        # Reads the three PEM files above; see PemSslSocketFactory for why not
-        # pgjdbc's default (key-file permission rule).
-        sslfactory: com.kernfolio.config.PemSslSocketFactory
+        pemKeyAlgorithm: Ed25519
         # SCRAM channel binding can't work with an Ed25519 server cert (no
         # signature digest to hash it with). verify-full plus the client cert
         # already rule out a MITM.

@@ -1,9 +1,7 @@
 services:
   openbao:
-    build:
-      context: ./openbao
-      target: server
-    image: kernfolio-openbao
+    image: openbao/openbao:2.7.1
+    user: "100:1000"
     mem_limit: 512m
     environment:
       BAO_ADDR: "http://127.0.0.1:8200"
@@ -21,10 +19,17 @@ services:
       retries: 5
 
   openbao-init:
-    build:
-      context: ./openbao
-      target: init
+    build: ./openbao
     image: kernfolio-openbao-init
+    # Root, but only to chown: it gives each private key on openbao_certs to
+    # the service that uses it (see "File ownership" in openbao/init/setup.sh).
+    user: "0:0"
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+    security_opt:
+      - no-new-privileges:true
     mem_limit: 128m
     depends_on:
       openbao:
@@ -75,10 +80,12 @@ services:
     # Reuses the openbao-init image (same Dockerfile) because setup-db.sh needs
     # both the `bao` CLI (from the base image) and `psql` (to bootstrap the
     # app_owner role before OpenBao starts handing out dynamic app credentials).
-    build:
-      context: ./openbao
-      target: init
+    build: ./openbao
     image: kernfolio-openbao-init
+    user: "100:1000"
+    # Supplementary group postgres (70): pg_root_password is root:70 0640.
+    group_add:
+      - "70"
     mem_limit: 128m
     depends_on:
       openbao:
@@ -94,6 +101,8 @@ services:
 
   optimizer:
     build: ./optimizer
+    # Owner of optimizer-key.pem / optimizer-client-key.pem (openbao/init/setup.sh).
+    user: "10001:10001"
     mem_limit: 512m
     environment:
       PYTHONUNBUFFERED: "1"
@@ -113,6 +122,8 @@ services:
 
   web:
     image: kernfolio-web:latest
+    # Paketo's default user, pinned: owner of app-key.pem / app-client-key.pem.
+    user: "1002:1001"
     mem_limit: 512m
     environment:
       BAO_ADDR: "http://openbao:8200"
@@ -146,6 +157,8 @@ services:
     # on unprivileged 8080/8443; docker owns the privileged host ports.
     build: ./caddy
     image: kernfolio-caddy
+    # Owner of caddy-client-key.pem.
+    user: "1000:1000"
     mem_limit: 64m
     cap_drop:
       - ALL
