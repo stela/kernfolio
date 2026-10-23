@@ -15,7 +15,7 @@ Each run reports expected return, volatility, Sharpe ratio, 95 % CVaR and the ca
 
 **Privacy by construction.** Share counts, cash amounts, and total portfolio value stay in your browser's local storage. The browser converts them to percentage weights before anything is sent, so the backend — and whoever operates it — only ever sees tickers and percentages, and cannot tell a €5,000 portfolio from a €5,000,000 one.
 
-**Multi-user, strictly separated.** One instance serves many users. Registration is invite-only by default (or open, via a feature flag), and an admin manages users and flags. Isolation is enforced in PostgreSQL itself with row-level security on portfolios, positions and optimization runs — every connection is scoped to the signed-in user — rather than relying only on application-level filtering. Database credentials are short-lived and issued by OpenBao, and all traffic between services is mutual TLS.
+**Multi-user, strictly separated.** One instance serves many users. Registration is invite-only by default (or open, via a feature flag), and an admin manages users and flags. Isolation is enforced in PostgreSQL itself with row-level security on portfolios, positions and optimization runs — every connection is scoped to the signed-in user — rather than relying only on application-level filtering. Database credentials are short-lived and issued by OpenBao, and traffic between the app's services is mutual TLS.
 
 ## Architecture
 
@@ -62,7 +62,7 @@ Services, ports, and resource footprint:
 
 Full dev stack budget: ~2.4 GiB of container memory, observed steady-state ~1.1 GiB. JVM services size their heap + metaspace + code cache explicitly through `JAVA_TOOL_OPTIONS` (see `docker-compose.yml` / `docker-compose.dev.yml`) so Paketo's memory calculator defers to the explicit values.
 
-All inter-service traffic — including Caddy → web — is mTLS with certificates issued by OpenBao's PKI engine. Caddy runs as uid 1000 with all capabilities dropped; it listens on 8080/8443 inside its container and Docker publishes those as 80/443.
+Traffic between services — Caddy → web, web → optimizer, and every connection to PostgreSQL — is mutual TLS with certificates issued by OpenBao's PKI engine, and each hop has an integration test. PostgreSQL refuses any TCP login without TLS, a client certificate from that CA and a password. The exception for now is the connection to OpenBao itself, which is still plain HTTP inside the compose network. Caddy runs as uid 1000 with all capabilities dropped; it listens on 8080/8443 inside its container and Docker publishes those as 80/443.
 
 > **Upgrading an existing checkout:** Caddy used to run as root, so `caddy_data` / `caddy_config` volumes created before this change are root-owned and the new container can't write to them. Remove them once: `docker volume rm kernfolio_caddy_data kernfolio_caddy_config`. (In production, do this before first obtaining a certificate, or `chown -R 1000:1000` the volume contents instead.)
 
