@@ -37,7 +37,7 @@ class OptimizerMtlsIntegrationTest {
         // Only what the Dockerfile copies: the context stays small (no local
         // .venv) and Docker's layer cache keeps reruns fast.
         private val image = ImageFromDockerfile("kernfolio-optimizer-mtls-test", false).apply {
-            for (file in listOf("Dockerfile", "pyproject.toml", "uv.lock", "run_mtls.py", "app")) {
+            for (file in listOf("Dockerfile", ".python-version", "pyproject.toml", "uv.lock", "run_mtls.py", "app")) {
                 withFileFromPath(file, optimizerDir.resolve(file))
             }
         }

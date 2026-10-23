@@ -130,7 +130,7 @@ services:
     <<: *hardened
     build: ./optimizer
     # Owner of optimizer-key.pem / optimizer-client-key.pem (openbao/init/setup.sh).
-    user: "10001:10001"
+    user: "65532:65532"
     mem_limit: 512m
     environment:
       PYTHONUNBUFFERED: "1"

@@ -53,7 +53,7 @@ Services, ports, and resource footprint:
 | Service | Port | `mem_limit` | Typical RSS | Image | Image size |
 | --- | --- | --- | --- | --- | --- |
 | web | 8443 (internal only, mTLS) | 512 MiB | ~345 MiB | `kernfolio-web:latest` (buildpack) | ~472 MB |
-| optimizer | 8000 | 512 MiB | ~370 MiB | `kernfolio-optimizer:latest` (python:3.14-slim) | ~505 MB |
+| optimizer | 8000 | 512 MiB | ~370 MiB | `kernfolio-optimizer:latest` (distroless cc + uv-managed CPython 3.14) | ~482 MB |
 | postgres | 5432 | 256 MiB | ~48 MiB | `postgres:18-alpine` | ~281 MB |
 | openbao | 8200 | 512 MiB | ~70 MiB | `openbao/openbao:2.7.1` | ~181 MB |
 | yfinance-twin | 8081 | 256 MiB | ~140 MiB | `kernfolio-yfinance-twin:latest` (buildpack) | ~353 MB |

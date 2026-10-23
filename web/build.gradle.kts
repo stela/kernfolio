@@ -92,7 +92,7 @@ tasks.withType<Test> {
     // leaving a stale up-to-date result.
     inputs.files(
         rootProject.fileTree("optimizer") {
-            include("Dockerfile", "pyproject.toml", "uv.lock", "run_mtls.py", "app/**")
+            include("Dockerfile", ".python-version", "pyproject.toml", "uv.lock", "run_mtls.py", "app/**")
             exclude("**/__pycache__/**")
         },
         rootProject.fileTree("postgres"),

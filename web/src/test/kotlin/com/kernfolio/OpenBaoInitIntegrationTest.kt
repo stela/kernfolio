@@ -41,8 +41,8 @@ class OpenBaoInitIntegrationTest {
             "caddy" to mapOf("ca.pem" to CA, "caddy-client.pem" to "0:0 644", "caddy-client-key.pem" to "1000:0 600"),
             "optimizer" to mapOf(
                 "ca.pem" to CA,
-                "optimizer.pem" to "0:0 644", "optimizer-key.pem" to "10001:0 600",
-                "optimizer-client.pem" to "0:0 644", "optimizer-client-key.pem" to "10001:0 600",
+                "optimizer.pem" to "0:0 644", "optimizer-key.pem" to "65532:0 600",
+                "optimizer-client.pem" to "0:0 644", "optimizer-client-key.pem" to "65532:0 600",
             ),
             "postgres" to mapOf(
                 "ca.pem" to CA,
