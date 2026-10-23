@@ -26,9 +26,9 @@ class OptimizerClientConfig {
     @Bean
     fun optimizerWebClient(
         @Value("\${optimizer.base-url}") baseUrl: String,
-        @Value("\${vault.certs.ca:}") caPath: String,
-        @Value("\${vault.certs.cert:}") certPath: String,
-        @Value("\${vault.certs.key:}") keyPath: String,
+        @Value("\${openbao.certs.ca:}") caPath: String,
+        @Value("\${openbao.certs.cert:}") certPath: String,
+        @Value("\${openbao.certs.key:}") keyPath: String,
     ): WebClient {
         val builder = WebClient.builder()
             .baseUrl(baseUrl)

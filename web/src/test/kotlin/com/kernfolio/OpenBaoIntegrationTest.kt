@@ -7,21 +7,25 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.boot.health.contributor.HealthIndicator
+import org.springframework.boot.health.contributor.ReactiveHealthIndicator
+import org.springframework.boot.health.contributor.Status
+import org.springframework.context.ApplicationContext
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.core.env.Environment
 import org.springframework.mail.javamail.JavaMailSender
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
+import org.springframework.vault.core.VaultOperations
 import org.testcontainers.containers.Network
 import org.testcontainers.containers.PostgreSQLContainer
-import org.testcontainers.vault.VaultContainer
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import javax.sql.DataSource
 
-private const val VAULT_TOKEN = "test-root-token"
+private const val BAO_TOKEN = "test-root-token"
 
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.NONE,
@@ -31,10 +35,10 @@ private const val VAULT_TOKEN = "test-root-token"
         "spring.config.import=vault://",
     ],
 )
-class VaultProfileIntegrationTest {
-    // Vault is off by default for tests (see web/build.gradle.kts). This test
-    // is the one that exercises the real Vault integration, so it re-enables
-    // Vault and adds the vault:// config import that dev/prod profiles declare.
+class OpenBaoIntegrationTest {
+    // Spring Cloud Vault is off by default for tests (see web/build.gradle.kts).
+    // This test is the one that exercises the real OpenBao integration, so it
+    // re-enables it and adds the vault:// config import that dev/prod declare.
 
     companion object {
         private val network = Network.newNetwork()
@@ -45,42 +49,26 @@ class VaultProfileIntegrationTest {
             .withPassword("kernfolio")
             .withNetwork(network)
             .withNetworkAliases("postgres")
-            .withInitScript("vault-test-init.sql")
+            .withInitScript("openbao-test-init.sql")
 
         private val greenMail = GreenMail(ServerSetup(0, null, ServerSetup.PROTOCOL_SMTP))
 
-        // VaultContainer with init commands — uses the vault CLI inside the container
-        // to configure the database secrets engine (mirrors setup-db.sh)
-        private val vault = VaultContainer("hashicorp/vault:1.18")
-            .withVaultToken(VAULT_TOKEN)
+        private val openBao = OpenBaoContainer(BAO_TOKEN)
             .withNetwork(network)
-            .withNetworkAliases("vault")
-            .withInitCommand(
-                "secrets enable database",
-                """write database/config/kernfolio \
-                    plugin_name=postgresql-database-plugin \
-                    allowed_roles=app \
-                    connection_url="postgresql://{{username}}:{{password}}@postgres:5432/kernfolio?sslmode=disable" \
-                    username=kernfolio \
-                    password=kernfolio""",
-                """write database/roles/app \
-                    db_name=kernfolio \
-                    creation_statements="CREATE ROLE \"{{name}}\" WITH LOGIN PASSWORD '{{password}}' VALID UNTIL '{{expiration}}'; GRANT ALL ON SCHEMA public TO \"{{name}}\"; GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO \"{{name}}\"; GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO \"{{name}}\";" \
-                    revocation_statements="DROP ROLE IF EXISTS \"{{name}}\";" \
-                    default_ttl=1h max_ttl=24h""",
-            )
+            .withNetworkAliases("openbao")
 
         init {
             postgres.start()
             greenMail.start()
-            vault.start()
+            openBao.start()
+            configureDatabaseEngine()
 
-            // Set Vault connection properties as system properties — must be available
+            // Set OpenBao connection properties as system properties — must be available
             // before spring.config.import: vault:// triggers in the early bootstrap phase
-            System.setProperty("spring.cloud.vault.uri", "http://${vault.host}:${vault.firstMappedPort}")
-            System.setProperty("spring.cloud.vault.token", VAULT_TOKEN)
+            System.setProperty("spring.cloud.vault.uri", openBao.address)
+            System.setProperty("spring.cloud.vault.token", BAO_TOKEN)
 
-            // Generate dynamic DB credentials from Vault's database engine, then
+            // Generate dynamic DB credentials from OpenBao's database engine, then
             // write them (along with other secrets) into KV for Spring to consume.
             // spring.config.import: vault:// reads KV but not the database backend
             // directly, so we bridge the two.
@@ -103,18 +91,41 @@ class VaultProfileIntegrationTest {
                 "jdbc:postgresql://${postgres.host}:${postgres.firstMappedPort}/kernfolio"
             }
             // Disable SMTP auth for GreenMail (nested properties with dots
-            // don't map cleanly from Vault KV, so set them here directly)
+            // don't map cleanly from OpenBao KV, so set them here directly)
             registry.add("spring.mail.properties.mail.smtp.auth") { "false" }
             registry.add("spring.mail.properties.mail.smtp.starttls.enable") { "false" }
             registry.add("market-data.scheduler.enabled") { "false" }
             registry.add("optimizer.base-url") { "http://localhost:9999" }
         }
 
+        /** Mirrors openbao/init/setup-db.sh, minus the app_owner group role. */
+        private fun configureDatabaseEngine() {
+            openBao.bao("secrets", "enable", "database")
+            openBao.bao(
+                "write", "database/config/kernfolio",
+                "plugin_name=postgresql-database-plugin",
+                "allowed_roles=app",
+                "connection_url=postgresql://{{username}}:{{password}}@postgres:5432/kernfolio?sslmode=disable",
+                "username=kernfolio",
+                "password=kernfolio",
+            )
+            openBao.bao(
+                "write", "database/roles/app",
+                "db_name=kernfolio",
+                "creation_statements=CREATE ROLE \"{{name}}\" WITH LOGIN PASSWORD '{{password}}' VALID UNTIL '{{expiration}}'; " +
+                    "GRANT ALL ON SCHEMA public TO \"{{name}}\"; " +
+                    "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO \"{{name}}\"; " +
+                    "GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO \"{{name}}\";",
+                "revocation_statements=DROP ROLE IF EXISTS \"{{name}}\";",
+                "default_ttl=1h",
+                "max_ttl=24h",
+            )
+        }
+
         private fun generateDatabaseCredentials(): Pair<String, String> {
-            val vaultAddr = "http://${vault.host}:${vault.firstMappedPort}"
             val request = HttpRequest.newBuilder()
-                .uri(URI.create("$vaultAddr/v1/database/creds/app"))
-                .header("X-Vault-Token", VAULT_TOKEN)
+                .uri(URI.create("${openBao.address}/v1/database/creds/app"))
+                .header("X-Vault-Token", BAO_TOKEN)
                 .GET()
                 .build()
             val response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString())
@@ -126,11 +137,10 @@ class VaultProfileIntegrationTest {
         }
 
         private fun writeKvSecrets(dbUsername: String, dbPassword: String) {
-            val vaultAddr = "http://${vault.host}:${vault.firstMappedPort}"
             val smtpPort = greenMail.smtp.port
             val request = HttpRequest.newBuilder()
-                .uri(URI.create("$vaultAddr/v1/secret/data/kernfolio"))
-                .header("X-Vault-Token", VAULT_TOKEN)
+                .uri(URI.create("${openBao.address}/v1/secret/data/kernfolio"))
+                .header("X-Vault-Token", BAO_TOKEN)
                 .header("Content-Type", "application/json")
                 .POST(
                     HttpRequest.BodyPublishers.ofString(
@@ -166,27 +176,33 @@ class VaultProfileIntegrationTest {
     @Autowired
     lateinit var emailService: EmailService
 
+    @Autowired
+    lateinit var vaultOperations: VaultOperations
+
+    @Autowired
+    lateinit var applicationContext: ApplicationContext
+
     @Test
-    fun `application context loads with vault enabled`() {
+    fun `application context loads with OpenBao enabled`() {
         assertThat(environment.getProperty("spring.cloud.vault.enabled"))
             .isEqualTo("true")
     }
 
     @Test
-    fun `vault database credentials allow database access`() {
+    fun `OpenBao database credentials allow database access`() {
         dataSource.connection.use { conn ->
             conn.createStatement().use { stmt ->
                 val rs = stmt.executeQuery("SELECT current_user")
                 assertThat(rs.next()).isTrue()
                 val username = rs.getString(1)
-                // Vault database engine generates usernames with v-token-{role}- prefix
+                // The database engine generates usernames with v-token-{role}- prefix
                 assertThat(username).startsWith("v-token-app-")
             }
         }
     }
 
     @Test
-    fun `liquibase migrations run with vault-issued credentials`() {
+    fun `liquibase migrations run with OpenBao-issued credentials`() {
         dataSource.connection.use { conn ->
             val tables = conn.metaData.getTables(null, "public", "users", null)
             assertThat(tables.next()).isTrue()
@@ -202,7 +218,7 @@ class VaultProfileIntegrationTest {
     }
 
     @Test
-    fun `JavaMailSender is configured from vault SMTP secrets`() {
+    fun `JavaMailSender is configured from OpenBao SMTP secrets`() {
         assertThat(mailSender).isNotNull()
         val impl = mailSender as org.springframework.mail.javamail.JavaMailSenderImpl
         assertThat(impl.host).isEqualTo("localhost")
@@ -210,7 +226,7 @@ class VaultProfileIntegrationTest {
     }
 
     @Test
-    fun `invite code email is sent via vault-configured SMTP`() {
+    fun `invite code email is sent via OpenBao-configured SMTP`() {
         emailService.sendInviteCode("newuser@example.com", "ABCD1234", "http://localhost:8080")
 
         val messages = greenMail.receivedMessages
@@ -222,5 +238,26 @@ class VaultProfileIntegrationTest {
         val body = msg.content as String
         assertThat(body).contains("ABCD1234")
         assertThat(body).contains("http://localhost:8080/register")
+    }
+
+    // OpenBao 2.6 dropped `performance_standby` from GET /sys/health, and
+    // spring-vault-core <= 4.0.3 failed to deserialise the response
+    // (spring-projects/spring-vault#1048). These two guard against a downgrade.
+    @Test
+    fun `sys health response from OpenBao deserialises`() {
+        val health = vaultOperations.opsForSys().health()
+        assertThat(health.isInitialized).isTrue()
+        assertThat(health.isSealed).isFalse()
+        assertThat(health.isPerformanceStandby).isFalse()
+    }
+
+    @Test
+    fun `actuator health indicator reports OpenBao as up`() {
+        val status = when (val indicator = applicationContext.getBean("vaultHealthIndicator")) {
+            is HealthIndicator -> indicator.health()?.status
+            is ReactiveHealthIndicator -> indicator.health().block()?.status
+            else -> error("Unexpected health contributor type: ${indicator::class}")
+        }
+        assertThat(status).isEqualTo(Status.UP)
     }
 }

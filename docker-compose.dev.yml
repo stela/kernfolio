@@ -1,19 +1,18 @@
 services:
-  vault:
-    environment:
-      VAULT_DEV_ROOT_TOKEN_ID: "dev-root-token"
-      VAULT_DEV_LISTEN_ADDRESS: "0.0.0.0:8200"
-    command: vault server -dev
+  openbao:
+    # In-memory dev server. -config is deliberately not passed, so the Raft
+    # config mounted from openbao/config is ignored.
+    command: bao server -dev -dev-root-token-id=dev-root-token -dev-listen-address=0.0.0.0:8200
     ports:
       - "8200:8200"
 
-  vault-init:
+  openbao-init:
     environment:
-      VAULT_TOKEN: "dev-root-token"
+      BAO_TOKEN: "dev-root-token"
 
-  vault-db-init:
+  openbao-db-init:
     environment:
-      VAULT_TOKEN: "dev-root-token"
+      BAO_TOKEN: "dev-root-token"
 
   postgres:
     ports:
@@ -36,7 +35,7 @@ services:
       # `tls`: same mTLS-on-8443 listener as prod, reached via Caddy at
       # https://localhost. (A bare `dev` bootRun outside docker stays plain HTTP.)
       SPRING_PROFILES_ACTIVE: dev,tls
-      SPRING_CLOUD_VAULT_TOKEN: "dev-root-token"
+      SPRING_CLOUD_BAO_TOKEN: "dev-root-token"
       BPL_JVM_THREAD_COUNT: 50
       JAVA_TOOL_OPTIONS: "-Xmx192m -Xss512k -XX:MaxMetaspaceSize=128m -XX:ReservedCodeCacheSize=48m -XX:MaxDirectMemorySize=10m"
       # Diagnostics: surface Spring Security authentication decisions (bad

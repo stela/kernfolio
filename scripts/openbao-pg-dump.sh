@@ -1,22 +1,22 @@
 #!/bin/sh
-# Fetch one-time Vault DB credential and run pg_dump.
+# Fetch one-time OpenBao DB credential and run pg_dump.
 # The credential auto-expires after the configured TTL.
 set -e
 
-VAULT_ADDR="${VAULT_ADDR:-http://vault:8200}"
-VAULT_TOKEN="${VAULT_TOKEN:?VAULT_TOKEN is required}"
+BAO_ADDR="${BAO_ADDR:-http://openbao:8200}"
+BAO_TOKEN="${BAO_TOKEN:?BAO_TOKEN is required}"
 DB_HOST="${DB_HOST:-postgres}"
 DB_NAME="${DB_NAME:-kernfolio}"
 
-# Request dynamic credentials from Vault
-CRED=$(curl -s -H "X-Vault-Token: ${VAULT_TOKEN}" \
-  "${VAULT_ADDR}/v1/database/creds/app")
+# Request dynamic credentials from OpenBao (the API still uses the X-Vault-Token header)
+CRED=$(curl -s -H "X-Vault-Token: ${BAO_TOKEN}" \
+  "${BAO_ADDR}/v1/database/creds/app")
 
 DB_USER=$(echo "$CRED" | jq -r '.data.username')
 DB_PASS=$(echo "$CRED" | jq -r '.data.password')
 
 if [ -z "$DB_USER" ] || [ "$DB_USER" = "null" ]; then
-  echo "ERROR: Failed to get Vault DB credentials" >&2
+  echo "ERROR: Failed to get OpenBao DB credentials" >&2
   exit 1
 fi
 

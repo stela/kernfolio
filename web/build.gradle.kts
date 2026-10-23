@@ -44,7 +44,6 @@ dependencies {
     testImplementation("org.springframework.boot:spring-boot-testcontainers")
     testImplementation("org.seleniumhq.selenium:selenium-java:4.51.0")
     testImplementation("org.testcontainers:testcontainers-selenium")
-    testImplementation("org.testcontainers:testcontainers-vault")
     testImplementation("com.icegreen:greenmail-junit5:2.1.14")
     testRuntimeOnly("com.h2database:h2")
 }
@@ -81,10 +80,10 @@ tasks.named<BootBuildImage>("bootBuildImage") {
 
 tasks.withType<Test> {
     useJUnitPlatform()
-    // Vault is enabled by the dev and prod profiles (via spring.config.import
+    // OpenBao is wired in by the dev and prod profiles (via spring.config.import
     // in application-{dev,prod}.yml). Tests don't activate either profile, so
-    // they never trigger the Vault config loader. Explicitly disable the
-    // auto-config as well so Spring Cloud Vault beans are not created.
+    // they never trigger the Spring Cloud Vault config loader. Explicitly disable
+    // the auto-config as well so Spring Cloud Vault beans are not created.
     systemProperty("spring.cloud.vault.enabled", "false")
     systemProperty("spring.cloud.vault.config.lifecycle.enabled", "false")
 }

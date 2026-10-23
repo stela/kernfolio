@@ -29,9 +29,9 @@ cd optimizer && uv run pytest tests/test_optimize.py  # Single test file
 # non-BOM ones (currently just bouncycastle) are `constraints` in web/build.gradle.kts.
 # Re-check and delete them on every Spring Boot / Spring Cloud bump — a stale pin once held Jackson *below* the BOM.
 
-# Docker images (JVM images via bootBuildImage/Paketo; optimizer + vault-init + caddy via Dockerfile)
+# Docker images (JVM images via bootBuildImage/Paketo; optimizer + openbao-init + caddy via Dockerfile)
 ./gradlew :web:bootBuildImage              # just the web image (kernfolio-web:latest)
-./gradlew dockerBuild                      # production set: web + optimizer + vault-init + caddy
+./gradlew dockerBuild                      # production set: web + optimizer + openbao-init + caddy
 ./gradlew dockerBuildDev                   # dev set: above + yfinance-twin + frankfurter-twin
 
 # Tailwind CSS is built automatically during :web:processResources
@@ -68,7 +68,7 @@ cd optimizer && uv run pytest tests/test_optimize.py  # Single test file
 - **Nonce-based CSP**: `CspNonceFilter` generates a per-request nonce. Every `<script>` and `<link rel="stylesheet">` tag must include `nonce="${nonce}"`. CSP header: `script-src 'self' 'nonce-...'`. No `unsafe-eval` or `unsafe-inline`. All client-side JS must be in static `.js` files, never inline. Do not use JS frameworks that require `eval()` / `new Function()`.
 - **No dynamic data in HTML**: Never embed server data in HTML `data-*` attributes for JavaScript consumption. Use JSON API endpoints instead (XSS prevention). Chart JS files parse IDs from URL path via `ChartUtils.getIdsFromUrl()`.
 - **Privacy**: Backend never sees total portfolio value, share counts, or cash amounts. Only percentage weights.
-- **Vault** (mandatory): `spring-cloud-starter-vault-config:5.0.3` is always active via the default `vault` profile. Provides dynamic PostgreSQL credentials (Vault database engine, `app` role), KV v2 secrets under `secret/kernfolio`, and PKI-issued mTLS certificates for inter-service traffic. Dev stack uses `vault server -dev`; production uses file storage and requires operator init/unseal.
+- **OpenBao** (mandatory; the MPL-2.0 fork of HashiCorp Vault, `openbao/openbao:2.7.1`): reached through `spring-cloud-starter-vault-config:5.0.3`, always on via `application.yml` — the library, its `spring.cloud.vault.*` properties, `SPRING_CLOUD_VAULT_TOKEN`, the `vault://` import prefix and the `X-OpenBao-Token` header keep their OpenBao names, and OpenBao's API answers to them. Provides dynamic PostgreSQL credentials (database engine, `app` role), KV v2 secrets under `secret/kernfolio`, and PKI-issued mTLS certificates for inter-service traffic. Dev stack uses `bao server -dev`; production uses single-node Raft storage and requires operator init/unseal. OpenBao 2.7 removed the `file` storage backend, so don't reintroduce it. spring-vault-core must stay ≥ 4.0.4: OpenBao ≥ 2.6 omits `performance_standby` from `sys/health`, which older versions fail to deserialise (spring-vault#1048, guarded by `OpenBaoIntegrationTest`).
 
 ### Testing
 - **Unit tests**: MockK for mocking, no Spring context
@@ -84,9 +84,9 @@ cd optimizer && uv run pytest tests/test_optimize.py  # Single test file
 
 ### Running the Application
 
-Vault is always on. Vault connection, KV/database engine settings, and mTLS cert paths (`vault.certs.*`) are declared directly in `application.yml` — there is no separate `vault` profile. The `vault://` config imports and the datasource URL live in `application-dev.yml` / `application-prod.yml`; server-side TLS lives in `application-tls.yml`. Tests disable Vault via a Gradle `systemProperty` in `web/build.gradle.kts`; `VaultProfileIntegrationTest` opts back in via `@SpringBootTest(properties = ...)`.
+OpenBao is always on. OpenBao connection, KV/database engine settings, and mTLS cert paths (`openbao.certs.*`) are declared directly in `application.yml` — there is no separate `vault` profile. The `vault://` config imports and the datasource URL live in `application-dev.yml` / `application-prod.yml`; server-side TLS lives in `application-tls.yml`. Tests disable OpenBao via a Gradle `systemProperty` in `web/build.gradle.kts`; `OpenBaoIntegrationTest` opts back in via `@SpringBootTest(properties = ...)`.
 
-JVM images (`kernfolio-web`, `kernfolio-yfinance-twin`, `kernfolio-frankfurter-twin`) are produced by Spring Boot's `bootBuildImage` task (Paketo buildpacks) — the compose files reference them by tag, not by `build:` stanza. Non-JVM images (`optimizer`, `vault-init`, `caddy`) are still built from Dockerfiles via `docker compose build`. `./gradlew dockerBuild(Dev)` orchestrates both paths. `docker compose up` will *not* build missing JVM images; run the Gradle task first.
+JVM images (`kernfolio-web`, `kernfolio-yfinance-twin`, `kernfolio-frankfurter-twin`) are produced by Spring Boot's `bootBuildImage` task (Paketo buildpacks) — the compose files reference them by tag, not by `build:` stanza. Non-JVM images (`optimizer`, `openbao-init`, `caddy`) are still built from Dockerfiles via `docker compose build`. `./gradlew dockerBuild(Dev)` orchestrates both paths. `docker compose up` will *not* build missing JVM images; run the Gradle task first.
 
 **Development (full stack):**
 ```bash
@@ -94,21 +94,21 @@ JVM images (`kernfolio-web`, `kernfolio-yfinance-twin`, `kernfolio-frankfurter-t
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up
 # Browse to https://localhost  (Caddy's built-in CA — trust its root once, see README, or click through)
 ```
-Starts: Vault (dev mode, token `dev-root-token`, port 8200), vault-init (seeds secrets + PKI certs), PostgreSQL (5432), optimizer (8000), digital twins (8081, 8082), Caddy (443). web is **not** published — it serves mTLS on 8443 inside the compose network and is reached only through Caddy, same as prod. Spring profiles: `dev,tls` (via `SPRING_PROFILES_ACTIVE` in `docker-compose.dev.yml`). Dynamic DB credentials come from Vault's database engine; mTLS certs are issued by Vault PKI and shared via the `vault_agent_certs` volume.
+Starts: OpenBao (dev mode, token `dev-root-token`, port 8200), openbao-init (seeds secrets + PKI certs), PostgreSQL (5432), optimizer (8000), digital twins (8081, 8082), Caddy (443). web is **not** published — it serves mTLS on 8443 inside the compose network and is reached only through Caddy, same as prod. Spring profiles: `dev,tls` (via `SPRING_PROFILES_ACTIVE` in `docker-compose.dev.yml`). Dynamic DB credentials come from OpenBao's database engine; mTLS certs are issued by OpenBao PKI and shared via the `openbao_certs` volume.
 
 **Production:**
 ```bash
 ./gradlew dockerBuild
-VAULT_APP_TOKEN=<real-token> KERNFOLIO_DOMAIN=<public-hostname> docker compose up -d
+BAO_APP_TOKEN=<real-token> KERNFOLIO_DOMAIN=<public-hostname> docker compose up -d
 # Browse to https://<public-hostname> (ACME cert). Without KERNFOLIO_DOMAIN: https://localhost, Caddy's built-in CA.
 ```
-Uses `docker-compose.yml` only. Vault runs with file storage (persistent); the operator is responsible for initializing and unsealing it on first boot. Caddy terminates TLS on 443 (80 only redirects) and reverse-proxies to `https://web:8443` via mTLS. All inter-service communication is mTLS with Vault PKI-issued certificates. Spring profile: `prod`, which pulls in `tls` through `spring.profiles.group`.
+Uses `docker-compose.yml` only. OpenBao runs with single-node Raft storage (persistent); the operator is responsible for initializing and unsealing it on first boot. Caddy terminates TLS on 443 (80 only redirects) and reverse-proxies to `https://web:8443` via mTLS. All inter-service communication is mTLS with OpenBao PKI-issued certificates. Spring profile: `prod`, which pulls in `tls` through `spring.profiles.group`.
 
 **Runtime resource budget:** full dev stack runs in ~1.1 GiB steady-state RSS against ~2.4 GiB of `mem_limit`. The JVM services (web, twins) use explicit `JAVA_TOOL_OPTIONS` (e.g. `-Xmx192m -Xss512k -XX:MaxMetaspaceSize=128m -XX:ReservedCodeCacheSize=48m -XX:MaxDirectMemorySize=10m` for web) to suppress Paketo's chunky default reservations. See the README Quickstart table for per-service sizing.
 
-**Front door (Caddy → web):** Caddy is rebuilt from `caddy/Dockerfile` to run as uid 1000 with `cap_drop: ALL`; it listens on 8080/8443 and Docker publishes those as 80/443 (dev: 443 only, via `ports: !override`). The *external* cert is never from Vault — Vault's PKI is Ed25519, which browsers reject, and dev Vault regenerates its root on every restart. Instead `{$KERNFOLIO_DOMAIN:localhost}` gets ACME for a real domain or Caddy's built-in CA for `localhost` (root persisted in `caddy_data`). `Caddyfile.dev` strips HSTS, because HSTS is per host and would force https on every `localhost` port once the root is trusted. The *internal* hop uses Vault certs: Caddy presents `caddy-client.pem`, web serves `app.pem` (SANs `app`, `web`, `localhost`). `ClientCertCnFilter` answers 403 by setting the status directly — `sendError()` would ERROR-dispatch to `/error`, which Spring Security turns into a 302 to `/login`. `caddy validate` needs `/vault/certs` mounted (it loads the client key pair). The `caddy_data`/`caddy_config` volumes must be owned by uid 1000; ones created by the old root-running Caddy have to be removed once.
+**Front door (Caddy → web):** Caddy is rebuilt from `caddy/Dockerfile` to run as uid 1000 with `cap_drop: ALL`; it listens on 8080/8443 and Docker publishes those as 80/443 (dev: 443 only, via `ports: !override`). The *external* cert is never from OpenBao — OpenBao's PKI is Ed25519, which browsers reject, and dev OpenBao regenerates its root on every restart. Instead `{$KERNFOLIO_DOMAIN:localhost}` gets ACME for a real domain or Caddy's built-in CA for `localhost` (root persisted in `caddy_data`). `Caddyfile.dev` strips HSTS, because HSTS is per host and would force https on every `localhost` port once the root is trusted. The *internal* hop uses OpenBao certs: Caddy presents `caddy-client.pem`, web serves `app.pem` (SANs `app`, `web`, `localhost`). `ClientCertCnFilter` answers 403 by setting the status directly — `sendError()` would ERROR-dispatch to `/error`, which Spring Security turns into a 302 to `/login`. `caddy validate` needs `/openbao/certs` mounted (it loads the client key pair). The `caddy_data`/`caddy_config` volumes must be owned by uid 1000; ones created by the old root-running Caddy have to be removed once.
 
-**No HEALTHCHECK on JVM services:** Paketo's default tiny runtime (`run-noble-java-tiny`) is distroless-style — no shell, no wget/curl/nc. The compose DAG doesn't require those services to report healthy (caddy uses a plain `depends_on`). Postgres, Vault, and optimizer keep their working healthchecks.
+**No HEALTHCHECK on JVM services:** Paketo's default tiny runtime (`run-noble-java-tiny`) is distroless-style — no shell, no wget/curl/nc. The compose DAG doesn't require those services to report healthy (caddy uses a plain `depends_on`). Postgres, OpenBao, and optimizer keep their working healthchecks.
 
 **Profile summary:**
 | Profile | Purpose | Notes |
@@ -118,36 +118,36 @@ Uses `docker-compose.yml` only. Vault runs with file storage (persistent); the o
 | `tls` | Server-side mTLS for the Caddy → web hop (`application-tls.yml`). | Port 8443, `client-auth: need`, `ClientCertCnFilter` only admits `CN=caddy`, trusts `X-Forwarded-*`. Grouped into `prod`; listed next to `dev` in the dev compose overlay. Off in tests and bare `bootRun`; covered by `WebMtlsIntegrationTest`. |
 | `test` | `@SpringBootTest` with H2. | Disables Liquibase, scheduler; only used by `KernfolioApplicationTest`. |
 
-(Vault is not a profile — it's on by default in `application.yml`.)
+(OpenBao is not a profile — it's on by default in `application.yml`.)
 
-### Vault, PKI & database credentials
+### OpenBao, PKI & database credentials
 
-Vault is the origin for three separate classes of secret material, all seeded by the one-shot `vault-init` container running `vault/init/setup.sh`:
+OpenBao is the origin for three separate classes of secret material, all seeded by the one-shot `openbao-init` container running `openbao/init/setup.sh`:
 
 **PKI (two-tier chain):** root CA (`CN=Kernfolio Dev CA`) → intermediate CA (`CN=Kernfolio Dev Intermediate CA`) → leaf certs for each service (`app` — web's server cert, SANs `app,web,localhost`, plus its `app-client` identity towards the optimizer; `optimizer`; `caddy` — client-only, for the hop to web; `postgres`). All Ed25519: fine for Tomcat/JSSE, Netty, Go, OpenSSL — not for browsers. Leaf files on the volume are written as **leaf + intermediate bundled** so servers present a full chain at handshake; trust anchors only need `ca.pem` (root). Trying to trust only `ca.pem` without the intermediate bundled in the leaf file gives `PKIX path building failed: unable to find valid certification path to requested target`.
 
-`setup.sh` is **idempotent** about root and intermediate: it reads the existing cert first and only generates if absent. Regenerating unconditionally is a trap because Vault's `pki/root/generate/internal` **appends** a new issuer rather than overwriting, and `default` stays pinned to the first-ever root. Subsequent `sign-intermediate` calls then sign with the stale default while `ca.pem` on disk gets overwritten by the newer root — the chain fragments silently, and services see `PKIX path validation failed: Path does not chain with any of the trust anchors`. Leaf certs are re-issued every run (short-lived, cheap).
+`setup.sh` is **idempotent** about root and intermediate: it reads the existing cert first and only generates if absent. Regenerating unconditionally is a trap because OpenBao's `pki/root/generate/internal` **appends** a new issuer rather than overwriting, and `default` stays pinned to the first-ever root. Subsequent `sign-intermediate` calls then sign with the stale default while `ca.pem` on disk gets overwritten by the newer root — the chain fragments silently, and services see `PKIX path validation failed: Path does not chain with any of the trust anchors`. Leaf certs are re-issued every run (short-lived, cheap).
 
 **KV v2 secrets:** `secret/kernfolio` holds app-wide settings (SMTP, session signing key, admin email). Fetched at boot by Spring Cloud Vault. Values are hardcoded in `setup.sh` for dev; in prod they're operator-managed.
 
 **Database credentials (two-stage):**
-1. **Superuser password** is bootstrapped by vault-init into `/vault/certs/pg_root_password` on the `vault_agent_certs` volume. Postgres reads it via `POSTGRES_PASSWORD_FILE` at initdb time, and `vault-db-init` reads the same file to authenticate as superuser when wiring up the database engine. `setup.sh` **reuses** the existing password file if non-empty — critical for restart safety.
-2. **Dynamic app roles** are issued on demand by Vault's database engine (`database/roles/app`). Each role is a real Postgres role with a Vault-generated name (`v-token-app-<id>`) and a lease of `default_ttl=1h` / `max_ttl=24h`. Spring Cloud Vault renews until `max_ttl`, then must rotate to a new role. **Laptop sleep** crossing `max_ttl` kills rotation (JVM scheduler frozen while wall-clock advances past the revoke window) — symptom is `FATAL: password authentication failed for user "v-token-app-..."`; fix is `docker compose restart web`.
+1. **Superuser password** is bootstrapped by openbao-init into `/openbao/certs/pg_root_password` on the `openbao_certs` volume. Postgres reads it via `POSTGRES_PASSWORD_FILE` at initdb time, and `openbao-db-init` reads the same file to authenticate as superuser when wiring up the database engine. `setup.sh` **reuses** the existing password file if non-empty — critical for restart safety.
+2. **Dynamic app roles** are issued on demand by OpenBao's database engine (`database/roles/app`). Each role is a real Postgres role with an OpenBao-generated name (`v-token-app-<id>`) and a lease of `default_ttl=1h` / `max_ttl=24h`. Spring Cloud Vault renews until `max_ttl`, then must rotate to a new role. **Laptop sleep** crossing `max_ttl` kills rotation (JVM scheduler frozen while wall-clock advances past the revoke window) — symptom is `FATAL: password authentication failed for user "v-token-app-..."`; fix is `docker compose restart web`.
 
 **Volumes and what lives where:**
-- `vault_data`: Vault's storage (file-backed in prod; in dev mode this volume exists but Vault ignores it — state is in-memory).
-- `vault_agent_certs`: `ca.pem`, all issued leaf certs, and `pg_root_password`.
+- `openbao_data`: OpenBao's Raft storage, mounted at `/openbao/file` (the image pre-creates that dir owned by the `openbao` user; a fresh volume at a new path would be root-owned). In dev mode the volume exists but is ignored — state is in-memory.
+- `openbao_certs`: `ca.pem`, all issued leaf certs, and `pg_root_password`. Written by the init containers running as the non-root `openbao` user (uid 100). `openbao/init/Dockerfile` pre-creates `/openbao/certs` owned by that user, and Docker copies the ownership into a fresh volume on first mount. A volume first created by another container (e.g. a manual `docker run … cp`) ends up root-owned and the init scripts fail with `Permission denied` — `chown -R 100:1000` it.
 - `pgdata`: Postgres data directory, including the superuser password baked into the catalog at initdb time.
 
-**`vault_agent_certs` and `pgdata` are coupled**: the superuser password in `pgdata`'s catalog must equal the bytes in `pg_root_password`. Wiping one without wiping the other desyncs them — postgres boots with the old password while vault-init generates a fresh one, and `vault-db-init` then fails to authenticate as superuser so no dynamic app roles can ever be issued. If you must wipe one, wipe both, or reset the postgres superuser password in-place (start postgres alone, `docker exec -u postgres psql` via the `trust`-auth local socket in `pg_hba_mtls.conf`, `ALTER USER kernfolio PASSWORD '<same as the file>'`).
+**`openbao_certs` and `pgdata` are coupled**: the superuser password in `pgdata`'s catalog must equal the bytes in `pg_root_password`. Wiping one without wiping the other desyncs them — postgres boots with the old password while openbao-init generates a fresh one, and `openbao-db-init` then fails to authenticate as superuser so no dynamic app roles can ever be issued. If you must wipe one, wipe both, or reset the postgres superuser password in-place (start postgres alone, `docker exec -u postgres psql` via the `trust`-auth local socket in `pg_hba_mtls.conf`, `ALTER USER kernfolio PASSWORD '<same as the file>'`).
 
 **Dev vs. production differences:**
-- Dev (`docker-compose.dev.yml` overlay, `vault server -dev`): Vault state lives in memory, auto-unsealed, root token is `dev-root-token`. Any `docker compose restart vault` or `docker compose down` wipes PKI + KV + database engine config. Vault-init re-runs on next boot and re-seeds everything; because `setup.sh` is idempotent and reuses `pg_root_password` from the volume, a clean cycle is safe. Certs in `vault_agent_certs` persist across restarts and are reused.
-- Production (`docker-compose.yml` only, `vault server -config=/vault/config/vault.hcl`): Vault uses file storage (`vault_data` volume), persists across restarts, requires operator `vault operator init` + `vault operator unseal` on first boot. PKI + KV + database engine config survive restarts, so vault-init's idempotency guard short-circuits cleanly on re-runs.
+- Dev (`docker-compose.dev.yml` overlay, `bao server -dev`): OpenBao state lives in memory, auto-unsealed, root token is `dev-root-token`. Any `docker compose restart openbao` or `docker compose down` wipes PKI + KV + database engine config. OpenBao-init re-runs on next boot and re-seeds everything; because `setup.sh` is idempotent and reuses `pg_root_password` from the volume, a clean cycle is safe. Certs in `openbao_certs` persist across restarts and are reused.
+- Production (`docker-compose.yml` only, `bao server -config=/openbao/config/openbao.hcl`): OpenBao uses single-node Raft storage (`openbao_data` volume), persists across restarts, requires operator `bao operator init` + `bao operator unseal` on first boot (and unseal after every restart). PKI + KV + database engine config survive restarts, so openbao-init's idempotency guard short-circuits cleanly on re-runs.
 
-**Triaging a cert-related error after deploy:** compare container start times to volume file mtimes — any service started *before* the latest vault-init cert write is serving or trusting stale material.
+**Triaging a cert-related error after deploy:** compare container start times to volume file mtimes — any service started *before* the latest openbao-init cert write is serving or trusting stale material.
 ```bash
 docker inspect kernfolio-<svc>-1 --format '{{.State.StartedAt}}'
-docker run --rm -v kernfolio_vault_agent_certs:/v alpine stat -c '%y %n' /v/ca.pem /v/optimizer.pem
+docker run --rm -v kernfolio_openbao_certs:/v alpine stat -c '%y %n' /v/ca.pem /v/optimizer.pem
 ```
 If timestamps disagree, `docker compose restart <svc>` fixes it.

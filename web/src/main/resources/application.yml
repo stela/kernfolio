@@ -9,9 +9,11 @@ spring:
       prod: tls
 
   cloud:
+    # Spring Cloud Vault, pointed at OpenBao (same /v1 API). The library and
+    # its property names keep the "vault" name.
     vault:
       enabled: true
-      uri: ${VAULT_ADDR:http://localhost:8200}
+      uri: ${BAO_ADDR:http://localhost:8200}
       authentication: token
       token: ${SPRING_CLOUD_VAULT_TOKEN:dev-root-token}
       kv:
@@ -26,15 +28,15 @@ spring:
   liquibase:
     change-log: classpath:db/changelog/db.changelog-master.yaml
 
-# mTLS certificate paths (issued by Vault PKI, shared via the
-# vault_agent_certs docker volume). OptimizerClientConfig treats
+# mTLS certificate paths (issued by OpenBao PKI, shared via the
+# openbao_certs docker volume). OptimizerClientConfig treats
 # missing files as "no mTLS" and falls back to plain HTTP.
-vault:
+openbao:
   certs:
-    dir: /vault/certs
-    ca: ${vault.certs.dir}/ca.pem
-    cert: ${vault.certs.dir}/app-client.pem
-    key: ${vault.certs.dir}/app-client-key.pem
+    dir: /openbao/certs
+    ca: ${openbao.certs.dir}/ca.pem
+    cert: ${openbao.certs.dir}/app-client.pem
+    key: ${openbao.certs.dir}/app-client-key.pem
 
 gg:
   jte:

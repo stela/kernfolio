@@ -1155,6 +1155,8 @@ All inter-service communication uses mutual TLS. Vault's PKI engine issues short
 
 ### 12.2 Docker Compose
 
+> **Superseded:** HashiCorp Vault has since been replaced by OpenBao (`openbao/openbao`, single-node Raft storage, `bao` CLI, services `openbao`/`openbao-init`/`openbao-db-init`). The snippet below is the original design; `docker-compose.yml` is authoritative.
+
 ```yaml
 services:
   vault:

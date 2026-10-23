@@ -4,7 +4,7 @@ import os
 
 import uvicorn
 
-CERT_DIR = os.getenv("VAULT_CERT_DIR", "/vault/certs")
+CERT_DIR = os.getenv("OPENBAO_CERT_DIR", "/openbao/certs")
 
 ssl_kwargs = {}
 cert_file = os.path.join(CERT_DIR, "optimizer.pem")

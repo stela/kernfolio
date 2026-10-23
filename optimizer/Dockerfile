@@ -34,7 +34,7 @@ ENV PATH="/opt/optimizer/.venv/bin:$PATH"
 
 EXPOSE 8000
 
-# run_mtls.py enables TLS when Vault-issued certs are mounted at /vault/certs
+# run_mtls.py enables TLS when OpenBao-issued certs are mounted at /openbao/certs
 # (always the case in this stack). Plain `uvicorn …` would leave the server
 # on HTTP while the web client dials https://optimizer:8000.
 CMD ["python", "run_mtls.py"]

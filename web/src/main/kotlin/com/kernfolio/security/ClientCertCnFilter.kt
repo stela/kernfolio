@@ -14,7 +14,7 @@ import java.security.cert.X509Certificate
 import javax.naming.ldap.LdapName
 
 /**
- * Narrows `server.ssl.client-auth: need` from "any cert issued by the Vault
+ * Narrows `server.ssl.client-auth: need` from "any cert issued by the OpenBao
  * CA" (which includes the optimizer's and postgres's) to the reverse proxy
  * alone. Not Spring Security's x509() on purpose: that would authenticate
  * every request as a pre-authenticated "caddy" principal and bypass form login.

@@ -5,4 +5,4 @@
 **/node_modules
 **/__pycache__
 optimizer/.venv
-vault/data
+openbao/data
