@@ -14,7 +14,6 @@ dependencies = [
     "cvxpy>=1.8",
     "yfinance>=0.2.40",
     "httpx2>=2.13",
-    "hvac>=2.3",
     "packaging>=24.0",
 ]
 
