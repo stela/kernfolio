@@ -86,4 +86,16 @@ tasks.withType<Test> {
     // the auto-config as well so Spring Cloud Vault beans are not created.
     systemProperty("spring.cloud.vault.enabled", "false")
     systemProperty("spring.cloud.vault.config.lifecycle.enabled", "false")
+    // The mTLS integration tests run repo files from outside this module: the
+    // optimizer image, the postgres TLS config and compose's optimizer
+    // healthcheck. Declare them so edits there re-run the tests instead of
+    // leaving a stale up-to-date result.
+    inputs.files(
+        rootProject.fileTree("optimizer") {
+            include("Dockerfile", "pyproject.toml", "uv.lock", "run_mtls.py", "app/**")
+            exclude("**/__pycache__/**")
+        },
+        rootProject.fileTree("postgres"),
+        rootProject.file("docker-compose.yml"),
+    ).withPropertyName("repoFilesUnderTest").withPathSensitivity(PathSensitivity.RELATIVE)
 }
