@@ -21,7 +21,7 @@ Each run reports expected return, volatility, Sharpe ratio, 95 % CVaR and the ca
 
 | Module | Stack | Purpose |
 | --- | --- | --- |
-| `web/` | Kotlin 2.4.20 / Spring Boot 4.1.1 / Java 25, JTE + vanilla JS + Chart.js | Server-rendered UI, PostgreSQL persistence, auth, feature flags |
+| `web/` | Kotlin 2.4.21 / Spring Boot 4.1.2 / Java 25, JTE + vanilla JS + Chart.js | Server-rendered UI, PostgreSQL persistence, auth, feature flags |
 | `optimizer/` | Python 3.14+ / FastAPI | Stateless math and market-data microservice (`/optimize`, `/fetch-prices`, `/fetch-fx-rates`, `/search-tickers`) |
 | `digital-twins/` | Spring Boot | Fake yfinance & Frankfurter APIs for local development |
 | `vault/`, `postgres/`, `scripts/` | HashiCorp Vault 1.19 + Postgres 18 config | Dynamic DB credentials, mTLS PKI, ops scripts |

@@ -9,7 +9,7 @@ plugins {
 }
 
 dependencies {
-    implementation("org.springframework.cloud:spring-cloud-starter-vault-config:5.0.2")
+    implementation("org.springframework.cloud:spring-cloud-starter-vault-config:5.0.3")
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.boot:spring-boot-starter-data-jdbc")
     implementation("org.springframework.boot:spring-boot-starter-security")
@@ -29,12 +29,7 @@ dependencies {
 
     constraints {
         implementation("org.bouncycastle:bcprov-jdk18on:1.86") {
-            because("spring-cloud-starter 5.0.2 pulls 1.81.1, which has known CVEs; drop once Spring Cloud catches up")
-        }
-        listOf("spring-cloud-context", "spring-cloud-commons").forEach {
-            implementation("org.springframework.cloud:$it:5.0.3") {
-                because("CVE-2026-59284 in 5.0.2; drop once spring-cloud-starter-vault-config 5.0.3 is out")
-            }
+            because("spring-cloud-starter 5.0.4 still pulls 1.85.2, which has known CVEs; drop once Spring Cloud catches up")
         }
     }
 
@@ -42,15 +37,15 @@ dependencies {
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.security:spring-security-test")
-    testImplementation("io.mockk:mockk:1.14.9")
-    testImplementation("org.wiremock:wiremock-standalone:3.13.0")
+    testImplementation("io.mockk:mockk:1.14.11")
+    testImplementation("org.wiremock:wiremock-standalone:3.13.2")
     testImplementation("org.testcontainers:testcontainers-junit-jupiter")
     testImplementation("org.testcontainers:testcontainers-postgresql")
     testImplementation("org.springframework.boot:spring-boot-testcontainers")
-    testImplementation("org.seleniumhq.selenium:selenium-java:4.33.0")
+    testImplementation("org.seleniumhq.selenium:selenium-java:4.51.0")
     testImplementation("org.testcontainers:testcontainers-selenium")
     testImplementation("org.testcontainers:testcontainers-vault")
-    testImplementation("com.icegreen:greenmail-junit5:2.1.3")
+    testImplementation("com.icegreen:greenmail-junit5:2.1.14")
     testRuntimeOnly("com.h2database:h2")
 }
 
