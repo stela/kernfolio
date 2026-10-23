@@ -18,6 +18,14 @@ COPY app/ app/
 RUN uv sync --frozen --no-editable
 
 FROM python:3.14-slim
+# Every CPython 3.14 distribution (the official image, uv-managed Python)
+# preinstalls pip; there is no pip-free 3.14 base. The app runs from the
+# uv-built venv and never needs pip, so drop it along with the libraries it
+# vendors (urllib3, msgpack), which scanners flag but nothing at runtime uses.
+RUN rm -rf /usr/local/lib/python3.14/site-packages/pip \
+           /usr/local/lib/python3.14/site-packages/pip-*.dist-info \
+           /usr/local/lib/python3.14/ensurepip/_bundled \
+           /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.14
 WORKDIR /opt/optimizer
 COPY --from=build /opt/optimizer/.venv /opt/optimizer/.venv
 COPY app/ app/
