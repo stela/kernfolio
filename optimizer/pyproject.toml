@@ -29,3 +29,10 @@ constraint-dependencies = ["starlette>=1.3.1"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Deprecations (e.g. pandas' PDEP-8 inplace removal) and solves that only
+# reach reduced accuracy fail the suite instead of scrolling past.
+filterwarnings = [
+    "error::DeprecationWarning",
+    "error::FutureWarning",
+    "error:Solution may be inaccurate:UserWarning",
+]

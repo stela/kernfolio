@@ -327,6 +327,23 @@ def test_kelly_bearish_views_move_to_cash():
     assert data["metrics"]["annual_volatility"] < 0.02
 
 
+def test_frontier_is_complete_when_views_make_every_return_negative():
+    # Bearish views leave all three expected returns negative and within
+    # ~0.07 pp of each other. The frontier used to aim its top target at
+    # max_ret * 0.999, which is *above* the maximum for negative returns,
+    # and OSQP/Clarabel stalled on the nearly degenerate interior points:
+    # 14 of 50 points were silently dropped.
+    bearish = {"A": -0.10, "B": -0.10, "C": -0.10}
+    data = _optimize(_correlated_request(0.3, bearish, {"A": 0.05, "B": 0.05, "C": 0.05}))
+    frontier = data["efficient_frontier"]
+    assert len(frontier) == 50
+    returns = [p["return"] for p in frontier]
+    risks = [p["risk"] for p in frontier]
+    assert all(r < 0 for r in returns)
+    assert returns == sorted(returns)
+    assert risks == sorted(risks)
+
+
 def test_tight_view_spread_outweighs_the_market_and_wide_one_does_not():
     views = {"A": 0.30}
     tight = _optimize(_correlated_request(0.0, views, {"A": 0.05}))

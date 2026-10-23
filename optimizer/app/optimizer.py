@@ -1,6 +1,8 @@
 """Black-Litterman views + fractional-Kelly sizing."""
 
+import logging
 import time
+import warnings
 
 import cvxpy as cp
 import numpy as np
@@ -14,6 +16,18 @@ from app.schemas import (
     OptimizeRequest,
     OptimizeResponse,
 )
+
+log = logging.getLogger(__name__)
+
+# Clarabel (interior point, ships with cvxpy) rather than cvxpy's default for
+# QPs, OSQP: OSQP's loose first-order tolerances returned optimal_inaccurate or
+# hit its iteration limit on ~2% of frontier solves (worst near the frontier's
+# ends), and those points were silently dropped. Clarabel in turn can stall on
+# near-degenerate problems (e.g. views making all expected returns almost
+# equal); HiGHS (active set, also shipped with cvxpy) solves those exactly but
+# is far slower in general, so it is only the fallback.
+SOLVER = cp.CLARABEL
+FALLBACK_SOLVER = cp.HIGHS
 
 
 def _build_prices_dataframe(
@@ -110,9 +124,17 @@ def _run_kelly(
         objective,
         [cp.sum(w) <= budget, w >= constraints.min_weight, w <= constraints.max_weight],
     )
-    problem.solve()
-    if w.value is None or problem.status not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
-        raise ValueError(f"Kelly sizing failed (solver status: {problem.status})")
+    for solver in (SOLVER, FALLBACK_SOLVER):
+        try:
+            problem.solve(solver=solver)
+        except cp.SolverError:
+            continue
+        if problem.status == cp.OPTIMAL and w.value is not None:
+            break
+    else:
+        if problem.status != cp.OPTIMAL_INACCURATE or w.value is None:
+            raise ValueError(f"Kelly sizing failed (solver status: {problem.status})")
+        log.warning("Kelly sizing solved only to reduced accuracy")
 
     # Same clean-up pypfopt's clean_weights() applies: drop solver dust.
     return {t: (0.0 if abs(v) < 1e-4 else float(v)) for t, v in zip(tickers, w.value)}
@@ -146,47 +168,53 @@ def _compute_frontier_points(
     """
     if len(expected_returns) * constraints.max_weight < 1.0:
         return []
-    # Find return range
-    ef_min = EfficientFrontier(
-        expected_returns,
-        cov_matrix,
-        weight_bounds=(constraints.min_weight, constraints.max_weight),
-    )
+
+    def frontier(solver: str = SOLVER) -> EfficientFrontier:
+        return EfficientFrontier(
+            expected_returns,
+            cov_matrix,
+            weight_bounds=(constraints.min_weight, constraints.max_weight),
+            solver=solver,
+        )
+
+    def point(ef: EfficientFrontier) -> tuple[float, FrontierPoint]:
+        ret, risk, _ = ef.portfolio_performance(verbose=False, risk_free_rate=risk_free_rate)
+        return ret, FrontierPoint(risk=round(risk, 6), ret=round(ret, 6))
+
+    # Both ends are portfolios in their own right: minimum volatility, and
+    # maximum return (a negligible risk penalty breaks ties). They're used
+    # as-is rather than re-solved as efficient_return targets: a target at the
+    # very edge of what the bounds allow is barely feasible, and the old
+    # `max_ret * 0.999` pulled the target *outside* that range whenever views
+    # made the maximum return negative.
+    ef_min = frontier()
     ef_min.min_volatility()
-    min_perf = ef_min.portfolio_performance(verbose=False, risk_free_rate=risk_free_rate)
-    min_ret = min_perf[0]
+    min_ret, low = point(ef_min)
+    ef_max = frontier()
+    ef_max.max_quadratic_utility(risk_aversion=0.0001)
+    max_ret, high = point(ef_max)
+    if max_ret - min_ret <= 1e-9:
+        return [low]  # the bounds leave a single efficient portfolio
 
-    # Find the maximum feasible return (maximize return ignoring risk)
-    ef_max_ret = EfficientFrontier(
-        expected_returns,
-        cov_matrix,
-        weight_bounds=(constraints.min_weight, constraints.max_weight),
-    )
-    ef_max_ret.max_quadratic_utility(risk_aversion=0.0001)
-    max_perf = ef_max_ret.portfolio_performance(verbose=False, risk_free_rate=risk_free_rate)
-    max_ret = max_perf[0]
-
-    # Slightly shrink upper bound to stay within feasible region
-    target_returns = np.linspace(min_ret, max_ret * 0.999, n_points)
-
-    points: list[FrontierPoint] = []
-    for target in target_returns:
-        try:
-            ef = EfficientFrontier(
-                expected_returns,
-                cov_matrix,
-                weight_bounds=(constraints.min_weight, constraints.max_weight),
-            )
-            ef.efficient_return(target)
-            perf = ef.portfolio_performance(
-                verbose=False, risk_free_rate=risk_free_rate
-            )
-            points.append(
-                FrontierPoint(risk=round(perf[1], 6), ret=round(perf[0], 6))
-            )
-        except Exception:
-            continue
-
+    points = [low]
+    failed = 0
+    for target in np.linspace(min_ret, max_ret, n_points)[1:-1]:
+        for solver in (SOLVER, FALLBACK_SOLVER):
+            ef = frontier(solver)
+            try:
+                # pypfopt only warns on optimal_inaccurate; treat it as a failure.
+                with warnings.catch_warnings():
+                    warnings.filterwarnings("error", "Solution may be inaccurate")
+                    ef.efficient_return(target)
+                points.append(point(ef)[1])
+                break
+            except Exception:
+                continue
+        else:
+            failed += 1
+    points.append(high)
+    if failed:
+        log.warning("Efficient frontier: %d of %d interior points failed to solve", failed, n_points - 2)
     return points
 
 
