@@ -4,10 +4,9 @@ set -e
 export BAO_ADDR="${BAO_ADDR:-http://openbao:8200}"
 export BAO_TOKEN="${BAO_TOKEN:-dev-root-token}"
 
-# Postgres superuser password. Materialized by openbao-init onto the
-# openbao_certs volume at /openbao/certs/pg_root_password. Postgres reads
-# the same file via POSTGRES_PASSWORD_FILE, so both sides see identical
-# bytes without the value ever leaving the volume.
+# Postgres superuser password. openbao-init writes it into this container's
+# volume (certs_openbao) and, identically, into postgres's (certs_postgres),
+# where postgres reads it via POSTGRES_PASSWORD_FILE.
 PG_ROOT_PASSWORD_FILE="${PG_ROOT_PASSWORD_FILE:-/openbao/certs/pg_root_password}"
 if [ ! -s "${PG_ROOT_PASSWORD_FILE}" ]; then
     echo "ERROR: ${PG_ROOT_PASSWORD_FILE} missing or empty." >&2
@@ -59,7 +58,7 @@ echo "=== Enabling database secrets engine ==="
 bao secrets enable database 2>/dev/null || true
 
 # The OpenBao server opens this connection itself, so the cert paths are in
-# the openbao container (it mounts openbao_certs read-only). channel_binding:
+# the openbao container (it mounts certs_openbao read-only). channel_binding:
 # see PGCHANNELBINDING above; pgx would otherwise attempt SCRAM-SHA-256-PLUS.
 # username_template pins the `v-token-app-` prefix that pg_hba_mtls.conf
 # matches on; the default template would change it with the auth method.

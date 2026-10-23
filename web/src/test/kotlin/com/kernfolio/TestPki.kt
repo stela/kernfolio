@@ -13,8 +13,8 @@ import java.nio.file.attribute.PosixFilePermissions
 /**
  * Certificates for the mTLS integration tests, issued by a real OpenBao PKI set
  * up like openbao/init/setup.sh: two-tier, Ed25519, each leaf file bundled with
- * its intermediate. File names match the openbao_certs volume, so [dir] can
- * stand in for /openbao/certs.
+ * its intermediate. File names match the certs_* volumes; they're all in one
+ * dir here, so [dir] can stand in for any service's /openbao/certs.
  *
  * `foreign-client` comes from an unrelated root CA (CN `app`, like the real
  * app cert) for "wrong CA" negative tests.

@@ -61,7 +61,7 @@ class OpenBaoIntegrationTest {
             .withNetwork(network)
             .withNetworkAliases("openbao")
             .apply {
-                // As the compose openbao service mounts openbao_certs. On the volume
+                // As the compose openbao service mounts certs_openbao. On the volume
                 // the key is openbao-owned 0600; this root-owned copy is 0644 so the
                 // `openbao` user can read it (pgx doesn't check permissions).
                 for (file in listOf("ca.pem", "postgres-admin-client.pem", "postgres-admin-client-key.pem")) {

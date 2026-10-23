@@ -27,7 +27,7 @@ export PGSSLMODE=verify-full
 export PGSSLROOTCERT="$CERT_DIR/ca.pem"
 export PGSSLCERT="$CERT_DIR/app-client.pem"
 # The key belongs to web's uid (0600), so run this as root in a container that
-# mounts openbao_certs. libpq wants the key owned by the current user, hence
+# mounts certs_web. libpq wants the key owned by the current user, hence
 # a private copy.
 PGSSLKEY="$(mktemp)"
 trap 'rm -f "$PGSSLKEY"' EXIT

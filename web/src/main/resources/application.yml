@@ -30,8 +30,8 @@ spring:
   liquibase:
     change-log: classpath:db/changelog/db.changelog-master.yaml
 
-# mTLS certificate paths (issued by OpenBao PKI, shared via the
-# openbao_certs docker volume). OptimizerClientConfig treats
+# mTLS certificate paths (issued by OpenBao PKI, in web's own
+# certs_web docker volume). OptimizerClientConfig treats
 # missing files as "no mTLS" and falls back to plain HTTP.
 openbao:
   certs:

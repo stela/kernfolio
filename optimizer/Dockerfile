@@ -36,7 +36,10 @@ ENV PATH="/opt/optimizer/.venv/bin:$PATH"
 # private keys are given to uid 10001 by openbao/init/setup.sh. The home dir is
 # for yfinance's tz/cookie cache.
 RUN groupadd --system --gid 10001 optimizer \
-    && useradd --system --uid 10001 --gid optimizer --create-home --shell /usr/sbin/nologin optimizer
+    && useradd --system --uid 10001 --gid optimizer --create-home --shell /usr/sbin/nologin optimizer \
+    # No setuid/setgid binaries (su, passwd, mount, ...): nothing in here may
+    # become root. Compose's no-new-privileges blocks them too.
+    && find / -xdev -perm /6000 -type f -exec chmod a-s {} +
 USER optimizer
 
 EXPOSE 8000

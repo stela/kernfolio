@@ -5,6 +5,6 @@ FROM openbao/openbao:2.7.1
 USER root
 RUN apk add --no-cache jq postgresql18-client
 # Back to the unprivileged default; compose picks each container's user:
-# openbao-init needs root (with only CAP_CHOWN) to give every key on the
-# openbao_certs volume to its service, openbao-db-init runs as openbao.
+# openbao-init needs root (with only CHOWN + DAC_READ_SEARCH) to give every
+# key in the certs_* volumes to its service; openbao-db-init runs as openbao.
 USER openbao
