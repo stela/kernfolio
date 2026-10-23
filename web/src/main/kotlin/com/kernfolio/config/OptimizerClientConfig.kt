@@ -38,12 +38,12 @@ class OptimizerClientConfig {
         if (caPath.isNotBlank() && File(caPath).exists()) {
             log.info("Configuring mTLS for optimizer WebClient")
             val caFile = File(caPath)
-            val cert = loadCertificate(File(certPath))
+            val certChain = loadCertificateChain(File(certPath))
             val key = loadPrivateKey(File(keyPath))
 
             val sslContext = SslContextBuilder.forClient()
                 .trustManager(caFile)
-                .keyManager(key, cert)
+                .keyManager(key, *certChain)
                 .build()
 
             val httpClient = HttpClient.create()
@@ -57,9 +57,16 @@ class OptimizerClientConfig {
         return builder.build()
     }
 
-    private fun loadCertificate(file: File): X509Certificate =
-        file.inputStream().use {
-            CertificateFactory.getInstance("X.509").generateCertificate(it) as X509Certificate
+    /**
+     * Leaf plus intermediate, as OpenBao-issued cert files are bundled. The
+     * optimizer only trusts the root CA, so sending just the leaf (what
+     * `generateCertificate` would read) fails its client-cert check.
+     */
+    private fun loadCertificateChain(file: File): Array<X509Certificate> =
+        file.inputStream().use { input ->
+            CertificateFactory.getInstance("X.509").generateCertificates(input)
+                .map { it as X509Certificate }
+                .toTypedArray()
         }
 
     private fun loadPrivateKey(file: File): PrivateKey {

@@ -89,8 +89,9 @@ services:
       - openbao_certs:/openbao/certs:ro
     healthcheck:
       # python:3.14-slim has no curl/wget. Verifies the server cert against the
-      # OpenBao CA (optimizer.pem carries a `localhost` SAN).
-      test: ["CMD", "python", "-c", "import ssl, urllib.request; urllib.request.urlopen('https://localhost:8000/health', context=ssl.create_default_context(cafile='/openbao/certs/ca.pem'), timeout=5)"]
+      # OpenBao CA (optimizer.pem carries a `localhost` SAN) and presents a
+      # client cert, which the server requires (run_mtls.py).
+      test: ["CMD", "python", "-c", "import ssl, urllib.request; c = ssl.create_default_context(cafile='/openbao/certs/ca.pem'); c.load_cert_chain('/openbao/certs/optimizer-client.pem', '/openbao/certs/optimizer-client-key.pem'); urllib.request.urlopen('https://localhost:8000/health', context=c, timeout=5)"]
       interval: 30s
       timeout: 10s
       retries: 3
