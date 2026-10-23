@@ -3,13 +3,16 @@
 # The credential auto-expires after the configured TTL.
 set -e
 
-BAO_ADDR="${BAO_ADDR:-http://openbao:8200}"
+BAO_ADDR="${BAO_ADDR:-https://openbao:8200}"
 BAO_TOKEN="${BAO_TOKEN:?BAO_TOKEN is required}"
 DB_HOST="${DB_HOST:-postgres}"
 DB_NAME="${DB_NAME:-kernfolio}"
 
-# Request dynamic credentials from OpenBao (the API still uses the X-Vault-Token header)
-CRED=$(curl -s -H "X-Vault-Token: ${BAO_TOKEN}" \
+CERT_DIR="${OPENBAO_CERT_DIR:-/openbao/certs}"
+
+# Request dynamic credentials from OpenBao (the API still uses the X-Vault-Token
+# header). Its listener cert chains to openbao-ca.pem (openbao/init/setup-tls.sh).
+CRED=$(curl -sS --cacert "$CERT_DIR/openbao-ca.pem" -H "X-Vault-Token: ${BAO_TOKEN}" \
   "${BAO_ADDR}/v1/database/creds/app")
 
 DB_USER=$(echo "$CRED" | jq -r '.data.username')
@@ -22,7 +25,6 @@ fi
 
 # Postgres only accepts mTLS (postgres/pg_hba_mtls.conf). Dynamic app roles
 # need any client cert from the OpenBao CA; use the app's.
-CERT_DIR="${OPENBAO_CERT_DIR:-/openbao/certs}"
 export PGSSLMODE=verify-full
 export PGSSLROOTCERT="$CERT_DIR/ca.pem"
 export PGSSLCERT="$CERT_DIR/app-client.pem"

@@ -9,8 +9,9 @@ import java.nio.file.Path
 /**
  * Guards the container isolation in docker-compose.yml (+ the dev overlay):
  * every service drops all capabilities and can't gain privileges, each one
- * mounts only its own certs volume, and the uids it runs as are the ones
- * openbao/init/setup.sh gives the private keys to.
+ * mounts only its own certs volume, the uids it runs as are the ones
+ * openbao/init/common.sh gives the private keys to, and every OpenBao client
+ * reaches OpenBao over TLS.
  */
 class ComposeHardeningTest {
 
@@ -27,16 +28,19 @@ class ComposeHardeningTest {
     /**
      * Base services with the dev overlay merged on top, plus overlay-only
      * services. Like compose: keys are replaced, except `volumes`, which merge
-     * by mount target.
+     * by mount target, and `environment`, which merges by variable.
      */
     private val allServices: Map<String, Map<String, Any?>> by lazy {
         val base = services("docker-compose.yml")
         val dev = services("docker-compose.dev.yml")
         (base.keys + dev.keys).associateWith { name ->
-            val merged = base[name].orEmpty() + dev[name].orEmpty()
+            var merged = base[name].orEmpty() + dev[name].orEmpty()
             val volumes = (base[name].orEmpty().strings("volumes") + dev[name].orEmpty().strings("volumes"))
                 .associateBy { it.split(':')[1] }.values.toList()
-            if (volumes.isEmpty()) merged else merged + ("volumes" to volumes)
+            if (volumes.isNotEmpty()) merged = merged + ("volumes" to volumes)
+            val environment = base[name].orEmpty().environment() + dev[name].orEmpty().environment()
+            if (environment.isNotEmpty()) merged = merged + ("environment" to environment)
+            merged
         }
     }
 
@@ -44,7 +48,7 @@ class ComposeHardeningTest {
         (this[key] as List<*>?).orEmpty().map { it.toString() }
 
     private val setupUids: Map<String, String> by lazy {
-        val script = Files.readString(repo.resolve("openbao/init/setup.sh"))
+        val script = Files.readString(repo.resolve("openbao/init/common.sh"))
         Regex("""^([A-Z]+)_UID=(\d+)""", RegexOption.MULTILINE).findAll(script)
             .associate { it.groupValues[1] to it.groupValues[2] }
     }
@@ -59,8 +63,9 @@ class ComposeHardeningTest {
     }
 
     @Test
-    fun `only openbao-init and postgres add capabilities back, and only what they need`() {
+    fun `only the init containers and postgres add capabilities back, and only what they need`() {
         val expected = mapOf(
+            "openbao-tls-init" to listOf("CHOWN", "DAC_READ_SEARCH"),
             "openbao-init" to listOf("CHOWN", "DAC_READ_SEARCH"),
             "postgres" to listOf("CHOWN", "DAC_READ_SEARCH", "FOWNER", "SETUID", "SETGID"),
         )
@@ -79,6 +84,11 @@ class ComposeHardeningTest {
         assertThat(certsMounts).isEqualTo(
             mapOf(
                 "openbao" to listOf("certs_openbao:/openbao/certs:ro"),
+                // Writes OpenBao's listener cert, and its trust anchor for web.
+                "openbao-tls-init" to listOf(
+                    "certs_openbao:/openbao/certs/openbao",
+                    "certs_web:/openbao/certs/web",
+                ),
                 "openbao-init" to listOf(
                     "certs_web:/openbao/certs/web",
                     "certs_caddy:/openbao/certs/caddy",
@@ -96,7 +106,7 @@ class ComposeHardeningTest {
     }
 
     @Test
-    fun `services run as the uids setup_sh gives their keys to`() {
+    fun `services run as the uids common_sh gives their keys to`() {
         // postgres has no `user:`: the image starts as root and drops to 70 itself.
         val expected = mapOf(
             "web" to "WEB", "caddy" to "CADDY", "optimizer" to "OPTIMIZER",
@@ -107,5 +117,35 @@ class ComposeHardeningTest {
             assertThat(uid).describedAs("$service user").isEqualTo(setupUids.getValue(uidName))
         }
         assertThat(setupUids["POSTGRES"]).isEqualTo("70")
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun Map<String, Any?>.environment(): Map<String, String> =
+        (this["environment"] as Map<String, Any?>?).orEmpty().mapValues { it.value.toString() }
+
+    @Test
+    fun `every OpenBao client uses https and names the listener's trust anchor`() {
+        val clients = allServices.filterValues { "BAO_ADDR" in it.environment() }
+        assertThat(clients.keys).contains("openbao", "openbao-init", "openbao-db-init", "web")
+        for ((name, service) in clients) {
+            val env = service.environment()
+            assertThat(env.getValue("BAO_ADDR")).describedAs("$name BAO_ADDR").startsWith("https://")
+            // web trusts it through spring.cloud.vault.ssl.trust-store instead.
+            if (name != "web") {
+                assertThat(env["BAO_CACERT"]).describedAs("$name BAO_CACERT").endsWith("/openbao-ca.pem")
+            }
+        }
+    }
+
+    @Test
+    fun `openbao serves listener_hcl in prod and dev, after openbao-tls-init`() {
+        val prod = services("docker-compose.yml").getValue("openbao")
+        assertThat(prod["command"].toString())
+            .contains("-config=/openbao/config/openbao.hcl", "-config=/openbao/config/listener.hcl")
+        // Dev mode's own plain listener has to stay off the network.
+        assertThat(allServices.getValue("openbao")["command"].toString())
+            .contains("-dev", "-config=/openbao/config/listener.hcl", "-dev-listen-address=127.0.0.1:")
+            .doesNotContain("openbao.hcl")
+        assertThat(prod["depends_on"].toString()).contains("openbao-tls-init")
     }
 }

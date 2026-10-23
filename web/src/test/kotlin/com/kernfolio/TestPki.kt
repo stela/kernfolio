@@ -3,7 +3,6 @@ package com.kernfolio
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.json.JsonMapper
 import java.net.URI
-import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.nio.file.Files
@@ -19,6 +18,9 @@ import java.nio.file.attribute.PosixFilePermissions
  * `foreign-client` comes from an unrelated root CA (CN `app`, like the real
  * app cert) for "wrong CA" negative tests.
  *
+ * Also holds [OpenBaoTls]'s `openbao-ca.pem`, as certs_web does, for Spring
+ * Cloud Vault's trust store.
+ *
  * Started once per test JVM and shared by all test classes.
  */
 object TestPki {
@@ -29,6 +31,7 @@ object TestPki {
     private val openBao = OpenBaoContainer(TOKEN)
 
     init {
+        Files.copy(OpenBaoTls.dir.resolve(OpenBaoTls.CA), dir.resolve(OpenBaoTls.CA))
         openBao.start()
         openBao.bao("secrets", "enable", "pki")
         openBao.bao("secrets", "enable", "-path=pki_int", "pki")
@@ -94,7 +97,7 @@ object TestPki {
             .header("Content-Type", "application/json")
             .POST(HttpRequest.BodyPublishers.ofString(json.writeValueAsString(body)))
             .build()
-        val response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString())
+        val response = openBao.httpClient.send(request, HttpResponse.BodyHandlers.ofString())
         check(response.statusCode() in 200..299) { "bao write $path failed: ${response.body()}" }
         return if (response.body().isBlank()) json.createObjectNode() else json.readTree(response.body())["data"]
     }

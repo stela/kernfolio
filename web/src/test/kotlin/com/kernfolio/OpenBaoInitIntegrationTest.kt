@@ -6,17 +6,18 @@ import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 import org.testcontainers.containers.GenericContainer
 import org.testcontainers.containers.Network
-import org.testcontainers.images.builder.ImageFromDockerfile
-import java.nio.file.Path
+import java.nio.file.Files
 
 private const val BAO_TOKEN = "init-test-token"
 
 /**
- * Runs the real openbao/init/setup.sh in the real openbao-init image, with
- * compose's user and capabilities (root with only CHOWN + DAC_READ_SEARCH,
- * no-new-privileges),
- * and checks each per-service certs volume: it holds exactly that service's
- * files, and every private key belongs to the service's uid at 0600.
+ * Runs the real openbao/init/setup-tls.sh and setup.sh in the real
+ * openbao-init image, in compose's order and with compose's user and
+ * capabilities (root with only CHOWN + DAC_READ_SEARCH, no-new-privileges):
+ * setup-tls.sh first, then OpenBao starts with the listener cert it made, then
+ * setup.sh talks to it over TLS. Checks each per-service certs volume: it holds
+ * exactly that service's files, and every private key belongs to the service's
+ * uid at 0600. Renewal of the listener cert is in [OpenBaoTlsInitIntegrationTest].
  */
 class OpenBaoInitIntegrationTest {
 
@@ -25,16 +26,14 @@ class OpenBaoInitIntegrationTest {
         // the container's own (unset) network property.
         private val sharedNetwork = Network.newNetwork()
 
-        private val openBao = OpenBaoContainer(BAO_TOKEN)
-            .withNetwork(sharedNetwork)
-            .withNetworkAliases("openbao")
+        private lateinit var openBao: OpenBaoContainer
 
         private const val CA = "0:0 644"
 
         /** volume dir -> file name -> "uid:gid mode" */
         private val expected = mapOf(
             "web" to mapOf(
-                "ca.pem" to CA,
+                "ca.pem" to CA, "openbao-ca.pem" to CA,
                 "app.pem" to "0:0 644", "app-key.pem" to "1002:0 600",
                 "app-client.pem" to "0:0 644", "app-client-key.pem" to "1002:0 600",
             ),
@@ -50,20 +49,23 @@ class OpenBaoInitIntegrationTest {
                 "pg_root_password" to "70:0 600",
             ),
             "openbao" to mapOf(
-                "ca.pem" to CA,
+                "ca.pem" to CA, "openbao-ca.pem" to CA,
+                "openbao.pem" to "0:0 644", "openbao-key.pem" to "100:0 600",
                 "postgres-admin-client.pem" to "0:0 644", "postgres-admin-client-key.pem" to "100:0 600",
                 "pg_root_password" to "100:0 600",
             ),
         )
 
-        private val image = ImageFromDockerfile("kernfolio-openbao-init-test", false)
-            .withFileFromPath("Dockerfile", Path.of("..", "openbao", "Dockerfile").toAbsolutePath().normalize())
-
-        private val init = GenericContainer(image).apply {
+        private val init = GenericContainer(OpenBaoTls.initImage).apply {
             withNetwork(sharedNetwork)
-            withEnv("BAO_ADDR", "http://openbao:8200")
+            // As in docker-compose.yml.
+            withEnv("BAO_ADDR", "https://openbao:8200")
+            withEnv("BAO_CACERT", "/openbao/certs/openbao/openbao-ca.pem")
             withEnv("BAO_TOKEN", BAO_TOKEN)
-            withCopyFileToContainer(KernfolioPostgresContainer.repoFile("openbao/init/setup.sh", 0b111_101_101), "/openbao/init/setup.sh")
+            withCopyFileToContainer(KernfolioPostgresContainer.repoFile("openbao/init/common.sh"), "/openbao/init/common.sh")
+            for (script in listOf("setup-tls.sh", "setup.sh")) {
+                withCopyFileToContainer(KernfolioPostgresContainer.repoFile("openbao/init/$script", 0b111_101_101), "/openbao/init/$script")
+            }
             // Like fresh certs_<service> volumes: root-owned, empty mounts.
             withTmpFs(expected.keys.associate { "/openbao/certs/$it" to "rw,mode=755" })
             // Stay up so the script can be run (twice) with execInContainer.
@@ -80,8 +82,18 @@ class OpenBaoInitIntegrationTest {
         @JvmStatic
         @BeforeAll
         fun start() {
-            openBao.start()
             init.start()
+            exec("/openbao/init/setup-tls.sh")
+            // OpenBao's own listener cert, as setup-tls.sh left it in certs_openbao.
+            // Read with cat: `docker cp` doesn't see tmpfs mounts.
+            val tlsDir = Files.createTempDirectory("kernfolio-init-test-openbao-tls")
+            for (file in OpenBaoTls.FILES) {
+                Files.writeString(tlsDir.resolve(file), exec("cat", "/openbao/certs/openbao/$file"))
+            }
+            openBao = OpenBaoContainer(BAO_TOKEN, tlsDir)
+                .withNetwork(sharedNetwork)
+                .withNetworkAliases("openbao")
+            openBao.start()
         }
 
         private fun exec(vararg command: String): String {
@@ -105,6 +117,7 @@ class OpenBaoInitIntegrationTest {
         runSetup()
         assertThat(ownership()).isEqualTo(expected)
         val caBefore = exec("cat", "/openbao/certs/web/ca.pem")
+        val listenerCertBefore = exec("cat", "/openbao/certs/openbao/openbao.pem")
         val passwordBefore = exec("cat", "/openbao/certs/openbao/pg_root_password")
         assertThat(exec("cat", "/openbao/certs/postgres/pg_root_password")).isEqualTo(passwordBefore)
 
@@ -114,6 +127,8 @@ class OpenBaoInitIntegrationTest {
         assertThat(output).contains("Reusing existing root CA", "Reusing existing pg_root_password")
         assertThat(ownership()).isEqualTo(expected)
         assertThat(exec("cat", "/openbao/certs/web/ca.pem")).isEqualTo(caBefore)
+        // setup.sh leaves setup-tls.sh's files alone.
+        assertThat(exec("cat", "/openbao/certs/openbao/openbao.pem")).isEqualTo(listenerCertBefore)
         assertThat(exec("cat", "/openbao/certs/openbao/pg_root_password")).isEqualTo(passwordBefore)
         assertThat(exec("cat", "/openbao/certs/postgres/pg_root_password")).isEqualTo(passwordBefore)
     }

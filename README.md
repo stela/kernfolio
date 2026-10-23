@@ -55,14 +55,14 @@ Services, ports, and resource footprint:
 | web | 8443 (internal only, mTLS) | 512 MiB | ~345 MiB | `kernfolio-web:latest` (buildpack) | ~472 MB |
 | optimizer | 8000 | 512 MiB | ~370 MiB | `kernfolio-optimizer:latest` (distroless cc + uv-managed CPython 3.14) | ~482 MB |
 | postgres | 5432 | 256 MiB | ~48 MiB | `postgres:18-alpine` | ~281 MB |
-| openbao | 8200 | 512 MiB | ~70 MiB | `openbao/openbao:2.7.1` | ~181 MB |
+| openbao | 8200 (TLS) | 512 MiB | ~70 MiB | `openbao/openbao:2.7.1` | ~181 MB |
 | yfinance-twin | 8081 | 256 MiB | ~140 MiB | `kernfolio-yfinance-twin:latest` (buildpack) | ~353 MB |
 | frankfurter-twin | 8082 | 256 MiB | ~125 MiB | `kernfolio-frankfurter-twin:latest` (buildpack) | ~352 MB |
 | caddy | 443 (dev); 80 + 443 (prod) | 64 MiB | ~17 MiB | `kernfolio-caddy:latest` (caddy:2-alpine, non-root) | ~104 MB |
 
 Full dev stack budget: ~2.4 GiB of container memory, observed steady-state ~1.1 GiB. JVM services size their heap + metaspace + code cache explicitly through `JAVA_TOOL_OPTIONS` (see `docker-compose.yml` / `docker-compose.dev.yml`) so Paketo's memory calculator defers to the explicit values.
 
-Traffic between services — Caddy → web, web → optimizer, and every connection to PostgreSQL — is mutual TLS with certificates issued by OpenBao's PKI engine, and each hop has an integration test. PostgreSQL refuses any TCP login without TLS, a client certificate from that CA and a password. The exception for now is the connection to OpenBao itself, which is still plain HTTP inside the compose network. Each service gets its own secrets volume holding only its certificate and key, so even root inside one container can't read another service's key. Every container runs with all Linux capabilities dropped and `no-new-privileges`; only the one-shot init container and Postgres's startup add back the few they need. Caddy runs as uid 1000; it listens on 8080/8443 inside its container and Docker publishes those as 80/443.
+Traffic between services — Caddy → web, web → optimizer, and every connection to PostgreSQL — is mutual TLS with certificates issued by OpenBao's PKI engine, and each hop has an integration test. PostgreSQL refuses any TCP login without TLS, a client certificate from that CA and a password. Connections to OpenBao itself use TLS too, with a separate certificate made before OpenBao starts, since its PKI can't issue one for itself. Each service gets its own secrets volume holding only its certificate and key, so even root inside one container can't read another service's key. Every container runs with all Linux capabilities dropped and `no-new-privileges`; only the one-shot init containers and Postgres's startup add back the few they need. Caddy runs as uid 1000; it listens on 8080/8443 inside its container and Docker publishes those as 80/443.
 
 > **Upgrading an existing checkout:** Caddy used to run as root, so `caddy_data` / `caddy_config` volumes created before this change are root-owned and the new container can't write to them. Remove them once: `docker volume rm kernfolio_caddy_data kernfolio_caddy_config`. (In production, do this before first obtaining a certificate, or `chown -R 1000:1000` the volume contents instead.)
 

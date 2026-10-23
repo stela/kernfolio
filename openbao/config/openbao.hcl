@@ -9,13 +9,9 @@ storage "raft" {
   node_id = "openbao-1"
 }
 
-listener "tcp" {
-  address     = "0.0.0.0:8200"
-  tls_disable = 1
-}
-
-api_addr     = "http://openbao:8200"
-cluster_addr = "http://openbao:8201"
+# The listener and api_addr are in listener.hcl, which dev mode loads too
+# (docker-compose.dev.yml).
+cluster_addr = "https://openbao:8201"
 
 # Recommended with Raft: mlock would also pin the storage engine's mmapped files.
 disable_mlock = true

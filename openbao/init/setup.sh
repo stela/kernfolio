@@ -1,47 +1,16 @@
 #!/bin/sh
 set -e
 
-export BAO_ADDR="${BAO_ADDR:-http://openbao:8200}"
+. "$(dirname "$0")/common.sh"
+
+# OpenBao's listener cert comes from openbao-tls-init (setup-tls.sh).
+export BAO_ADDR="${BAO_ADDR:-https://openbao:8200}"
+export BAO_CACERT="${BAO_CACERT:-$OPENBAO_CA}"
 export BAO_TOKEN="${BAO_TOKEN:-dev-root-token}"
 
-# ── Where secrets go ─────────────────────────────────────────────────
-# One volume per consumer, each mounted only into its service (at
-# /openbao/certs there) and here at /openbao/certs/<name>. So even root in one
-# container can't read another service's key. Within a volume, private keys
-# also belong to the service's uid at 0600 (libpq and pgjdbc insist on that).
-# This script runs as root with only CAP_CHOWN and CAP_DAC_READ_SEARCH (see
-# docker-compose.yml); the uids are pinned via `user:` there — change both
-# together.
-CERTS=/openbao/certs
-WEB_DIR=$CERTS/web              # certs_web: web
-CADDY_DIR=$CERTS/caddy          # certs_caddy: caddy
-OPTIMIZER_DIR=$CERTS/optimizer  # certs_optimizer: optimizer
-POSTGRES_DIR=$CERTS/postgres    # certs_postgres: postgres
-OPENBAO_DIR=$CERTS/openbao      # certs_openbao: openbao server, openbao-db-init
+# Secrets layout and place(): see common.sh.
 ALL_DIRS="$WEB_DIR $CADDY_DIR $OPTIMIZER_DIR $POSTGRES_DIR $OPENBAO_DIR"
-
-WEB_UID=1002        # Paketo buildpack image (web)
-CADDY_UID=1000      # caddy/Dockerfile
-OPTIMIZER_UID=65532 # optimizer/Dockerfile (distroless `nonroot`)
-POSTGRES_UID=70     # postgres:18-alpine
-OPENBAO_UID=100     # openbao/openbao image: openbao server + openbao-db-init
-
-# place <dest> <uid> <gid> <mode>: write stdin to <dest> with that owner and
-# mode. Goes through a temp file and rename: with no DAC_OVERRIDE, root can't
-# open another user's 0600 file for writing (DAC_READ_SEARCH only lets it
-# read), but it may replace it in the root-owned directory.
-place() {
-  local dest="$1" tmp="$1.tmp.$$"
-  cat > "$tmp"
-  chmod "$4" "$tmp"
-  chown "$2:$3" "$tmp"
-  mv -f "$tmp" "$dest"
-}
-
-umask 077
-for d in $ALL_DIRS; do
-  [ -d "$d" ] || { echo "ERROR: $d is not mounted" >&2; exit 1; }
-done
+require_dirs $ALL_DIRS
 
 echo "=== OpenBao init: waiting for OpenBao ==="
 until bao status >/dev/null 2>&1; do sleep 1; done

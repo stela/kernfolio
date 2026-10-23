@@ -4,6 +4,7 @@ import com.icegreen.greenmail.util.GreenMail
 import com.icegreen.greenmail.util.ServerSetup
 import com.kernfolio.service.EmailService
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -24,12 +25,15 @@ import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
+import javax.net.ssl.SSLHandshakeException
 import javax.sql.DataSource
 
 private const val BAO_TOKEN = "test-root-token"
 
 /**
- * The real OpenBao integration, end to end over mTLS: OpenBao's database engine
+ * The real OpenBao integration, end to end over TLS. Spring Cloud Vault reaches
+ * OpenBao's TLS listener, trusting only `openbao-ca.pem` through the
+ * application.yml trust store. OpenBao's database engine
  * connects to [KernfolioPostgresContainer] with the superuser client cert (as
  * set up by openbao/init/setup-db.sh), and Spring's datasource connects with the
  * dynamic credentials and the app cert through the real `db-tls` profile.
@@ -79,6 +83,9 @@ class OpenBaoIntegrationTest {
             // before spring.config.import: vault:// triggers in the early bootstrap phase
             System.setProperty("spring.cloud.vault.uri", openBao.address)
             System.setProperty("spring.cloud.vault.token", BAO_TOKEN)
+            // Where application.yml's spring.cloud.vault.ssl.trust-store (and
+            // application-db-tls.yml) find certs. Needed this early too.
+            System.setProperty("openbao.certs.dir", TestPki.dir.toString())
 
             // Generate dynamic DB credentials from OpenBao's database engine, then
             // write them (along with other secrets) into KV for Spring to consume.
@@ -94,14 +101,13 @@ class OpenBaoIntegrationTest {
             greenMail.stop()
             System.clearProperty("spring.cloud.vault.uri")
             System.clearProperty("spring.cloud.vault.token")
+            System.clearProperty("openbao.certs.dir")
         }
 
         @JvmStatic
         @DynamicPropertySource
         fun configureProperties(registry: DynamicPropertyRegistry) {
             registry.add("spring.datasource.url") { postgres.jdbcUrl }
-            // Where application-db-tls.yml (and OptimizerClientConfig) find certs.
-            registry.add("openbao.certs.dir") { TestPki.dir.toString() }
             // Disable SMTP auth for GreenMail (nested properties with dots
             // don't map cleanly from OpenBao KV, so set them here directly)
             registry.add("spring.mail.properties.mail.smtp.auth") { "false" }
@@ -145,7 +151,7 @@ class OpenBaoIntegrationTest {
                 .header("X-Vault-Token", BAO_TOKEN)
                 .GET()
                 .build()
-            val response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString())
+            val response = openBao.httpClient.send(request, HttpResponse.BodyHandlers.ofString())
             check(response.statusCode() == 200) { "Failed to generate DB credentials: ${response.body()}" }
 
             val body = response.body()
@@ -176,7 +182,7 @@ class OpenBaoIntegrationTest {
                     )
                 )
                 .build()
-            val response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString())
+            val response = openBao.httpClient.send(request, HttpResponse.BodyHandlers.ofString())
             check(response.statusCode() in 200..299) { "Failed to write KV secrets: ${response.body()}" }
         }
     }
@@ -203,6 +209,30 @@ class OpenBaoIntegrationTest {
     fun `application context loads with OpenBao enabled`() {
         assertThat(environment.getProperty("spring.cloud.vault.enabled"))
             .isEqualTo("true")
+    }
+
+    @Test
+    fun `Spring Cloud Vault talks to OpenBao over https`() {
+        assertThat(environment.getProperty("spring.cloud.vault.uri")).startsWith("https://")
+        assertThat(environment.getProperty("spring.cloud.vault.ssl.trust-store"))
+            .isEqualTo("file:${TestPki.dir}/openbao-ca.pem")
+    }
+
+    @Test
+    fun `OpenBao's API refuses plain HTTP`() {
+        val request = HttpRequest.newBuilder()
+            .uri(URI.create("http://${openBao.host}:${openBao.getMappedPort(OpenBaoContainer.PORT)}/v1/sys/health"))
+            .build()
+        val response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString())
+        assertThat(response.statusCode()).isEqualTo(400)
+        assertThat(response.body()).contains("HTTP request to an HTTPS server")
+    }
+
+    @Test
+    fun `a client that doesn't trust openbao-ca_pem fails the handshake`() {
+        val request = HttpRequest.newBuilder().uri(URI.create("${openBao.address}/v1/sys/health")).build()
+        assertThatThrownBy { HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString()) }
+            .isInstanceOf(SSLHandshakeException::class.java)
     }
 
     @Test
