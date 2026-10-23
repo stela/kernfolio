@@ -22,9 +22,7 @@ def _build_prices_dataframe(
     """Convert the request prices dict into a DataFrame with DatetimeIndex."""
     dates = pd.to_datetime(prices["dates"])
     ticker_data = {k: v for k, v in prices.items() if k != "dates"}
-    df = pd.DataFrame(ticker_data, index=dates)
-    df.sort_index(inplace=True)
-    return df
+    return pd.DataFrame(ticker_data, index=dates).sort_index()
 
 
 def _compute_covariance(prices_df: pd.DataFrame, method: str) -> pd.DataFrame:
