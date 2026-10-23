@@ -92,7 +92,7 @@ fi
 
 # Ed25519 role — used by all non-Java services
 bao write pki_int/roles/kernfolio-service \
-  allowed_domains="app,web,optimizer,postgres,caddy,localhost" \
+  allowed_domains="app,web,optimizer,postgres,caddy,kernfolio,localhost" \
   allow_subdomains=false \
   allow_bare_domains=true \
   allow_localhost=true \
@@ -130,11 +130,19 @@ issue_cert "kernfolio-service" "optimizer" "" /openbao/certs/optimizer-client.pe
 # Caddy (Go) — Ed25519
 issue_cert "kernfolio-service" "caddy" "" /openbao/certs/caddy-client.pem /openbao/certs/caddy-client-key.pem
 
-# PostgreSQL (OpenSSL) — Ed25519
+# PostgreSQL (OpenSSL) — Ed25519. Server cert only; postgres copies the key
+# to a postgres-owned 0600 file at start (postgres/docker-entrypoint-tls.sh).
 issue_cert "kernfolio-service" "postgres" "localhost" /openbao/certs/postgres.pem /openbao/certs/postgres-key.pem
 
-# Fix permissions for postgres (runs as uid 70)
-chmod 600 /openbao/certs/postgres-key.pem
+# Postgres superuser client identity. pg_hba.conf requires
+# clientcert=verify-full for user `kernfolio`, i.e. the cert CN must equal the
+# user name. Used by the OpenBao database engine and by openbao-db-init.
+issue_cert "kernfolio-service" "kernfolio" "" /openbao/certs/postgres-admin-client.pem /openbao/certs/postgres-admin-client-key.pem
+
+# Private keys that only their owner (uid 100, OpenBao + init) reads stay 0600.
+# The other keys are read by services running under other uids and stay 0644
+# on this internal volume.
+chmod 600 /openbao/certs/postgres-key.pem /openbao/certs/postgres-admin-client-key.pem
 chmod 644 /openbao/certs/postgres.pem /openbao/certs/ca.pem
 
 echo "=== OpenBao init complete ==="

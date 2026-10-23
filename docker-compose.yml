@@ -1,6 +1,9 @@
 services:
   openbao:
-    image: openbao/openbao:2.7.1
+    build:
+      context: ./openbao
+      target: server
+    image: kernfolio-openbao
     mem_limit: 512m
     environment:
       BAO_ADDR: "http://127.0.0.1:8200"
@@ -8,6 +11,8 @@ services:
       # Raft data dir; see openbao/config/openbao.hcl for why it's /openbao/file.
       - openbao_data:/openbao/file
       - ./openbao/config:/openbao/config:ro
+      # Client cert for the Postgres database engine (see openbao/init/setup-db.sh).
+      - openbao_certs:/openbao/certs:ro
     command: bao server -config=/openbao/config/openbao.hcl
     healthcheck:
       test: ["CMD", "bao", "status"]
@@ -16,7 +21,10 @@ services:
       retries: 5
 
   openbao-init:
-    build: ./openbao/init
+    build:
+      context: ./openbao
+      target: init
+    image: kernfolio-openbao-init
     mem_limit: 128m
     depends_on:
       openbao:
@@ -49,9 +57,11 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
       - openbao_certs:/openbao/certs:ro
+      - ./postgres/docker-entrypoint-tls.sh:/usr/local/bin/docker-entrypoint-tls.sh:ro
       - ./postgres/pg_hba_mtls.conf:/etc/postgresql/pg_hba.conf:ro
-      - ./postgres/postgresql_ssl.conf:/etc/postgresql/conf.d/ssl.conf:ro
       - ./postgres/init-extensions.sql:/docker-entrypoint-initdb.d/init-extensions.sql:ro
+    # TLS + mTLS-only TCP; the wrapper adds the -c flags and starts `postgres`.
+    entrypoint: ["/usr/local/bin/docker-entrypoint-tls.sh"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U kernfolio"]
       interval: 10s
@@ -65,7 +75,9 @@ services:
     # Reuses the openbao-init image (same Dockerfile) because setup-db.sh needs
     # both the `bao` CLI (from the base image) and `psql` (to bootstrap the
     # app_owner role before OpenBao starts handing out dynamic app credentials).
-    build: ./openbao/init
+    build:
+      context: ./openbao
+      target: init
     image: kernfolio-openbao-init
     mem_limit: 128m
     depends_on:

@@ -6,7 +6,9 @@ spring:
     group:
       # prod always serves mTLS on 8443 (application-tls.yml); dev opts in via
       # SPRING_PROFILES_ACTIVE=dev,tls in docker-compose.dev.yml.
-      prod: tls
+      # Both always talk mTLS to Postgres (application-db-tls.yml).
+      prod: tls, db-tls
+      dev: db-tls
 
   cloud:
     # Spring Cloud Vault, pointed at OpenBao (same /v1 API). The library and

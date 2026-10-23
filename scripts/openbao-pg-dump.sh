@@ -20,5 +20,19 @@ if [ -z "$DB_USER" ] || [ "$DB_USER" = "null" ]; then
   exit 1
 fi
 
+# Postgres only accepts mTLS (postgres/pg_hba_mtls.conf). Dynamic app roles
+# need any client cert from the OpenBao CA; use the app's.
+CERT_DIR="${OPENBAO_CERT_DIR:-/openbao/certs}"
+export PGSSLMODE=verify-full
+export PGSSLROOTCERT="$CERT_DIR/ca.pem"
+export PGSSLCERT="$CERT_DIR/app-client.pem"
+# libpq refuses a key readable by group/others; the shared one is 0644 so
+# web (another uid) can read it. Use a private copy.
+PGSSLKEY="$(mktemp)"
+trap 'rm -f "$PGSSLKEY"' EXIT
+install -m 600 "$CERT_DIR/app-client-key.pem" "$PGSSLKEY"
+export PGSSLKEY
+# No SCRAM channel binding with Ed25519 server certs (see openbao/init/setup-db.sh).
+export PGCHANNELBINDING=disable
 export PGPASSWORD="$DB_PASS"
 pg_dump -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" --no-owner --no-acl

@@ -29,6 +29,17 @@ until bao status >/dev/null 2>&1; do sleep 1; done
 # currently active, and stale tables owned by a previous dynamic role
 # don't prevent future DDL.
 echo "=== Bootstrapping app_owner role ==="
+# Postgres only accepts TCP logins over mTLS (postgres/pg_hba_mtls.conf). The
+# superuser's cert CN must be `kernfolio`. libpq accepts the key: it's owned
+# by this process's uid with mode 0600.
+export PGSSLMODE=verify-full
+export PGSSLROOTCERT=/openbao/certs/ca.pem
+export PGSSLCERT=/openbao/certs/postgres-admin-client.pem
+export PGSSLKEY=/openbao/certs/postgres-admin-client-key.pem
+# SCRAM channel binding (tls-server-end-point) hashes the server cert with its
+# signature digest, and Ed25519 has none: libpq fails with "could not find
+# digest for NID UNDEF". verify-full + the client cert already rule out a MITM.
+export PGCHANNELBINDING=disable
 export PGPASSWORD="${DB_ROOT_PASSWORD}"
 psql -h postgres -U kernfolio -d kernfolio -v ON_ERROR_STOP=1 <<'SQL'
 DO $$
@@ -41,16 +52,22 @@ $$;
 GRANT ALL ON SCHEMA public TO app_owner;
 ALTER SCHEMA public OWNER TO app_owner;
 SQL
-unset PGPASSWORD
+unset PGPASSWORD PGSSLMODE PGSSLROOTCERT PGSSLCERT PGSSLKEY PGCHANNELBINDING
 
 # ── Database secrets engine ──────────────────────────────────────────
 echo "=== Enabling database secrets engine ==="
 bao secrets enable database 2>/dev/null || true
 
+# The OpenBao server opens this connection itself, so the cert paths are in
+# the openbao container (it mounts openbao_certs read-only). channel_binding:
+# see PGCHANNELBINDING above; pgx would otherwise attempt SCRAM-SHA-256-PLUS.
+# username_template pins the `v-token-app-` prefix that pg_hba_mtls.conf
+# matches on; the default template would change it with the auth method.
 bao write database/config/kernfolio \
   plugin_name=postgresql-database-plugin \
   allowed_roles="app" \
-  connection_url="postgresql://{{username}}:{{password}}@postgres:5432/kernfolio?sslmode=disable" \
+  connection_url="postgresql://{{username}}:{{password}}@postgres:5432/kernfolio?sslmode=verify-full&sslrootcert=/openbao/certs/ca.pem&sslcert=/openbao/certs/postgres-admin-client.pem&sslkey=/openbao/certs/postgres-admin-client-key.pem&channel_binding=disable" \
+  username_template='{{ printf "v-token-app-%s-%s" (random 20) (unix_time) | truncate 63 }}' \
   username="kernfolio" \
   password="${DB_ROOT_PASSWORD}"
 

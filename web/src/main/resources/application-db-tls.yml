@@ -1,0 +1,19 @@
+# mTLS to Postgres (postgres/pg_hba_mtls.conf only accepts TLS + a client cert
+# from the OpenBao CA + password). Grouped into `dev` and `prod` (see
+# application.yml); tests with a plain Testcontainers postgres leave it off.
+# verify-full checks the server cert's SANs (`postgres`, `localhost`).
+spring:
+  datasource:
+    hikari:
+      data-source-properties:
+        sslmode: verify-full
+        sslrootcert: ${openbao.certs.dir}/ca.pem
+        sslcert: ${openbao.certs.dir}/app-client.pem
+        sslkey: ${openbao.certs.dir}/app-client-key.pem
+        # Reads the three PEM files above; see PemSslSocketFactory for why not
+        # pgjdbc's default (key-file permission rule).
+        sslfactory: com.kernfolio.config.PemSslSocketFactory
+        # SCRAM channel binding can't work with an Ed25519 server cert (no
+        # signature digest to hash it with). verify-full plus the client cert
+        # already rule out a MITM.
+        channelBinding: disable

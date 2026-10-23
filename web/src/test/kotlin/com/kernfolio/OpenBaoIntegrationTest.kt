@@ -14,11 +14,12 @@ import org.springframework.context.ApplicationContext
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.core.env.Environment
 import org.springframework.mail.javamail.JavaMailSender
+import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import org.springframework.vault.core.VaultOperations
 import org.testcontainers.containers.Network
-import org.testcontainers.containers.PostgreSQLContainer
+import org.testcontainers.utility.MountableFile
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -27,6 +28,12 @@ import javax.sql.DataSource
 
 private const val BAO_TOKEN = "test-root-token"
 
+/**
+ * The real OpenBao integration, end to end over mTLS: OpenBao's database engine
+ * connects to [KernfolioPostgresContainer] with the superuser client cert (as
+ * set up by openbao/init/setup-db.sh), and Spring's datasource connects with the
+ * dynamic credentials and the app cert through the real `db-tls` profile.
+ */
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.NONE,
     properties = [
@@ -35,6 +42,7 @@ private const val BAO_TOKEN = "test-root-token"
         "spring.config.import=vault://",
     ],
 )
+@ActiveProfiles("db-tls")
 class OpenBaoIntegrationTest {
     // Spring Cloud Vault is off by default for tests (see web/build.gradle.kts).
     // This test is the one that exercises the real OpenBao integration, so it
@@ -43,19 +51,22 @@ class OpenBaoIntegrationTest {
     companion object {
         private val network = Network.newNetwork()
 
-        private val postgres = PostgreSQLContainer("postgres:18-alpine")
-            .withDatabaseName("kernfolio")
-            .withUsername("kernfolio")
-            .withPassword("kernfolio")
+        private val postgres = KernfolioPostgresContainer()
             .withNetwork(network)
             .withNetworkAliases("postgres")
-            .withInitScript("openbao-test-init.sql")
 
         private val greenMail = GreenMail(ServerSetup(0, null, ServerSetup.PROTOCOL_SMTP))
 
         private val openBao = OpenBaoContainer(BAO_TOKEN)
             .withNetwork(network)
             .withNetworkAliases("openbao")
+            .apply {
+                // As the compose openbao service mounts openbao_certs. pgx doesn't
+                // check key file permissions; 0644 lets the `openbao` user read it.
+                for (file in listOf("ca.pem", "postgres-admin-client.pem", "postgres-admin-client-key.pem")) {
+                    withCopyFileToContainer(MountableFile.forHostPath(TestPki.dir.resolve(file), 0b110_100_100), "/openbao/certs/$file")
+                }
+            }
 
         init {
             postgres.start()
@@ -87,9 +98,9 @@ class OpenBaoIntegrationTest {
         @JvmStatic
         @DynamicPropertySource
         fun configureProperties(registry: DynamicPropertyRegistry) {
-            registry.add("spring.datasource.url") {
-                "jdbc:postgresql://${postgres.host}:${postgres.firstMappedPort}/kernfolio"
-            }
+            registry.add("spring.datasource.url") { postgres.jdbcUrl }
+            // Where application-db-tls.yml (and OptimizerClientConfig) find certs.
+            registry.add("openbao.certs.dir") { TestPki.dir.toString() }
             // Disable SMTP auth for GreenMail (nested properties with dots
             // don't map cleanly from OpenBao KV, so set them here directly)
             registry.add("spring.mail.properties.mail.smtp.auth") { "false" }
@@ -98,16 +109,21 @@ class OpenBaoIntegrationTest {
             registry.add("optimizer.base-url") { "http://localhost:9999" }
         }
 
-        /** Mirrors openbao/init/setup-db.sh, minus the app_owner group role. */
+        /** Mirrors openbao/init/setup-db.sh (TLS, username template), minus the app_owner group role. */
         private fun configureDatabaseEngine() {
             openBao.bao("secrets", "enable", "database")
             openBao.bao(
                 "write", "database/config/kernfolio",
                 "plugin_name=postgresql-database-plugin",
                 "allowed_roles=app",
-                "connection_url=postgresql://{{username}}:{{password}}@postgres:5432/kernfolio?sslmode=disable",
+                "connection_url=postgresql://{{username}}:{{password}}@postgres:5432/kernfolio?sslmode=verify-full" +
+                    "&sslrootcert=/openbao/certs/ca.pem" +
+                    "&sslcert=/openbao/certs/postgres-admin-client.pem" +
+                    "&sslkey=/openbao/certs/postgres-admin-client-key.pem" +
+                    "&channel_binding=disable",
+                "username_template={{ printf \"v-token-app-%s-%s\" (random 20) (unix_time) | truncate 63 }}",
                 "username=kernfolio",
-                "password=kernfolio",
+                "password=${postgres.superuserPassword}",
             )
             openBao.bao(
                 "write", "database/roles/app",
@@ -197,6 +213,18 @@ class OpenBaoIntegrationTest {
                 val username = rs.getString(1)
                 // The database engine generates usernames with v-token-{role}- prefix
                 assertThat(username).startsWith("v-token-app-")
+            }
+        }
+    }
+
+    @Test
+    fun `datasource connects over mTLS with the app certificate`() {
+        dataSource.connection.use { conn ->
+            conn.createStatement().use { stmt ->
+                val rs = stmt.executeQuery("SELECT ssl, client_dn FROM pg_stat_ssl WHERE pid = pg_backend_pid()")
+                assertThat(rs.next()).isTrue()
+                assertThat(rs.getBoolean(1)).isTrue()
+                assertThat(rs.getString(2)).isEqualTo("/CN=app")
             }
         }
     }
