@@ -117,6 +117,21 @@ class OpenBaoTlsInitIntegrationTest {
     }
 
     @Test
+    fun `writes dev_hcl's unseal key only when asked, and never replaces it`() {
+        freshRun()
+        assertThat(files(OPENBAO)).doesNotContainKey("dev-unseal.key")
+
+        val key = "$OPENBAO/dev-unseal.key"
+        assertThat(sh("OPENBAO_DEV_UNSEAL_KEY=1 /openbao/init/setup-tls.sh")).contains("Generating the dev unseal key")
+        assertThat(files(OPENBAO)["dev-unseal.key"]).isEqualTo("100:0 600")
+        assertThat(sh("wc -c < $key").trim()).isEqualTo("32")
+
+        val before = sh("md5sum $key")
+        assertThat(sh("OPENBAO_DEV_UNSEAL_KEY=1 /openbao/init/setup-tls.sh")).doesNotContain("dev unseal key")
+        assertThat(sh("md5sum $key")).isEqualTo(before)
+    }
+
+    @Test
     fun `web's PKCS#12 loads the way Spring Vault loads it, with no password`() {
         freshRun()
         val p12 = Files.createTempDirectory("openbao-tls-init-test")

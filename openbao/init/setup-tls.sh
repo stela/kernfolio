@@ -34,6 +34,15 @@ set -e
 
 require_dirs "$OPENBAO_DIR" "$WEB_DIR"
 
+# Dev only (docker-compose.dev.yml): the key for dev.hcl's static seal. Never
+# replaced: OpenBao's existing data can only be unsealed with the key it was
+# initialized with.
+DEV_UNSEAL_KEY=$OPENBAO_DIR/dev-unseal.key
+if [ "${OPENBAO_DEV_UNSEAL_KEY:-}" = 1 ] && [ ! -e "$DEV_UNSEAL_KEY" ]; then
+  echo "=== Generating the dev unseal key ==="
+  openssl rand 32 | place "$DEV_UNSEAL_KEY" "$OPENBAO_UID" 0 0600
+fi
+
 CERT=$OPENBAO_DIR/openbao.pem
 KEY=$OPENBAO_DIR/openbao-key.pem
 CLI_CERT=$OPENBAO_DIR/openbao-client.pem

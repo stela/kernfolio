@@ -142,13 +142,26 @@ class ComposeHardeningTest {
     @Test
     fun `openbao serves listener_hcl in prod and dev, after openbao-tls-init`() {
         val prod = services("docker-compose.yml").getValue("openbao")
-        assertThat(prod["command"].toString())
-            .contains("-config=/openbao/config/openbao.hcl", "-config=/openbao/config/listener.hcl")
-        // Dev mode's own plain listener has to stay off the network.
+        val prodConfigs = listOf("-config=/openbao/config/openbao.hcl", "-config=/openbao/config/listener.hcl")
+        assertThat(prod["command"].toString()).contains(prodConfigs).doesNotContain("dev.hcl", "-dev")
+        // Dev is prod's config plus dev.hcl, never `-dev`: that would add a
+        // plain-HTTP listener and keep state in memory.
         assertThat(allServices.getValue("openbao")["command"].toString())
-            .contains("-dev", "-config=/openbao/config/listener.hcl", "-dev-listen-address=127.0.0.1:")
-            .doesNotContain("openbao.hcl")
+            .contains(prodConfigs + "-config=/openbao/config/dev.hcl")
+            .doesNotContainPattern("""\s-dev(\s|-|$)""")
         assertThat(prod["depends_on"].toString()).contains("openbao-tls-init")
+    }
+
+    @Test
+    fun `only dev_hcl unseals and initializes itself`() {
+        val config = repo.resolve("openbao/config")
+        for (file in listOf("openbao.hcl", "listener.hcl")) {
+            assertThat(Files.readString(config.resolve(file))).describedAs(file)
+                .doesNotContainPattern("""(?m)^\s*(seal|initialize)\s""")
+        }
+        assertThat(Files.readString(config.resolve("dev.hcl")))
+            .containsPattern("""(?m)^seal "static"""")
+            .containsPattern("""(?m)^initialize """)
     }
 
     @Test

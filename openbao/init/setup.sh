@@ -16,6 +16,13 @@ require_dirs $ALL_DIRS
 
 echo "=== OpenBao init: waiting for OpenBao ==="
 until bao status >/dev/null 2>&1; do sleep 1; done
+# In dev, self-init creates the token just after unsealing (dev.hcl).
+tries=0
+until bao token lookup >/dev/null 2>&1; do
+  tries=$((tries + 1))
+  [ "$tries" -lt 30 ] || { echo "ERROR: OpenBao rejects BAO_TOKEN" >&2; exit 1; }
+  sleep 1
+done
 
 # ── KV v2 secrets engine ─────────────────────────────────────────────
 echo "=== Enabling KV v2 ==="
@@ -33,9 +40,9 @@ bao kv put secret/kernfolio \
 # OpenBao is the origin of this secret. It gets materialized as
 # pg_root_password into two volumes: postgres's, which reads it via
 # POSTGRES_PASSWORD_FILE at initdb time, and OpenBao's, for openbao-db-init
-# wiring up the database engine. The files are the durable source of truth
-# (they survive OpenBao dev-mode restarts, which wipe its in-memory KV); the
-# value is also mirrored into OpenBao KV so it's visible via `bao kv get`.
+# wiring up the database engine. The files are the source of truth (they
+# also survive removing openbao_data, which pgdata doesn't notice); the value
+# is also mirrored into OpenBao KV so it's visible via `bao kv get`.
 if [ -s "$OPENBAO_DIR/pg_root_password" ]; then
     echo "=== Reusing existing pg_root_password ==="
     pg_root_password="$(cat "$OPENBAO_DIR/pg_root_password")"

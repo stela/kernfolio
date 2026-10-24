@@ -29,7 +29,7 @@ Each run reports expected return, volatility, Sharpe ratio, 95 % CVaR and the ca
 
 ## Quickstart
 
-OpenBao (the MPL-licensed, Linux Foundation fork of HashiCorp Vault) is always in the critical path — it provisions database credentials, KV secrets, and PKI certificates for mTLS. The web app talks to it through Spring Cloud Vault, which works unchanged against OpenBao's Vault-compatible API. The dev stack runs OpenBao in `-dev` mode so there's nothing to initialize manually.
+OpenBao (the MPL-licensed, Linux Foundation fork of HashiCorp Vault) is always in the critical path — it provisions database credentials, KV secrets, and PKI certificates for mTLS. The web app talks to it through Spring Cloud Vault, which works unchanged against OpenBao's Vault-compatible API. The dev stack runs OpenBao like production (persistent Raft storage, mutual TLS), except that it unseals and initializes itself, so there's nothing to do by hand. To start it over, remove the `openbao_data` volume.
 
 Two steps, because the JVM images are produced by Gradle (Spring Boot's `bootBuildImage` / Paketo buildpacks) before Compose runs them:
 

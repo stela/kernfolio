@@ -93,6 +93,8 @@ class OpenBaoIntegrationTest {
             // spring.config.import: vault:// reads KV but not the database backend
             // directly, so we bridge the two.
             val (dbUsername, dbPassword) = generateDatabaseCredentials()
+            // Like setup.sh: unlike `-dev`, OpenBao mounts no KV by default.
+            openBao.bao("secrets", "enable", "-path=secret", "-version=2", "kv")
             writeKvSecrets(dbUsername, dbPassword)
         }
 

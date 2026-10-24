@@ -1,10 +1,18 @@
 services:
+  openbao-tls-init:
+    environment:
+      # dev.hcl's static seal key.
+      OPENBAO_DEV_UNSEAL_KEY: "1"
+
   openbao:
-    # In-memory dev server. Only listener.hcl is passed, not openbao.hcl, so
-    # there's no Raft storage. Dev mode always opens its own plain-HTTP
-    # listener as well; it stays on loopback inside the container, and 8200
-    # is the TLS listener from listener.hcl, same as prod.
-    command: bao server -dev -dev-root-token-id=dev-root-token -dev-listen-address=127.0.0.1:8210 -config=/openbao/config/listener.hcl
+    # Prod's storage and listener, plus dev.hcl: unseals and initializes
+    # itself, with root token dev-root-token. State persists in openbao_data
+    # like in prod; remove that volume to start over.
+    command: bao server -config=/openbao/config/openbao.hcl -config=/openbao/config/listener.hcl -config=/openbao/config/dev.hcl
+    environment:
+      BAO_DEV_ROOT_TOKEN: "dev-root-token"
+      # For `docker compose exec openbao bao ...`.
+      BAO_TOKEN: "dev-root-token"
     ports:
       - "8200:8200"
 
