@@ -14,10 +14,10 @@ private const val BAO_TOKEN = "init-test-token"
  * Runs the real openbao/init/setup-tls.sh and setup.sh in the real
  * openbao-init image, in compose's order and with compose's user and
  * capabilities (root with only CHOWN + DAC_READ_SEARCH, no-new-privileges):
- * setup-tls.sh first, then OpenBao starts with the listener cert it made, then
- * setup.sh talks to it over TLS. Checks each per-service certs volume: it holds
+ * setup-tls.sh first, then OpenBao starts with the listener certs it made, then
+ * setup.sh talks to it over mutual TLS. Checks each per-service certs volume: it holds
  * exactly that service's files, and every private key belongs to the service's
- * uid at 0600. Renewal of the listener cert is in [OpenBaoTlsInitIntegrationTest].
+ * uid at 0600. Renewal of the listener certs is in [OpenBaoTlsInitIntegrationTest].
  */
 class OpenBaoInitIntegrationTest {
 
@@ -33,7 +33,7 @@ class OpenBaoInitIntegrationTest {
         /** volume dir -> file name -> "uid:gid mode" */
         private val expected = mapOf(
             "web" to mapOf(
-                "ca.pem" to CA, "openbao-ca.pem" to CA,
+                "ca.pem" to CA, "openbao-ca.pem" to CA, "openbao-client.p12" to "1002:0 600",
                 "app.pem" to "0:0 644", "app-key.pem" to "1002:0 600",
                 "app-client.pem" to "0:0 644", "app-client-key.pem" to "1002:0 600",
             ),
@@ -51,6 +51,7 @@ class OpenBaoInitIntegrationTest {
             "openbao" to mapOf(
                 "ca.pem" to CA, "openbao-ca.pem" to CA,
                 "openbao.pem" to "0:0 644", "openbao-key.pem" to "100:0 600",
+                "openbao-client.pem" to "0:0 644", "openbao-client-key.pem" to "100:0 600",
                 "postgres-admin-client.pem" to "0:0 644", "postgres-admin-client-key.pem" to "100:0 600",
                 "pg_root_password" to "100:0 600",
             ),
@@ -61,6 +62,8 @@ class OpenBaoInitIntegrationTest {
             // As in docker-compose.yml.
             withEnv("BAO_ADDR", "https://openbao:8200")
             withEnv("BAO_CACERT", "/openbao/certs/openbao/openbao-ca.pem")
+            withEnv("BAO_CLIENT_CERT", "/openbao/certs/openbao/openbao-client.pem")
+            withEnv("BAO_CLIENT_KEY", "/openbao/certs/openbao/openbao-client-key.pem")
             withEnv("BAO_TOKEN", BAO_TOKEN)
             withCopyFileToContainer(KernfolioPostgresContainer.repoFile("openbao/init/common.sh"), "/openbao/init/common.sh")
             for (script in listOf("setup-tls.sh", "setup.sh")) {
@@ -84,12 +87,9 @@ class OpenBaoInitIntegrationTest {
         fun start() {
             init.start()
             exec("/openbao/init/setup-tls.sh")
-            // OpenBao's own listener cert, as setup-tls.sh left it in certs_openbao.
-            // Read with cat: `docker cp` doesn't see tmpfs mounts.
+            // OpenBao's mTLS certs, as setup-tls.sh left them on the volumes.
             val tlsDir = Files.createTempDirectory("kernfolio-init-test-openbao-tls")
-            for (file in OpenBaoTls.FILES) {
-                Files.writeString(tlsDir.resolve(file), exec("cat", "/openbao/certs/openbao/$file"))
-            }
+            OpenBaoTls.copyOut(tlsDir) { path -> exec("base64", path) }
             openBao = OpenBaoContainer(BAO_TOKEN, tlsDir)
                 .withNetwork(sharedNetwork)
                 .withNetworkAliases("openbao")

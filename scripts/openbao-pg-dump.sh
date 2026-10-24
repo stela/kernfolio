@@ -11,8 +11,11 @@ DB_NAME="${DB_NAME:-kernfolio}"
 CERT_DIR="${OPENBAO_CERT_DIR:-/openbao/certs}"
 
 # Request dynamic credentials from OpenBao (the API still uses the X-Vault-Token
-# header). Its listener cert chains to openbao-ca.pem (openbao/init/setup-tls.sh).
-CRED=$(curl -sS --cacert "$CERT_DIR/openbao-ca.pem" -H "X-Vault-Token: ${BAO_TOKEN}" \
+# header). Its listener is mutual TLS with openbao-ca.pem; present web's client
+# cert, a PKCS#12 with an empty password (openbao/init/setup-tls.sh).
+CRED=$(curl -sS --cacert "$CERT_DIR/openbao-ca.pem" \
+  --cert-type P12 --cert "$CERT_DIR/openbao-client.p12:" \
+  -H "X-Vault-Token: ${BAO_TOKEN}" \
   "${BAO_ADDR}/v1/database/creds/app")
 
 DB_USER=$(echo "$CRED" | jq -r '.data.username')

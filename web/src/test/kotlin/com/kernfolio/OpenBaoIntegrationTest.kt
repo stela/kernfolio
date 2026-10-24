@@ -25,15 +25,16 @@ import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
+import java.io.IOException
 import javax.net.ssl.SSLHandshakeException
 import javax.sql.DataSource
 
 private const val BAO_TOKEN = "test-root-token"
 
 /**
- * The real OpenBao integration, end to end over TLS. Spring Cloud Vault reaches
- * OpenBao's TLS listener, trusting only `openbao-ca.pem` through the
- * application.yml trust store. OpenBao's database engine
+ * The real OpenBao integration, end to end over mutual TLS. Spring Cloud Vault
+ * reaches OpenBao's listener with application.yml's `spring.cloud.vault.ssl.*`:
+ * it trusts only `openbao-ca.pem` and presents `openbao-client.p12`. OpenBao's database engine
  * connects to [KernfolioPostgresContainer] with the superuser client cert (as
  * set up by openbao/init/setup-db.sh), and Spring's datasource connects with the
  * dynamic credentials and the app cert through the real `db-tls` profile.
@@ -212,10 +213,36 @@ class OpenBaoIntegrationTest {
     }
 
     @Test
-    fun `Spring Cloud Vault talks to OpenBao over https`() {
+    fun `Spring Cloud Vault talks to OpenBao over mutual TLS`() {
+        // The KV and database tests here only pass if this setup works.
         assertThat(environment.getProperty("spring.cloud.vault.uri")).startsWith("https://")
         assertThat(environment.getProperty("spring.cloud.vault.ssl.trust-store"))
             .isEqualTo("file:${TestPki.dir}/openbao-ca.pem")
+        assertThat(environment.getProperty("spring.cloud.vault.ssl.key-store"))
+            .isEqualTo("file:${TestPki.dir}/openbao-client.p12")
+    }
+
+    private fun health(client: HttpClient) = client.send(
+        HttpRequest.newBuilder().uri(URI.create("${openBao.address}/v1/sys/health")).build(),
+        HttpResponse.BodyHandlers.ofString(),
+    )
+
+    @Test
+    fun `OpenBao answers a client with web's client cert`() {
+        assertThat(health(openBao.httpClient).statusCode()).isEqualTo(200)
+    }
+
+    @Test
+    fun `OpenBao refuses a client without a client cert`() {
+        assertThatThrownBy { health(OpenBaoTls.httpClient(clientKeys = null)) }.isInstanceOf(IOException::class.java)
+    }
+
+    @Test
+    fun `OpenBao refuses a client cert from the service PKI`() {
+        // The app's real identity towards the optimizer and postgres: valid,
+        // but from the PKI root, not the bootstrap CA.
+        val pkiClient = OpenBaoTls.pemKeyStore(TestPki.cert("app-client"), TestPki.key("app-client"))
+        assertThatThrownBy { health(OpenBaoTls.httpClient(clientKeys = pkiClient)) }.isInstanceOf(IOException::class.java)
     }
 
     @Test
@@ -230,6 +257,7 @@ class OpenBaoIntegrationTest {
 
     @Test
     fun `a client that doesn't trust openbao-ca_pem fails the handshake`() {
+        // No client cert either; the server cert check fails first.
         val request = HttpRequest.newBuilder().uri(URI.create("${openBao.address}/v1/sys/health")).build()
         assertThatThrownBy { HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString()) }
             .isInstanceOf(SSLHandshakeException::class.java)

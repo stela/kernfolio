@@ -9,10 +9,10 @@ import java.nio.file.Path
 
 /**
  * OpenBao dev server (in-memory, unsealed, fixed root token) for integration
- * tests, started like docker-compose.dev.yml: its API on 8200 over TLS, from
- * the real openbao/config/listener.hcl and a cert made by setup-tls.sh
- * ([tlsDir], by default [OpenBaoTls.dir]). Dev mode's own plain-HTTP listener
- * stays on loopback inside the container.
+ * tests, started like docker-compose.dev.yml: its API on 8200 over mutual
+ * TLS, from the real openbao/config/listener.hcl and certs made by
+ * setup-tls.sh ([tlsDir], by default [OpenBaoTls.dir]). Dev mode's own
+ * plain-HTTP listener stays on loopback inside the container.
  *
  * Testcontainers' VaultContainer only accepts `hashicorp/vault` images, so this
  * is a plain GenericContainer. Unlike VaultContainer's init commands, [bao]
@@ -24,9 +24,9 @@ class OpenBaoContainer(val token: String, private val tlsDir: Path = OpenBaoTls.
     init {
         withExposedPorts(PORT)
         withCopyFileToContainer(KernfolioPostgresContainer.repoFile("openbao/config/listener.hcl"), "/openbao/config/listener.hcl")
-        // On the volume the key is openbao-owned 0600; this root-owned copy is
-        // 0644 so the `openbao` user can read it.
-        for (file in OpenBaoTls.FILES) {
+        // On the volume the keys are openbao-owned 0600; these root-owned
+        // copies are 0644 so the `openbao` user can read them.
+        for (file in OpenBaoTls.OPENBAO_FILES) {
             withCopyFileToContainer(MountableFile.forHostPath(tlsDir.resolve(file), 0b110_100_100), "/openbao/certs/$file")
         }
         withCommand(
@@ -36,14 +36,17 @@ class OpenBaoContainer(val token: String, private val tlsDir: Path = OpenBaoTls.
         // Read by `bao` CLI invocations through execInContainer.
         withEnv("BAO_ADDR", "https://127.0.0.1:$PORT")
         withEnv("BAO_CACERT", "/openbao/certs/${OpenBaoTls.CA}")
+        withEnv("BAO_CLIENT_CERT", "/openbao/certs/openbao-client.pem")
+        withEnv("BAO_CLIENT_KEY", "/openbao/certs/openbao-client-key.pem")
         withEnv("BAO_TOKEN", token)
-        waitingFor(Wait.forHttps("/v1/sys/health").allowInsecure().forStatusCode(200))
+        // Like compose's healthcheck. An HTTP wait can't present a client cert.
+        waitingFor(Wait.forSuccessfulCommand("bao status"))
     }
 
     /** Base URL as seen from the test JVM. */
     val address: String get() = "https://$host:${getMappedPort(PORT)}"
 
-    /** A client that trusts this server's listener cert, and nothing else. */
+    /** A client that trusts this server's listener cert, and nothing else, and presents web's client cert. */
     val httpClient: HttpClient by lazy { OpenBaoTls.httpClient(tlsDir) }
 
     /** Runs `bao <args>` inside the container. */

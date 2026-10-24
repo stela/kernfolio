@@ -11,7 +11,7 @@ import java.nio.file.Path
  * every service drops all capabilities and can't gain privileges, each one
  * mounts only its own certs volume, the uids it runs as are the ones
  * openbao/init/common.sh gives the private keys to, and every OpenBao client
- * reaches OpenBao over TLS.
+ * reaches OpenBao over mutual TLS.
  */
 class ComposeHardeningTest {
 
@@ -124,15 +124,17 @@ class ComposeHardeningTest {
         (this["environment"] as Map<String, Any?>?).orEmpty().mapValues { it.value.toString() }
 
     @Test
-    fun `every OpenBao client uses https and names the listener's trust anchor`() {
+    fun `every OpenBao client uses https, trusts the listener's anchor and has a client cert`() {
         val clients = allServices.filterValues { "BAO_ADDR" in it.environment() }
         assertThat(clients.keys).contains("openbao", "openbao-init", "openbao-db-init", "web")
         for ((name, service) in clients) {
             val env = service.environment()
             assertThat(env.getValue("BAO_ADDR")).describedAs("$name BAO_ADDR").startsWith("https://")
-            // web trusts it through spring.cloud.vault.ssl.trust-store instead.
+            // web uses spring.cloud.vault.ssl.* instead (OpenBaoIntegrationTest).
             if (name != "web") {
                 assertThat(env["BAO_CACERT"]).describedAs("$name BAO_CACERT").endsWith("/openbao-ca.pem")
+                assertThat(env["BAO_CLIENT_CERT"]).describedAs("$name BAO_CLIENT_CERT").endsWith("/openbao-client.pem")
+                assertThat(env["BAO_CLIENT_KEY"]).describedAs("$name BAO_CLIENT_KEY").endsWith("/openbao-client-key.pem")
             }
         }
     }
@@ -147,5 +149,13 @@ class ComposeHardeningTest {
             .contains("-dev", "-config=/openbao/config/listener.hcl", "-dev-listen-address=127.0.0.1:")
             .doesNotContain("openbao.hcl")
         assertThat(prod["depends_on"].toString()).contains("openbao-tls-init")
+    }
+
+    @Test
+    fun `OpenBao's listener requires client certs from the bootstrap CA`() {
+        val listener = Files.readString(repo.resolve("openbao/config/listener.hcl"))
+        assertThat(listener).containsPattern("""(?m)^\s*tls_require_and_verify_client_cert\s*=\s*true""")
+        assertThat(listener).containsPattern("""(?m)^\s*tls_client_ca_file\s*=\s*"/openbao/certs/openbao-ca.pem"""")
+        assertThat(listener).doesNotContain("tls_disable")
     }
 }

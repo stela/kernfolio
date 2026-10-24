@@ -18,8 +18,8 @@ import java.nio.file.attribute.PosixFilePermissions
  * `foreign-client` comes from an unrelated root CA (CN `app`, like the real
  * app cert) for "wrong CA" negative tests.
  *
- * Also holds [OpenBaoTls]'s `openbao-ca.pem`, as certs_web does, for Spring
- * Cloud Vault's trust store.
+ * Also holds [OpenBaoTls]'s `openbao-ca.pem` and `openbao-client.p12`, as
+ * certs_web does, for Spring Cloud Vault's mTLS to OpenBao.
  *
  * Started once per test JVM and shared by all test classes.
  */
@@ -31,7 +31,9 @@ object TestPki {
     private val openBao = OpenBaoContainer(TOKEN)
 
     init {
-        Files.copy(OpenBaoTls.dir.resolve(OpenBaoTls.CA), dir.resolve(OpenBaoTls.CA))
+        for (file in listOf(OpenBaoTls.CA, OpenBaoTls.WEB_P12)) {
+            Files.copy(OpenBaoTls.dir.resolve(file), dir.resolve(file))
+        }
         openBao.start()
         openBao.bao("secrets", "enable", "pki")
         openBao.bao("secrets", "enable", "-path=pki_int", "pki")

@@ -13,9 +13,10 @@ x-hardened: &hardened
 
 services:
   openbao-tls-init:
-    # Makes OpenBao's listener cert before OpenBao starts (its PKI can't), and
-    # puts the trust anchor openbao-ca.pem where OpenBao's clients find it:
-    # certs_openbao (openbao, openbao-init, openbao-db-init) and certs_web.
+    # Makes the certs for OpenBao's mutual-TLS listener before OpenBao starts
+    # (its PKI can't): the server cert, client certs for OpenBao's clients,
+    # and the trust anchor openbao-ca.pem. In certs_openbao (openbao,
+    # openbao-init, openbao-db-init) and certs_web.
     # Root with the same two capabilities as openbao-init, for the same reason.
     # See openbao/init/setup-tls.sh.
     <<: *hardened
@@ -41,12 +42,14 @@ services:
       # For the healthcheck and `docker compose exec openbao bao ...`.
       BAO_ADDR: "https://127.0.0.1:8200"
       BAO_CACERT: /openbao/certs/openbao-ca.pem
+      BAO_CLIENT_CERT: /openbao/certs/openbao-client.pem
+      BAO_CLIENT_KEY: /openbao/certs/openbao-client-key.pem
     volumes:
       # Raft data dir; see openbao/config/openbao.hcl for why it's /openbao/file.
       - openbao_data:/openbao/file
       - ./openbao/config:/openbao/config:ro
-      # Listener cert (openbao/init/setup-tls.sh) and the client cert for the
-      # Postgres database engine (openbao/init/setup-db.sh).
+      # Listener and CLI certs (openbao/init/setup-tls.sh) and the client cert
+      # for the Postgres database engine (openbao/init/setup-db.sh).
       - certs_openbao:/openbao/certs:ro
     command: bao server -config=/openbao/config/openbao.hcl -config=/openbao/config/listener.hcl
     healthcheck:
@@ -85,6 +88,9 @@ services:
     environment:
       BAO_ADDR: "https://openbao:8200"
       BAO_CACERT: /openbao/certs/openbao/openbao-ca.pem
+      # openbao-cli's cert; root reads its uid-100 key through DAC_READ_SEARCH.
+      BAO_CLIENT_CERT: /openbao/certs/openbao/openbao-client.pem
+      BAO_CLIENT_KEY: /openbao/certs/openbao/openbao-client-key.pem
 
   postgres:
     <<: *hardened
@@ -153,6 +159,8 @@ services:
     environment:
       BAO_ADDR: "https://openbao:8200"
       BAO_CACERT: /openbao/certs/openbao-ca.pem
+      BAO_CLIENT_CERT: /openbao/certs/openbao-client.pem
+      BAO_CLIENT_KEY: /openbao/certs/openbao-client-key.pem
 
   optimizer:
     <<: *hardened
@@ -183,7 +191,7 @@ services:
     user: "1002:1001"
     mem_limit: 512m
     environment:
-      # Trusted via spring.cloud.vault.ssl.trust-store (application.yml).
+      # mTLS via spring.cloud.vault.ssl.* (application.yml).
       BAO_ADDR: "https://openbao:8200"
       SPRING_PROFILES_ACTIVE: prod
       SPRING_CLOUD_VAULT_TOKEN: "${BAO_APP_TOKEN:-dev-root-token}"

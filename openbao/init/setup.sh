@@ -3,9 +3,11 @@ set -e
 
 . "$(dirname "$0")/common.sh"
 
-# OpenBao's listener cert comes from openbao-tls-init (setup-tls.sh).
+# OpenBao's mTLS certs come from openbao-tls-init (setup-tls.sh).
 export BAO_ADDR="${BAO_ADDR:-https://openbao:8200}"
 export BAO_CACERT="${BAO_CACERT:-$OPENBAO_CA}"
+export BAO_CLIENT_CERT="${BAO_CLIENT_CERT:-$OPENBAO_DIR/openbao-client.pem}"
+export BAO_CLIENT_KEY="${BAO_CLIENT_KEY:-$OPENBAO_DIR/openbao-client-key.pem}"
 export BAO_TOKEN="${BAO_TOKEN:-dev-root-token}"
 
 # Secrets layout and place(): see common.sh.

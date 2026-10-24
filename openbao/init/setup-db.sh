@@ -2,8 +2,10 @@
 set -e
 
 export BAO_ADDR="${BAO_ADDR:-https://openbao:8200}"
-# Trust anchor for OpenBao's listener (openbao/init/setup-tls.sh).
+# OpenBao's listener is mutual TLS (openbao/init/setup-tls.sh).
 export BAO_CACERT="${BAO_CACERT:-/openbao/certs/openbao-ca.pem}"
+export BAO_CLIENT_CERT="${BAO_CLIENT_CERT:-/openbao/certs/openbao-client.pem}"
+export BAO_CLIENT_KEY="${BAO_CLIENT_KEY:-/openbao/certs/openbao-client-key.pem}"
 export BAO_TOKEN="${BAO_TOKEN:-dev-root-token}"
 
 # Postgres superuser password. openbao-init writes it into this container's
