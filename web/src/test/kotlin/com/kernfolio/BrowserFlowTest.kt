@@ -36,6 +36,7 @@ import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import org.testcontainers.Testcontainers
 import org.testcontainers.containers.BrowserWebDriverContainer
+import org.testcontainers.utility.DockerImageName
 import java.math.BigDecimal
 import java.time.Duration
 import java.time.LocalDate
@@ -101,14 +102,24 @@ class BrowserFlowTest {
             setCapability("goog:loggingPrefs", logPrefs)
         }
 
-        chrome = BrowserWebDriverContainer<Nothing>()
-            .withCapabilities(chromeOptions)
-        chrome.withEnv("LANG", "sv_SE.UTF-8")
-        chrome.withEnv("LANGUAGE", "sv_SE:sv")
-        chrome.start()
+        // Chromium rather than the default standalone-chrome image: Chrome is
+        // only built for amd64, so on arm64 hosts it ran under emulation and
+        // was slow enough to time out waits. Same version as selenium-java.
+        chrome = BrowserWebDriverContainer<Nothing>(
+            DockerImageName.parse("selenium/standalone-chromium:4.51.0")
+                .asCompatibleSubstituteFor("selenium/standalone-chrome")
+        ).apply {
+            withCapabilities(chromeOptions)
+            withRecordingMode(BrowserWebDriverContainer.VncRecordingMode.SKIP, null)
+            withEnv("LANG", "sv_SE.UTF-8")
+            withEnv("LANGUAGE", "sv_SE:sv")
+            start()
+        }
 
         driver = RemoteWebDriver(chrome.seleniumAddress, chromeOptions)
-        wait = WebDriverWait(driver, Duration.ofSeconds(15))
+        // Generous: the whole class shares the machine with other containers
+        // (and sometimes a docker build).
+        wait = WebDriverWait(driver, Duration.ofSeconds(30))
 
         // Fail loudly if the pin silently fell back to the image default.
         val resolved = driver.executeScript("return new Intl.NumberFormat().resolvedOptions().locale") as String
@@ -135,6 +146,11 @@ class BrowserFlowTest {
 
     private fun waitForUrl(containsPath: String) {
         wait.until(ExpectedConditions.urlContains(containsPath))
+    }
+
+    /** Accepts the JS confirm() a click just opened. */
+    private fun acceptConfirm() {
+        wait.until(ExpectedConditions.alertIsPresent()).accept()
     }
 
     private fun waitForPortfolioDetail() {
@@ -338,7 +354,7 @@ class BrowserFlowTest {
         val row = lastBtn.findElement(By.xpath("./ancestor::tr"))
         lastBtn.click()
 
-        driver.switchTo().alert().accept()
+        acceptConfirm()
         wait.until(ExpectedConditions.stalenessOf(row))
 
         // Re-add position
@@ -361,7 +377,8 @@ class BrowserFlowTest {
         assertPageContains("Edit Portfolio")
         fillField("name", "Browser Portfolio Edited")
         driver.findElement(By.cssSelector("button[type='submit']")).click()
-        waitForUrl(portfolioPath!!)
+        // Not urlContains: the edit page's own URL already contains portfolioPath.
+        wait.until(ExpectedConditions.urlMatches(Regex.escape(portfolioPath!!) + "$"))
         assertPageContains("Browser Portfolio Edited")
     }
 
@@ -428,16 +445,10 @@ class BrowserFlowTest {
         driver.findElement(By.id("advanced-toggle")).click()
         wait.until { !(panel.getAttribute("class") ?: "").contains("hidden") }
 
-        // Submit optimization
+        // Submit optimization. No check for the spinner in between: a fast
+        // server navigates to the results page (which has none) before the
+        // test could see it.
         driver.findElement(By.cssSelector("#optimize-form button[type='submit']")).click()
-
-        // Spinner should appear
-        wait.until {
-            val spinner = driver.findElement(By.id("spinner"))
-            !(spinner.getAttribute("class") ?: "").contains("hidden")
-        }
-
-        // Wait for redirect to results
         waitForUrl("/results/")
         resultsPath = driver.currentUrl!!.replace(baseUrl(), "")
     }
@@ -449,18 +460,16 @@ class BrowserFlowTest {
         assertPageContains("Optimization Results")
         assertPageContains("black_litterman")
 
-        // Wait for Chart.js canvases
-        val pie = wait.until(ExpectedConditions.presenceOfElementLocated(By.id("allocation-pie")))
-        val bar = wait.until(ExpectedConditions.presenceOfElementLocated(By.id("allocation-bar")))
-
-        wait.until { pie.size.width > 0 && pie.size.height > 0 }
-        wait.until { bar.size.width > 0 && bar.size.height > 0 }
-
-        // Verify Chart.js actually rendered
-        val pieRendered = driver.executeScript(
-            "return typeof Chart !== 'undefined' && Chart.getChart(document.getElementById('allocation-pie')) !== undefined"
-        ) as Boolean
-        assertThat(pieRendered).isTrue()
+        // Each chart is created only once its JSON fetch returns, so wait for
+        // the Chart.js instance itself (a bare canvas already has a size).
+        for (canvas in listOf("allocation-pie", "allocation-bar")) {
+            wait.until {
+                driver.executeScript(
+                    "return typeof Chart !== 'undefined' && Chart.getChart(document.getElementById(arguments[0])) !== undefined",
+                    canvas,
+                ) == true
+            }
+        }
 
         // Metric cards and the weights table are filled client-side from
         // the JSON API, formatted in the (sv-SE) browser locale. Values
@@ -500,7 +509,15 @@ class BrowserFlowTest {
     fun `admin toggle user via JS fetch`() {
         loginAs("badmin", "Br0wserP@ss!")
         navigateTo("/admin/users")
+        try {
+            toggleBuserOffAndOn()
+        } finally {
+            // Later tests log in as buser; don't let a failure here cascade.
+            jdbcTemplate.update("UPDATE users SET enabled = true WHERE username = 'buser'")
+        }
+    }
 
+    private fun toggleBuserOffAndOn() {
         // Find Disable button for buser
         val disableBtn = wait.until(
             ExpectedConditions.elementToBeClickable(
@@ -557,7 +574,7 @@ class BrowserFlowTest {
         navigateTo(portfolioPath!!)
 
         driver.findElement(By.cssSelector("form[data-confirm] button[type='submit']")).click()
-        driver.switchTo().alert().accept()
+        acceptConfirm()
         waitForUrl("/dashboard")
         assertPageContains("No portfolios yet")
     }
@@ -587,7 +604,7 @@ class BrowserFlowTest {
 
         // Clean up
         driver.findElement(By.cssSelector("form[data-confirm] button[type='submit']")).click()
-        driver.switchTo().alert().accept()
+        acceptConfirm()
         waitForUrl("/dashboard")
     }
 
@@ -614,7 +631,7 @@ class BrowserFlowTest {
 
         // Clean up
         driver.findElement(By.cssSelector("form[data-confirm] button[type='submit']")).click()
-        driver.switchTo().alert().accept()
+        acceptConfirm()
         waitForUrl("/dashboard")
     }
 
@@ -663,7 +680,7 @@ class BrowserFlowTest {
 
         // Clean up
         driver.findElement(By.cssSelector("form[data-confirm] button[type='submit']")).click()
-        driver.switchTo().alert().accept()
+        acceptConfirm()
         waitForUrl("/dashboard")
     }
 
@@ -731,7 +748,7 @@ class BrowserFlowTest {
 
         // Clean up
         driver.findElement(By.cssSelector("form[data-confirm] button[type='submit']")).click()
-        driver.switchTo().alert().accept()
+        acceptConfirm()
         waitForUrl("/dashboard")
     }
 
@@ -814,7 +831,7 @@ class BrowserFlowTest {
 
         // Clean up so this portfolio doesn't clutter later tests.
         driver.findElement(By.cssSelector("form[data-confirm] button[type='submit']")).click()
-        driver.switchTo().alert().accept()
+        acceptConfirm()
         waitForUrl("/dashboard")
     }
 
@@ -899,7 +916,7 @@ class BrowserFlowTest {
 
         // Clean up
         driver.findElement(By.cssSelector("form[data-confirm] button[type='submit']")).click()
-        driver.switchTo().alert().accept()
+        acceptConfirm()
         waitForUrl("/dashboard")
     }
 
@@ -943,7 +960,7 @@ class BrowserFlowTest {
         assertThat(saved.second).isEqualByComparingTo("0.305")
 
         driver.findElement(By.cssSelector("form[data-confirm] button[type='submit']")).click()
-        driver.switchTo().alert().accept()
+        acceptConfirm()
         waitForUrl("/dashboard")
     }
 
