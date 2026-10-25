@@ -6,7 +6,14 @@ export BAO_ADDR="${BAO_ADDR:-https://openbao:8200}"
 export BAO_CACERT="${BAO_CACERT:-/openbao/certs/openbao-ca.pem}"
 export BAO_CLIENT_CERT="${BAO_CLIENT_CERT:-/openbao/certs/openbao-client.pem}"
 export BAO_CLIENT_KEY="${BAO_CLIENT_KEY:-/openbao/certs/openbao-client-key.pem}"
-export BAO_TOKEN="${BAO_TOKEN:-dev-root-token}"
+
+# Wires up the database engine, which only needs doing at bootstrap: OpenBao
+# keeps the config. Without BAO_INIT_TOKEN (see setup.sh) there's nothing to do.
+if [ -z "${BAO_INIT_TOKEN:-}" ]; then
+    echo "=== No BAO_INIT_TOKEN: database engine left as configured ==="
+    exit 0
+fi
+export BAO_TOKEN="$BAO_INIT_TOKEN"
 
 # Postgres superuser password. openbao-init writes it into this container's
 # volume (certs_openbao) and, identically, into postgres's (certs_postgres),

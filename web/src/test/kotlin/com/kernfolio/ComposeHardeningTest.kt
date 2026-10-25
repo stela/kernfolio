@@ -95,6 +95,7 @@ class ComposeHardeningTest {
                     "certs_optimizer:/openbao/certs/optimizer",
                     "certs_postgres:/openbao/certs/postgres",
                     "certs_openbao:/openbao/certs/openbao",
+                    "certs_renewer:/openbao/certs/renewer",
                 ),
                 "postgres" to listOf("certs_postgres:/openbao/certs:ro"),
                 "openbao-db-init" to listOf("certs_openbao:/openbao/certs:ro"),
@@ -137,6 +138,25 @@ class ComposeHardeningTest {
                 assertThat(env["BAO_CLIENT_KEY"]).describedAs("$name BAO_CLIENT_KEY").endsWith("/openbao-client-key.pem")
             }
         }
+    }
+
+    @Test
+    fun `prod has no dev token, and only the init containers get BAO_INIT_TOKEN, from the operator`() {
+        val prodText = Files.readString(repo.resolve("docker-compose.yml"))
+        assertThat(prodText).doesNotContain("dev-root-token", "BAO_APP_TOKEN", "SPRING_CLOUD_VAULT_TOKEN")
+        val prod = services("docker-compose.yml")
+        val withInitToken = prod.filterValues { "BAO_INIT_TOKEN" in it.environment() }
+        assertThat(withInitToken.keys).containsExactlyInAnyOrder("openbao-init", "openbao-db-init")
+        for ((name, service) in withInitToken) {
+            assertThat(service.environment().getValue("BAO_INIT_TOKEN")).describedAs(name).isEqualTo("\${BAO_INIT_TOKEN:-}")
+        }
+        // No service gets a token through its environment, other than those two.
+        for ((name, service) in allServices) {
+            if (name in withInitToken || name == "openbao") continue
+            assertThat(service.environment().keys).describedAs("$name env")
+                .noneMatch { it.contains("TOKEN") }
+        }
+        assertThat(Files.readString(repo.resolve("web/src/main/resources/application.yml"))).doesNotContain("dev-root-token")
     }
 
     @Test

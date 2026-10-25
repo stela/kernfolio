@@ -25,7 +25,20 @@ spring:
         trust-store-type: PEM
         key-store: file:${openbao.certs.dir}/openbao-client.p12
         key-store-type: PKCS12
-      token: ${SPRING_CLOUD_VAULT_TOKEN:dev-root-token}
+      # The token is openbao.certs.token, minted by openbao-init (VaultBootstrap,
+      # FileTokenAuthentication). spring.cloud.vault.token is only the
+      # fallback for when that file is missing.
+      # Token calls go through the same (imperative) client as everything
+      # else; webflux on the classpath would otherwise make them reactive.
+      reactive:
+        enabled: false
+      # The token is periodic (30 days): renew it halfway, not 5 s before it
+      # expires (the default), so a sleeping laptop or a short outage of
+      # OpenBao doesn't lose it.
+      session:
+        lifecycle:
+          refresh-before-expiry: 360h
+          expiry-threshold: 1m
       kv:
         enabled: true
         backend: secret
@@ -47,6 +60,8 @@ openbao:
     ca: ${openbao.certs.dir}/ca.pem
     cert: ${openbao.certs.dir}/app-client.pem
     key: ${openbao.certs.dir}/app-client-key.pem
+    # web's OpenBao token (VaultBootstrap).
+    token: ${openbao.certs.dir}/openbao-token
 
 gg:
   jte:

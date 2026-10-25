@@ -16,13 +16,15 @@ services:
     ports:
       - "8200:8200"
 
+  # Dev bootstraps on every up, with the root token from dev.hcl's self-init.
+  # Idempotent, and web still gets its scoped token, as in prod.
   openbao-init:
     environment:
-      BAO_TOKEN: "dev-root-token"
+      BAO_INIT_TOKEN: "dev-root-token"
 
   openbao-db-init:
     environment:
-      BAO_TOKEN: "dev-root-token"
+      BAO_INIT_TOKEN: "dev-root-token"
 
   postgres:
     ports:
@@ -42,7 +44,6 @@ services:
       # `tls`: same mTLS-on-8443 listener as prod, reached via Caddy at
       # https://localhost. (A bare `dev` bootRun outside docker stays plain HTTP.)
       SPRING_PROFILES_ACTIVE: dev,tls
-      SPRING_CLOUD_VAULT_TOKEN: "dev-root-token"
       BPL_JVM_THREAD_COUNT: 50
       JAVA_TOOL_OPTIONS: "-Xmx192m -Xss512k -XX:MaxMetaspaceSize=128m -XX:ReservedCodeCacheSize=48m -XX:MaxDirectMemorySize=10m"
       # Diagnostics: surface Spring Security authentication decisions (bad

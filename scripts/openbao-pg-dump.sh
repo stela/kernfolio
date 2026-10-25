@@ -4,11 +4,14 @@
 set -e
 
 BAO_ADDR="${BAO_ADDR:-https://openbao:8200}"
-BAO_TOKEN="${BAO_TOKEN:?BAO_TOKEN is required}"
 DB_HOST="${DB_HOST:-postgres}"
 DB_NAME="${DB_NAME:-kernfolio}"
 
 CERT_DIR="${OPENBAO_CERT_DIR:-/openbao/certs}"
+# web's own token (openbao/init/setup.sh), unless one is given.
+if [ -z "${BAO_TOKEN:-}" ]; then
+  BAO_TOKEN="$(cat "$CERT_DIR/openbao-token")" || { echo "ERROR: set BAO_TOKEN or mount certs_web" >&2; exit 1; }
+fi
 
 # Request dynamic credentials from OpenBao (the API still uses the X-Vault-Token
 # header). Its listener is mutual TLS with openbao-ca.pem; present web's client

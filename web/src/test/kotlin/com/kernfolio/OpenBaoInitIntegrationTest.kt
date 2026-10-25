@@ -8,7 +8,7 @@ import org.testcontainers.containers.GenericContainer
 import org.testcontainers.containers.Network
 import java.nio.file.Files
 
-private const val BAO_TOKEN = "init-test-token"
+private const val INIT_TOKEN = "init-test-token"
 
 /**
  * Runs the real openbao/init/setup-tls.sh and setup.sh in the real
@@ -17,7 +17,9 @@ private const val BAO_TOKEN = "init-test-token"
  * setup-tls.sh first, then OpenBao starts with the listener certs it made, then
  * setup.sh talks to it over mutual TLS. Checks each per-service certs volume: it holds
  * exactly that service's files, and every private key belongs to the service's
- * uid at 0600. Renewal of the listener certs is in [OpenBaoTlsInitIntegrationTest].
+ * uid at 0600. Also the token bootstrap: with BAO_INIT_TOKEN it mints web's and
+ * cert-renewer's scoped tokens; without, it only issues certs, with the renewer's.
+ * Renewal of the listener certs is in [OpenBaoTlsInitIntegrationTest].
  */
 class OpenBaoInitIntegrationTest {
 
@@ -34,6 +36,7 @@ class OpenBaoInitIntegrationTest {
         private val expected = mapOf(
             "web" to mapOf(
                 "ca.pem" to CA, "openbao-ca.pem" to CA, "openbao-client.p12" to "1002:0 600",
+                "openbao-token" to "1002:0 600",
                 "app.pem" to "0:0 644", "app-key.pem" to "1002:0 600",
                 "app-client.pem" to "0:0 644", "app-client-key.pem" to "1002:0 600",
             ),
@@ -55,7 +58,11 @@ class OpenBaoInitIntegrationTest {
                 "postgres-admin-client.pem" to "0:0 644", "postgres-admin-client-key.pem" to "100:0 600",
                 "pg_root_password" to "100:0 600",
             ),
+            "renewer" to mapOf("openbao-token" to "0:0 600"),
         )
+
+        private const val WEB_TOKEN = "/openbao/certs/web/openbao-token"
+        private const val RENEWER_TOKEN = "/openbao/certs/renewer/openbao-token"
 
         private val init = GenericContainer(OpenBaoTls.initImage).apply {
             withNetwork(sharedNetwork)
@@ -64,8 +71,11 @@ class OpenBaoInitIntegrationTest {
             withEnv("BAO_CACERT", "/openbao/certs/openbao/openbao-ca.pem")
             withEnv("BAO_CLIENT_CERT", "/openbao/certs/openbao/openbao-client.pem")
             withEnv("BAO_CLIENT_KEY", "/openbao/certs/openbao/openbao-client-key.pem")
-            withEnv("BAO_TOKEN", BAO_TOKEN)
+            withEnv("BAO_INIT_TOKEN", INIT_TOKEN)
             withCopyFileToContainer(KernfolioPostgresContainer.repoFile("openbao/init/common.sh"), "/openbao/init/common.sh")
+            for (policy in listOf("kernfolio-app", "kernfolio-cert-renewer")) {
+                withCopyFileToContainer(KernfolioPostgresContainer.repoFile("openbao/init/policies/$policy.hcl"), "/openbao/init/policies/$policy.hcl")
+            }
             for (script in listOf("setup-tls.sh", "setup.sh")) {
                 withCopyFileToContainer(KernfolioPostgresContainer.repoFile("openbao/init/$script", 0b111_101_101), "/openbao/init/$script")
             }
@@ -90,7 +100,7 @@ class OpenBaoInitIntegrationTest {
             // OpenBao's mTLS certs, as setup-tls.sh left them on the volumes.
             val tlsDir = Files.createTempDirectory("kernfolio-init-test-openbao-tls")
             OpenBaoTls.copyOut(tlsDir) { path -> exec("base64", path) }
-            openBao = OpenBaoContainer(BAO_TOKEN, tlsDir)
+            openBao = OpenBaoContainer(INIT_TOKEN, tlsDir)
                 .withNetwork(sharedNetwork)
                 .withNetworkAliases("openbao")
             openBao.start()
@@ -104,6 +114,24 @@ class OpenBaoInitIntegrationTest {
 
         // setup.sh waits for OpenBao forever; bound it so a broken setup fails.
         private fun runSetup() = exec("timeout", "120", "/openbao/init/setup.sh")
+
+        /** A later `docker compose up`: no BAO_INIT_TOKEN. */
+        private fun runSetupWithoutInitToken() = exec("sh", "-c", "BAO_INIT_TOKEN= timeout 120 /openbao/init/setup.sh")
+
+        /** `bao <args>` with the token in [tokenFile]; returns the exit code and output. */
+        private fun baoAs(tokenFile: String, vararg args: String): Pair<Int, String> {
+            val result = init.execInContainer("sh", "-c", "BAO_TOKEN=\"\$(cat $tokenFile)\" bao \"\$@\"", "bao", *args)
+            return result.exitCode to (result.stdout + result.stderr).trim()
+        }
+
+        /**
+         * A field of the token's own data. Not `-field=`: for `renewable` that
+         * reads the lookup response's flag, which is always false.
+         */
+        private fun lookup(tokenFile: String, field: String): String = exec(
+            "sh", "-c",
+            "BAO_TOKEN=\"\$(cat $tokenFile)\" bao token lookup -format=json | jq -r '.data.$field | if type == \"array\" then join(\",\") else tostring end'",
+        ).trim()
 
         private fun ownership(): Map<String, Map<String, String>> = expected.keys.associateWith { dir ->
             exec("sh", "-c", "cd /openbao/certs/$dir && stat -c '%n %u:%g %a' *").lines()
@@ -123,13 +151,85 @@ class OpenBaoInitIntegrationTest {
 
         // A rerun has to replace files that now belong to other users, with no
         // DAC_OVERRIDE. It must also keep the CA and the postgres password.
+        val webToken = exec("cat", WEB_TOKEN)
+        val renewerToken = exec("cat", RENEWER_TOKEN)
         val output = runSetup()
-        assertThat(output).contains("Reusing existing root CA", "Reusing existing pg_root_password")
+        assertThat(output).contains(
+            "Reusing existing root CA", "Reusing existing pg_root_password",
+            "Reusing the kernfolio-app token", "Reusing the kernfolio-cert-renewer token",
+        )
+        assertThat(exec("cat", WEB_TOKEN)).isEqualTo(webToken)
+        assertThat(exec("cat", RENEWER_TOKEN)).isEqualTo(renewerToken)
         assertThat(ownership()).isEqualTo(expected)
         assertThat(exec("cat", "/openbao/certs/web/ca.pem")).isEqualTo(caBefore)
         // setup.sh leaves setup-tls.sh's files alone.
         assertThat(exec("cat", "/openbao/certs/openbao/openbao.pem")).isEqualTo(listenerCertBefore)
         assertThat(exec("cat", "/openbao/certs/openbao/pg_root_password")).isEqualTo(passwordBefore)
         assertThat(exec("cat", "/openbao/certs/postgres/pg_root_password")).isEqualTo(passwordBefore)
+    }
+
+    @Test
+    fun `bootstrap mints periodic orphan tokens with only their own policy`() {
+        runSetup()
+        for ((file, policy) in listOf(WEB_TOKEN to "kernfolio-app", RENEWER_TOKEN to "kernfolio-cert-renewer")) {
+            assertThat(lookup(file, "policies")).describedAs(file).isEqualTo("default,$policy")
+            assertThat(lookup(file, "orphan")).describedAs(file).isEqualTo("true")
+            // Periodic through its role: lookup shows no `period`, but the
+            // role, a 30-day TTL and no max TTL, so renewals can go on forever.
+            assertThat(lookup(file, "role")).describedAs(file).isEqualTo(policy)
+            assertThat(lookup(file, "creation_ttl")).describedAs(file).isEqualTo("2592000")
+            assertThat(lookup(file, "explicit_max_ttl")).describedAs(file).isEqualTo("0")
+            assertThat(lookup(file, "renewable")).describedAs(file).isEqualTo("true")
+        }
+        // The renewer's token issues certs and can do nothing else.
+        assertThat(baoAs(RENEWER_TOKEN, "write", "-field=serial_number", "pki_int/issue/kernfolio-service", "common_name=caddy").first).isZero()
+        assertThat(baoAs(RENEWER_TOKEN, "kv", "get", "secret/kernfolio").second).contains("Code: 403")
+        assertThat(baoAs(RENEWER_TOKEN, "secrets", "list").second).contains("Code: 403")
+        // Web's reads its secrets, but not the postgres superuser password.
+        assertThat(baoAs(WEB_TOKEN, "kv", "get", "-field=admin.email", "secret/kernfolio")).isEqualTo(0 to "admin@kernfolio.dev")
+        assertThat(baoAs(WEB_TOKEN, "kv", "get", "secret/kernfolio/pg-root").second).contains("Code: 403")
+        assertThat(baoAs(WEB_TOKEN, "write", "-field=serial_number", "pki_int/issue/kernfolio-service", "common_name=caddy").second)
+            .contains("Code: 403")
+    }
+
+    @Test
+    fun `without BAO_INIT_TOKEN a rerun only issues certs, with the renewer's token`() {
+        runSetup()
+        val webToken = exec("cat", WEB_TOKEN)
+        val renewerToken = exec("cat", RENEWER_TOKEN)
+        val caddyCert = exec("cat", "/openbao/certs/caddy/caddy-client.pem")
+
+        assertThat(runSetupWithoutInitToken()).contains("only issuing certificates").doesNotContain("Minting")
+        assertThat(ownership()).isEqualTo(expected)
+        assertThat(exec("cat", WEB_TOKEN)).isEqualTo(webToken)
+        assertThat(exec("cat", RENEWER_TOKEN)).isEqualTo(renewerToken)
+        assertThat(exec("cat", "/openbao/certs/caddy/caddy-client.pem")).isNotEqualTo(caddyCert)
+        exec("openssl", "verify", "-CAfile", "/openbao/certs/caddy/ca.pem", "-untrusted", "/openbao/certs/caddy/caddy-client.pem",
+            "/openbao/certs/caddy/caddy-client.pem")
+    }
+
+    @Test
+    fun `without BAO_INIT_TOKEN and a working renewer token it fails, pointing at the README`() {
+        runSetup()
+        exec("mv", RENEWER_TOKEN, "$RENEWER_TOKEN.saved")
+        try {
+            val result = init.execInContainer("sh", "-c", "BAO_INIT_TOKEN= timeout 120 /openbao/init/setup.sh")
+            assertThat(result.exitCode).isNotZero()
+            assertThat(result.stderr).contains("OpenBao isn't bootstrapped", "README")
+        } finally {
+            exec("mv", "$RENEWER_TOKEN.saved", RENEWER_TOKEN)
+        }
+    }
+
+    @Test
+    fun `bootstrap reruns keep the operator's KV values and re-mint a revoked token`() {
+        runSetup()
+        exec("sh", "-c", "BAO_TOKEN=$INIT_TOKEN bao kv patch secret/kernfolio admin.email=ops@example.com")
+        val (code, out) = baoAs(WEB_TOKEN, "token", "revoke", "-self")
+        check(code == 0) { out }
+
+        assertThat(runSetup()).contains("Keeping existing secret/kernfolio", "Minting the kernfolio-app token")
+        assertThat(baoAs(WEB_TOKEN, "kv", "get", "-field=admin.email", "secret/kernfolio")).isEqualTo(0 to "ops@example.com")
+        exec("sh", "-c", "BAO_TOKEN=$INIT_TOKEN bao kv patch secret/kernfolio admin.email=admin@kernfolio.dev")
     }
 }

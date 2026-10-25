@@ -1,0 +1,1 @@
+org.springframework.boot.bootstrap.BootstrapRegistryInitializer=com.kernfolio.config.vault.VaultBootstrap

@@ -85,10 +85,99 @@ Once signed in as admin:
 
 ```
 ./gradlew dockerBuild                            # build web + optimizer + openbao-init + caddy
-BAO_APP_TOKEN=<your-openbao-token> KERNFOLIO_DOMAIN=<your.domain> docker compose up -d
+KERNFOLIO_DOMAIN=<your.domain> docker compose up -d
 ```
 
-Uses `docker-compose.yml` only. OpenBao runs with single-node Raft storage and must be initialized and unsealed by an operator on first boot (`docker compose exec openbao bao operator init`, then `bao operator unseal`). Caddy terminates TLS on 443 (port 80 only redirects to https) and reverse-proxies to the web service over mTLS. With `KERNFOLIO_DOMAIN` set to a public hostname that resolves to the host, Caddy obtains and renews a certificate via ACME; left unset it serves `localhost` from its built-in CA. Copy `.env.example` to `.env` and set `BAO_APP_TOKEN` and `KERNFOLIO_DOMAIN` before `docker compose up`.
+Uses `docker-compose.yml` only. The very first start needs a few manual OpenBao steps; see [OpenBao: first start, restarts, starting over](#openbao-first-start-restarts-starting-over). Caddy terminates TLS on 443 (port 80 only redirects to https) and reverse-proxies to the web service over mTLS. With `KERNFOLIO_DOMAIN` set to a public hostname that resolves to the host, Caddy obtains and renews a certificate via ACME; left unset it serves `localhost` from its built-in CA. `KERNFOLIO_DOMAIN` can also go in `.env` (see `.env.example`).
+
+## OpenBao: first start, restarts, starting over
+
+OpenBao holds every secret the stack runs on, so it has to be **unsealed** (its storage decrypted) and **initialized** (given its first keys and root token) before anything else can start. Dev does both itself; prod leaves them to you.
+
+After that first start, nothing in the stack holds a privileged token. The one-shot `openbao-init` uses the root token once to set OpenBao up. It then hands out two narrow tokens, each in its own secrets volume:
+
+- **web's** token (`certs_web`) can read the app's secrets and get database credentials;
+- **cert-renewer's** token (`certs_renewer`) can only issue service certificates.
+
+Both are periodic: they stay valid as long as they're renewed at least every 30 days. Web renews its own, and every run of `openbao-init` renews both.
+
+| | Dev (`docker-compose.dev.yml`) | Prod (`docker-compose.yml`) |
+| --- | --- | --- |
+| Unsealing | Automatic, with a key file openbao-tls-init writes once (`certs_openbao/dev-unseal.key`) | By hand after every start of the `openbao` container, with the unseal keys from `bao operator init` |
+| Initializing | Automatic on first start; root token `dev-root-token` | By hand, once (`bao operator init`) |
+| Root token | `dev-root-token`, passed to openbao-init on every `up` | Given once for the bootstrap, then revoked |
+| Starting over | Remove the `openbao_data` volume | Remove `openbao_data` and every `certs_*` volume, then follow the first start again |
+
+### Dev
+
+Nothing to do: `docker compose -f docker-compose.yml -f docker-compose.dev.yml up` unseals, initializes and bootstraps OpenBao on the first start, and just unseals on later ones. Restarts and `down`/`up` keep everything, as in prod. To start OpenBao over (a new PKI, new tokens, an empty KV store):
+
+```
+docker compose -f docker-compose.yml -f docker-compose.dev.yml down
+docker volume rm kernfolio_openbao_data
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+```
+
+### Prod: first start
+
+1. Start OpenBao alone. It comes up sealed:
+   ```
+   docker compose up -d openbao
+   ```
+2. Initialize it. This prints the unseal keys (5 by default, 3 needed to unseal) and the root token. Store them safely, **outside this host**: whoever has enough unseal keys and the `openbao_data` volume has every secret.
+   ```
+   docker compose exec openbao bao operator init
+   ```
+3. Unseal it, entering a different key each time, until `Sealed` shows `false` (3 times by default):
+   ```
+   docker compose exec openbao bao operator unseal
+   ```
+4. Bootstrap the stack with the root token. openbao-init sets up the engines, PKI and policies, mints web's and cert-renewer's tokens, and issues every service certificate. `read -rs` keeps the token out of your shell history:
+   ```
+   read -rs BAO_INIT_TOKEN && export BAO_INIT_TOKEN
+   docker compose up -d
+   ```
+5. Set the real app secrets (`secret/kernfolio` starts with placeholders for SMTP and the admin email; later runs never overwrite it):
+   ```
+   docker compose exec -e BAO_TOKEN="$BAO_INIT_TOKEN" openbao \
+     bao kv patch secret/kernfolio spring.mail.host=… spring.mail.username=… spring.mail.password=… admin.email=…
+   docker compose restart web
+   ```
+6. Once https://<your.domain> works, revoke the root token and run `up` once more without it. That replaces the init containers, whose config would otherwise still hold the token:
+   ```
+   docker compose exec -e BAO_TOKEN="$BAO_INIT_TOKEN" openbao bao token revoke -self
+   unset BAO_INIT_TOKEN
+   docker compose up -d
+   ```
+
+### Prod: restarts and host reboots
+
+OpenBao comes back **sealed** after every start of its container, and everything else waits for it. Unseal it, then start the rest:
+
+```
+docker compose up -d openbao
+docker compose exec openbao bao operator unseal     # repeat until Sealed is false
+docker compose up -d
+```
+
+No token is needed: openbao-init now issues certificates with cert-renewer's token, and web has its own. Restarting any other service doesn't seal OpenBao.
+
+### Prod: recovery
+
+You need a root token again if:
+
+- the stack was down for more than 30 days, so the scoped tokens expired (openbao-init then fails with `OpenBao isn't bootstrapped yet, or its tokens expired`);
+- `certs_web` or `certs_renewer` was lost.
+
+Make a new root token from the unseal keys, then repeat steps 4 and 6 of the first start:
+
+```
+docker compose exec openbao bao operator generate-root -init         # prints a nonce and an OTP
+docker compose exec openbao bao operator generate-root -nonce=<nonce> # once per unseal key, up to the threshold
+docker compose exec openbao bao operator generate-root -decode=<encoded token> -otp=<OTP>
+```
+
+Never remove `openbao_data` in prod unless you mean to start over: it holds the PKI, the KV secrets and the database engine. Its data can only be unsealed with the keys from step 2.
 
 ## Build & test
 

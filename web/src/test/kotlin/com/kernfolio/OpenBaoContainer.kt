@@ -53,10 +53,18 @@ class OpenBaoContainer(val token: String, private val tlsDir: Path = OpenBaoTls.
     /** A client that trusts this server's listener cert, and nothing else, and presents web's client cert. */
     val httpClient: HttpClient by lazy { OpenBaoTls.httpClient(tlsDir) }
 
-    /** Runs `bao <args>` inside the container. */
-    fun bao(vararg args: String) {
+    /** Runs `bao <args>` inside the container, with the root token; returns its output. */
+    fun bao(vararg args: String): String {
         val result = execInContainer("bao", *args)
         check(result.exitCode == 0) { "bao ${args.joinToString(" ")} failed: ${result.stderr}" }
+        return result.stdout.trim()
+    }
+
+    /** Copies openbao/init/policies/[policy].hcl in and writes it, plus a token role like setup.sh's. */
+    fun writePolicyAndRole(policy: String) {
+        copyFileToContainer(KernfolioPostgresContainer.repoFile("openbao/init/policies/$policy.hcl"), "/tmp/$policy.hcl")
+        bao("policy", "write", policy, "/tmp/$policy.hcl")
+        bao("write", "auth/token/roles/$policy", "allowed_policies=$policy", "orphan=true", "renewable=true", "token_period=720h")
     }
 
     companion object {

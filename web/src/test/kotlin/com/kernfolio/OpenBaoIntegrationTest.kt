@@ -26,6 +26,9 @@ import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.io.IOException
+import java.nio.file.Files
+import java.nio.file.Path
+import org.springframework.vault.VaultException
 import javax.net.ssl.SSLHandshakeException
 import javax.sql.DataSource
 
@@ -34,7 +37,9 @@ private const val BAO_TOKEN = "test-root-token"
 /**
  * The real OpenBao integration, end to end over mutual TLS. Spring Cloud Vault
  * reaches OpenBao's listener with application.yml's `spring.cloud.vault.ssl.*`:
- * it trusts only `openbao-ca.pem` and presents `openbao-client.p12`. OpenBao's database engine
+ * it trusts only `openbao-ca.pem` and presents `openbao-client.p12`. It logs in
+ * with a `kernfolio-app` token from a file, as openbao-init mints it for web
+ * (VaultBootstrap / FileTokenAuthentication), not with the root token. OpenBao's database engine
  * connects to [KernfolioPostgresContainer] with the superuser client cert (as
  * set up by openbao/init/setup-db.sh), and Spring's datasource connects with the
  * dynamic credentials and the app cert through the real `db-tls` profile.
@@ -60,6 +65,8 @@ class OpenBaoIntegrationTest {
             .withNetwork(network)
             .withNetworkAliases("postgres")
 
+        private val appTokenFile: Path = Files.createTempFile("kernfolio-test-openbao-token", "")
+
         private val greenMail = GreenMail(ServerSetup(0, null, ServerSetup.PROTOCOL_SMTP))
 
         private val openBao = OpenBaoContainer(BAO_TOKEN)
@@ -83,7 +90,11 @@ class OpenBaoIntegrationTest {
             // Set OpenBao connection properties as system properties — must be available
             // before spring.config.import: vault:// triggers in the early bootstrap phase
             System.setProperty("spring.cloud.vault.uri", openBao.address)
-            System.setProperty("spring.cloud.vault.token", BAO_TOKEN)
+            // web's scoped token, in a file, as setup.sh writes it. No
+            // spring.cloud.vault.token: the file has to be what's used.
+            openBao.writePolicyAndRole("kernfolio-app")
+            Files.writeString(appTokenFile, openBao.bao("token", "create", "-role=kernfolio-app", "-field=token"))
+            System.setProperty("openbao.certs.token", appTokenFile.toString())
             // Where application.yml's spring.cloud.vault.ssl.trust-store (and
             // application-db-tls.yml) find certs. Needed this early too.
             System.setProperty("openbao.certs.dir", TestPki.dir.toString())
@@ -96,6 +107,8 @@ class OpenBaoIntegrationTest {
             // Like setup.sh: unlike `-dev`, OpenBao mounts no KV by default.
             openBao.bao("secrets", "enable", "-path=secret", "-version=2", "kv")
             writeKvSecrets(dbUsername, dbPassword)
+            // As setup.sh mirrors it; web's policy must keep it out of reach.
+            openBao.bao("kv", "put", "secret/kernfolio/pg-root", "password=superuser-secret")
         }
 
         @JvmStatic
@@ -103,7 +116,7 @@ class OpenBaoIntegrationTest {
         fun tearDown() {
             greenMail.stop()
             System.clearProperty("spring.cloud.vault.uri")
-            System.clearProperty("spring.cloud.vault.token")
+            System.clearProperty("openbao.certs.token")
             System.clearProperty("openbao.certs.dir")
         }
 
@@ -212,6 +225,25 @@ class OpenBaoIntegrationTest {
     fun `application context loads with OpenBao enabled`() {
         assertThat(environment.getProperty("spring.cloud.vault.enabled"))
             .isEqualTo("true")
+    }
+
+    @Test
+    fun `Spring logs in with web's scoped, periodic token from the file`() {
+        val self = vaultOperations.read("auth/token/lookup-self")!!.data!!
+        assertThat(self["id"]).isEqualTo(Files.readString(appTokenFile).trim())
+        assertThat(self["policies"] as List<*>).containsExactlyInAnyOrder("default", "kernfolio-app")
+        // Periodic through its role (lookup shows no `period` for that).
+        assertThat(self["role"]).isEqualTo("kernfolio-app")
+        assertThat(self["creation_ttl"].toString()).isEqualTo((720 * 3600).toString())
+        assertThat(self["explicit_max_ttl"].toString()).isEqualTo("0")
+        assertThat(self["orphan"]).isEqualTo(true)
+    }
+
+    @Test
+    fun `web's token can't read the postgres superuser password`() {
+        assertThatThrownBy { vaultOperations.read("secret/data/kernfolio/pg-root") }
+            .isInstanceOf(VaultException::class.java)
+            .hasMessageContaining("permission denied")
     }
 
     @Test

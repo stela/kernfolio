@@ -84,8 +84,13 @@ services:
       - certs_optimizer:/openbao/certs/optimizer
       - certs_postgres:/openbao/certs/postgres
       - certs_openbao:/openbao/certs/openbao
+      # cert-renewer's token: lets later runs issue certs without BAO_INIT_TOKEN.
+      - certs_renewer:/openbao/certs/renewer
     entrypoint: /openbao/init/setup.sh
     environment:
+      # Root token, passed once by the operator for the bootstrap (README,
+      # "OpenBao: first start, restarts, starting over"). Empty afterwards.
+      BAO_INIT_TOKEN: "${BAO_INIT_TOKEN:-}"
       BAO_ADDR: "https://openbao:8200"
       BAO_CACERT: /openbao/certs/openbao/openbao-ca.pem
       # openbao-cli's cert; root reads its uid-100 key through DAC_READ_SEARCH.
@@ -157,6 +162,8 @@ services:
       - certs_openbao:/openbao/certs:ro
     entrypoint: /openbao/init/setup-db.sh
     environment:
+      # Only does something at bootstrap, like openbao-init.
+      BAO_INIT_TOKEN: "${BAO_INIT_TOKEN:-}"
       BAO_ADDR: "https://openbao:8200"
       BAO_CACERT: /openbao/certs/openbao-ca.pem
       BAO_CLIENT_CERT: /openbao/certs/openbao-client.pem
@@ -191,10 +198,10 @@ services:
     user: "1002:1001"
     mem_limit: 512m
     environment:
-      # mTLS via spring.cloud.vault.ssl.* (application.yml).
+      # mTLS via spring.cloud.vault.ssl.* (application.yml). The token is
+      # certs_web/openbao-token, minted by openbao-init (FileTokenAuthentication).
       BAO_ADDR: "https://openbao:8200"
       SPRING_PROFILES_ACTIVE: prod
-      SPRING_CLOUD_VAULT_TOKEN: "${BAO_APP_TOKEN:-dev-root-token}"
       DB_HOST: postgres
       OPTIMIZER_BASE_URL: "https://optimizer:8000"
       # Fully specified memory sizes override Paketo's memory calculator so
@@ -252,3 +259,4 @@ volumes:
   certs_optimizer:
   certs_postgres:
   certs_openbao:
+  certs_renewer:
