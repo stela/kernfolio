@@ -9,11 +9,11 @@ import org.testcontainers.containers.GenericContainer
 import java.nio.file.Files
 
 /**
- * openbao/init/setup-tls.sh, run as compose's openbao-tls-init: real image, root
- * with only CHOWN + DAC_READ_SEARCH, no-new-privileges, on empty volumes. It
- * makes the certs for OpenBao's mutual-TLS listener and keeps them across
- * runs unless one is about to expire, is missing, or the server cert has the
- * wrong SANs. That they actually work (server, `bao` CLI, Spring) is in
+ * openbao/init/setup-tls.sh, run as compose's openbao-tls-init and (with
+ * `--leaves-only`) by cert-renewer: real image, root with only CHOWN +
+ * DAC_READ_SEARCH, no-new-privileges, on empty volumes. It makes OpenBao's
+ * listener CA once, keeps its key, and renews each leaf on its own when it's
+ * due. That the certs actually work (server, `bao` CLI, Spring) is in
  * [OpenBaoInitIntegrationTest] and [OpenBaoIntegrationTest].
  */
 class OpenBaoTlsInitIntegrationTest {
@@ -21,14 +21,16 @@ class OpenBaoTlsInitIntegrationTest {
     companion object {
         private const val OPENBAO = "/openbao/certs/openbao"
         private const val WEB = "/openbao/certs/web"
-        private const val ALL = "$OPENBAO/* $WEB/*"
-        private const val GENERATED = "Generating OpenBao TLS certificates"
-        private const val REUSED = "Reusing existing OpenBao TLS certificates"
+        private const val TLS_CA = "/openbao/tls-ca"
+        private const val ALL = "$OPENBAO/* $WEB/* $TLS_CA/*"
+        private const val NEW_CA = "Generating OpenBao's TLS CA"
+        private const val ISSUED = "Issuing OpenBao TLS cert"
+        private val LEAVES = listOf("$OPENBAO/openbao.pem", "$OPENBAO/openbao-client.pem", "$WEB/openbao-client.pem")
 
         private val init = GenericContainer(OpenBaoTls.initImage).apply {
             withCopyFileToContainer(KernfolioPostgresContainer.repoFile("openbao/init/common.sh"), "/openbao/init/common.sh")
             withCopyFileToContainer(KernfolioPostgresContainer.repoFile("openbao/init/setup-tls.sh", 0b111_101_101), "/openbao/init/setup-tls.sh")
-            withTmpFs(mapOf(OPENBAO to "rw,mode=755", WEB to "rw,mode=755"))
+            withTmpFs(mapOf(OPENBAO to "rw,mode=755", WEB to "rw,mode=755", TLS_CA to "rw,mode=755"))
             withCommand("tail", "-f", "/dev/null")
             withCreateContainerCmdModifier { cmd ->
                 cmd.withUser("0:0")
@@ -47,24 +49,22 @@ class OpenBaoTlsInitIntegrationTest {
         @AfterAll
         fun stop() = init.stop()
 
+        private fun exec(script: String) = init.execInContainer("sh", "-c", script)
+
         private fun sh(script: String): String {
-            val result = init.execInContainer("sh", "-c", script)
+            val result = exec(script)
             check(result.exitCode == 0) { "$script failed: ${result.stdout}\n${result.stderr}" }
             return result.stdout
         }
 
-        private fun runSetupTls() = sh("/openbao/init/setup-tls.sh")
+        private fun runSetupTls(args: String = "") = sh("/openbao/init/setup-tls.sh $args")
 
-        private fun freshRun(): String {
+        private fun freshRun(env: String = ""): String {
             sh("rm -f $ALL")
-            return runSetupTls()
+            return sh("$env /openbao/init/setup-tls.sh")
         }
 
-        /** Runs setup-tls.sh with [sed] applied to it, from empty volumes. */
-        private fun runVariant(sed: String): String {
-            sh("rm -f $ALL && sed '$sed' /openbao/init/setup-tls.sh > /openbao/init/variant.sh && sh /openbao/init/variant.sh")
-            return sh("cat $ALL | md5sum")
-        }
+        private fun md5(files: String) = sh("cat $files | md5sum")
 
         private fun files(dir: String): Map<String, String> =
             sh("cd $dir && stat -c '%n %u:%g %a' *").lines().filter { it.isNotBlank() }
@@ -74,17 +74,30 @@ class OpenBaoTlsInitIntegrationTest {
 
         private fun verify(file: String) = assertThat(sh("openssl verify -CAfile $OPENBAO/openbao-ca.pem $file")).contains("OK")
 
-        /** Web's client cert, out of its PKCS#12, as a PEM file path. */
-        private fun webClientCert(): String {
-            sh("openssl pkcs12 -in $WEB/openbao-client.p12 -passin pass: -nokeys -clcerts -out /tmp/web.pem")
-            return "/tmp/web.pem"
+        /**
+         * Re-signs web's client cert with the CA so that it started 80 days
+         * ago and ends in 5: less than a third of its lifetime left, so due.
+         */
+        private fun makeWebCertDue() {
+            // In the script, $($date<epoch>) is that time in the format openssl wants.
+            val date = "date -u +%Y%m%d%H%M%SZ -d @"
+            sh(
+                """
+                cd /tmp && openssl req -new -key $WEB/openbao-client-key.pem -subj /CN=app -out web.csr &&
+                openssl x509 -req -in web.csr -CA $OPENBAO/openbao-ca.pem -CAkey $TLS_CA/openbao-ca-key.pem \
+                  -not_before $($date$(( $(date +%s) - 80 * 86400 ))) -not_after $($date$(( $(date +%s) + 5 * 86400 ))) \
+                  -out web.pem 2>/dev/null &&
+                cat web.pem $OPENBAO/openbao-ca.pem > $WEB/openbao-client.pem
+                """.trimIndent()
+            )
         }
     }
 
     @Test
-    fun `makes the server and client certs, owned as compose needs, and keeps them on a rerun`() {
-        assertThat(freshRun()).contains(GENERATED)
+    fun `makes the CA and leaf certs, owned as compose needs, and keeps them on a rerun`() {
+        assertThat(freshRun()).contains(NEW_CA, "$ISSUED $OPENBAO/openbao.pem", "$ISSUED $OPENBAO/openbao-client.pem", "$ISSUED $WEB/openbao-client.pem")
 
+        assertThat(files(TLS_CA)).isEqualTo(mapOf("openbao-ca-key.pem" to "0:0 600", "lock" to "0:0 600"))
         assertThat(files(OPENBAO)).isEqualTo(
             mapOf(
                 "openbao.pem" to "0:0 644", "openbao-key.pem" to "100:0 600",
@@ -92,9 +105,14 @@ class OpenBaoTlsInitIntegrationTest {
                 "openbao-ca.pem" to "0:0 644",
             )
         )
-        assertThat(files(WEB)).isEqualTo(mapOf("openbao-client.p12" to "1002:0 600", "openbao-ca.pem" to "0:0 644"))
+        assertThat(files(WEB)).isEqualTo(
+            mapOf("openbao-client.pem" to "0:0 644", "openbao-client-key.pem" to "1002:0 600", "openbao-ca.pem" to "0:0 644")
+        )
         assertThat(sh("cat $WEB/openbao-ca.pem")).isEqualTo(sh("cat $OPENBAO/openbao-ca.pem"))
 
+        assertThat(x509("$OPENBAO/openbao-ca.pem")).contains("Subject: CN=Kernfolio OpenBao TLS CA", "CA:TRUE")
+        // About 10 years: the anchor outlives many leaf renewals.
+        sh("openssl x509 -in $OPENBAO/openbao-ca.pem -noout -checkend ${3600L * 86400}")
         assertThat(x509("$OPENBAO/openbao.pem")).contains(
             "Subject: CN=openbao", "NIST CURVE: P-256", "DNS:openbao, DNS:localhost, IP Address:127.0.0.1",
             "TLS Web Server Authentication", "CA:FALSE",
@@ -102,18 +120,103 @@ class OpenBaoTlsInitIntegrationTest {
         assertThat(x509("$OPENBAO/openbao-client.pem")).contains(
             "Subject: CN=openbao-cli", "NIST CURVE: P-256", "TLS Web Client Authentication", "CA:FALSE",
         ).doesNotContain("Server Authentication")
-        assertThat(x509(webClientCert())).contains(
+        assertThat(x509("$WEB/openbao-client.pem")).contains(
             "Subject: CN=app", "NIST CURVE: P-256", "TLS Web Client Authentication", "CA:FALSE",
         ).doesNotContain("Server Authentication")
-        for (cert in listOf("$OPENBAO/openbao.pem", "$OPENBAO/openbao-client.pem", webClientCert())) {
+        for (cert in LEAVES) {
             verify(cert)
-            // About two years, so they aren't replaced on every start.
-            sh("openssl x509 -in $cert -noout -checkend ${700 * 86400}")
+            // 90 days.
+            sh("openssl x509 -in $cert -noout -checkend ${89 * 86400}")
+            assertThat(exec("openssl x509 -in $cert -noout -checkend ${91 * 86400}").exitCode).isEqualTo(1)
         }
 
-        val before = sh("cat $ALL | md5sum")
-        assertThat(runSetupTls()).contains(REUSED)
-        assertThat(sh("cat $ALL | md5sum")).isEqualTo(before)
+        val before = md5(ALL)
+        assertThat(runSetupTls()).doesNotContain(NEW_CA, ISSUED).contains("OpenBao TLS certificates are current")
+        assertThat(runSetupTls("--leaves-only")).isBlank()
+        assertThat(md5(ALL)).isEqualTo(before)
+    }
+
+    @Test
+    fun `renews a due leaf alone, with the same CA`() {
+        freshRun()
+        makeWebCertDue()
+        val ca = md5("$OPENBAO/openbao-ca.pem $WEB/openbao-ca.pem $TLS_CA/openbao-ca-key.pem")
+        val others = md5("$OPENBAO/openbao.pem $OPENBAO/openbao-key.pem $OPENBAO/openbao-client.pem $OPENBAO/openbao-client-key.pem")
+        val oldKey = md5("$WEB/openbao-client-key.pem")
+
+        val out = runSetupTls("--leaves-only")
+
+        assertThat(out).contains("$ISSUED $WEB/openbao-client.pem (CN app)").doesNotContain(NEW_CA, "$ISSUED $OPENBAO")
+        assertThat(md5("$OPENBAO/openbao-ca.pem $WEB/openbao-ca.pem $TLS_CA/openbao-ca-key.pem")).isEqualTo(ca)
+        assertThat(md5("$OPENBAO/openbao.pem $OPENBAO/openbao-key.pem $OPENBAO/openbao-client.pem $OPENBAO/openbao-client-key.pem"))
+            .isEqualTo(others)
+        assertThat(md5("$WEB/openbao-client-key.pem")).isNotEqualTo(oldKey)
+        verify("$WEB/openbao-client.pem")
+        sh("openssl x509 -in $WEB/openbao-client.pem -noout -checkend ${89 * 86400}")
+        assertThat(files(WEB)["openbao-client-key.pem"]).isEqualTo("1002:0 600")
+    }
+
+    @Test
+    fun `keeps a short-lived leaf while more than a third of its lifetime is left`() {
+        // 5 minutes: renewal would only start with 100 s left.
+        freshRun("OPENBAO_TLS_LEAF_SECONDS=300")
+        val before = md5(ALL)
+        assertThat(runSetupTls("--leaves-only")).isBlank()
+        assertThat(md5(ALL)).isEqualTo(before)
+    }
+
+    @Test
+    fun `replaces only a server cert with other SANs`() {
+        freshRun()
+        val clients = md5("$OPENBAO/openbao-client.pem $WEB/openbao-client.pem")
+        sh("""sed 's/^SAN=.*/SAN="DNS:openbao"/; s/^SAN_AS_PRINTED=.*/SAN_AS_PRINTED="DNS:openbao"/' /openbao/init/setup-tls.sh > /openbao/init/variant.sh""")
+        assertThat(sh("sh /openbao/init/variant.sh")).contains("$ISSUED $OPENBAO/openbao.pem")
+        assertThat(sh("openssl x509 -in $OPENBAO/openbao.pem -noout -ext subjectAltName")).contains("DNS:openbao").doesNotContain("localhost")
+
+        assertThat(runSetupTls("--leaves-only")).contains("$ISSUED $OPENBAO/openbao.pem").doesNotContain("openbao-client")
+        assertThat(sh("openssl x509 -in $OPENBAO/openbao.pem -noout -ext subjectAltName"))
+            .contains("DNS:openbao, DNS:localhost, IP Address:127.0.0.1")
+        assertThat(md5("$OPENBAO/openbao-client.pem $WEB/openbao-client.pem")).isEqualTo(clients)
+    }
+
+    @Test
+    fun `a recreated certs_web gets new client certs from the same CA`() {
+        freshRun()
+        val ca = md5("$OPENBAO/openbao-ca.pem")
+        sh("rm $WEB/*")
+        assertThat(runSetupTls()).contains("$ISSUED $WEB/openbao-client.pem").doesNotContain(NEW_CA, "$ISSUED $OPENBAO")
+        assertThat(md5("$OPENBAO/openbao-ca.pem")).isEqualTo(ca)
+        assertThat(md5("$WEB/openbao-ca.pem")).isEqualTo(ca)
+        verify("$WEB/openbao-client.pem")
+    }
+
+    @Test
+    fun `without the CA key, openbao-tls-init starts over and cert-renewer refuses to`() {
+        freshRun()
+        val before = md5(ALL.replace("$TLS_CA/*", ""))
+        sh("rm $TLS_CA/openbao-ca-key.pem")
+
+        val renewer = exec("/openbao/init/setup-tls.sh --leaves-only")
+        assertThat(renewer.exitCode).isEqualTo(1)
+        assertThat(renewer.stderr).contains("only", "openbao-tls-init may replace it", "docker compose down")
+        assertThat(md5(ALL.replace("$TLS_CA/*", ""))).isEqualTo(before)
+
+        // Like a stack from before the CA key was kept: a new CA and every leaf.
+        val out = runSetupTls()
+        assertThat(out).contains(NEW_CA)
+        for (cert in LEAVES) {
+            assertThat(out).contains("$ISSUED $cert")
+            verify(cert)
+        }
+        assertThat(sh("cat $WEB/openbao-ca.pem")).isEqualTo(sh("cat $OPENBAO/openbao-ca.pem"))
+    }
+
+    @Test
+    fun `removes web's old PKCS#12`() {
+        freshRun()
+        sh("touch $WEB/openbao-client.p12")
+        runSetupTls()
+        assertThat(files(WEB)).doesNotContainKey("openbao-client.p12")
     }
 
     @Test
@@ -132,46 +235,13 @@ class OpenBaoTlsInitIntegrationTest {
     }
 
     @Test
-    fun `web's PKCS#12 loads the way Spring Vault loads it, with no password`() {
+    fun `web's client cert and key load as a Java key store`() {
         freshRun()
-        val p12 = Files.createTempDirectory("openbao-tls-init-test")
-        OpenBaoTls.copyOut(p12) { path -> sh("base64 $path") }
-        val keyStore = OpenBaoTls.webKeyStore(p12)
-        assertThat(keyStore.isKeyEntry("openbao-client")).isTrue()
-        assertThat(keyStore.getKey("openbao-client", CharArray(0)).algorithm).isEqualTo("EC")
-        // Leaf + bootstrap CA, so the server can build the chain.
-        assertThat(keyStore.getCertificateChain("openbao-client")).hasSize(2)
-    }
-
-    @Test
-    fun `replaces certs that expire within 30 days, not ones that don't`() {
-        val shortLived = runVariant("s/^VALID_DAYS=730$/VALID_DAYS=10/")
-        assertThat(runSetupTls()).contains(GENERATED)
-        assertThat(sh("cat $ALL | md5sum")).isNotEqualTo(shortLived)
-
-        // The same variant with a lifetime above the 30 days is kept, so it's
-        // the expiry that triggers the replacement above.
-        val longerLived = runVariant("s/^VALID_DAYS=730$/VALID_DAYS=60/")
-        assertThat(runSetupTls()).contains(REUSED)
-        assertThat(sh("cat $ALL | md5sum")).isEqualTo(longerLived)
-    }
-
-    @Test
-    fun `replaces a server cert with other SANs`() {
-        runVariant("""s/^SAN=.*/SAN="DNS:openbao"/; s/^SAN_AS_PRINTED=.*/SAN_AS_PRINTED="DNS:openbao"/""")
-        assertThat(runSetupTls()).contains(GENERATED)
-        assertThat(sh("openssl x509 -in $OPENBAO/openbao.pem -noout -ext subjectAltName"))
-            .contains("DNS:openbao, DNS:localhost, IP Address:127.0.0.1")
-    }
-
-    @Test
-    fun `starts over when any file is missing, e g a recreated certs_web`() {
-        freshRun()
-        val ca = sh("cat $OPENBAO/openbao-ca.pem")
-        sh("rm $WEB/openbao-client.p12")
-        assertThat(runSetupTls()).contains(GENERATED)
-        // A new CA: the old one's key is gone, so nothing could be issued from it.
-        assertThat(sh("cat $OPENBAO/openbao-ca.pem")).isNotEqualTo(ca)
-        verify(webClientCert())
+        val dir = Files.createTempDirectory("openbao-tls-init-test")
+        OpenBaoTls.copyOut(dir) { path -> sh("base64 $path") }
+        val keyStore = OpenBaoTls.webKeyStore(dir)
+        assertThat(keyStore.getKey("client", CharArray(0)).algorithm).isEqualTo("EC")
+        // Leaf + CA, so the server can build the chain.
+        assertThat(keyStore.getCertificateChain("client")).hasSize(2)
     }
 }

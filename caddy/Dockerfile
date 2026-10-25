@@ -18,3 +18,7 @@ RUN apk add --no-cache libcap-setcap \
 # Fresh named volumes inherit this ownership on first mount. Volumes created
 # by the old root-running container stay root-owned and must be removed once.
 USER caddy
+
+# Reloads Caddy when its client cert is renewed (run.sh).
+COPY --chmod=755 run.sh /usr/local/bin/kernfolio-caddy-run
+CMD ["/usr/local/bin/kernfolio-caddy-run"]

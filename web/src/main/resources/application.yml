@@ -17,14 +17,10 @@ spring:
       enabled: true
       uri: ${BAO_ADDR:https://localhost:8200}
       authentication: token
-      # Mutual TLS with OpenBao's own bootstrap CA, not the PKI root in ca.pem
-      # (openbao/init/setup-tls.sh). The client key is in a PKCS#12 with an
-      # empty password: Spring Vault's PEM key store type loads no keys.
-      ssl:
-        trust-store: file:${openbao.certs.dir}/openbao-ca.pem
-        trust-store-type: PEM
-        key-store: file:${openbao.certs.dir}/openbao-client.p12
-        key-store-type: PKCS12
+      # Mutual TLS with OpenBao's own TLS CA, not the PKI root in ca.pem
+      # (openbao/init/setup-tls.sh): openbao.certs.openbao-* below, through
+      # VaultBootstrap, which follows a renewed client cert. Not
+      # spring.cloud.vault.ssl.*, which is ignored.
       # The token is openbao.certs.token, minted by openbao-init (VaultBootstrap,
       # FileTokenAuthentication). spring.cloud.vault.token is only the
       # fallback for when that file is missing.
@@ -60,8 +56,11 @@ openbao:
     ca: ${openbao.certs.dir}/ca.pem
     cert: ${openbao.certs.dir}/app-client.pem
     key: ${openbao.certs.dir}/app-client-key.pem
-    # web's OpenBao token (VaultBootstrap).
+    # web's OpenBao token, and its mTLS to OpenBao (VaultBootstrap).
     token: ${openbao.certs.dir}/openbao-token
+    openbao-ca: ${openbao.certs.dir}/openbao-ca.pem
+    openbao-client-cert: ${openbao.certs.dir}/openbao-client.pem
+    openbao-client-key: ${openbao.certs.dir}/openbao-client-key.pem
 
 gg:
   jte:

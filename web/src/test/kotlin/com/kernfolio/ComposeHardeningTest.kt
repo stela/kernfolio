@@ -67,6 +67,7 @@ class ComposeHardeningTest {
         val expected = mapOf(
             "openbao-tls-init" to listOf("CHOWN", "DAC_READ_SEARCH"),
             "openbao-init" to listOf("CHOWN", "DAC_READ_SEARCH"),
+            "cert-renewer" to listOf("CHOWN", "DAC_READ_SEARCH"),
             "postgres" to listOf("CHOWN", "DAC_READ_SEARCH", "FOWNER", "SETUID", "SETGID"),
         )
         for ((name, service) in allServices) {
@@ -97,6 +98,15 @@ class ComposeHardeningTest {
                     "certs_openbao:/openbao/certs/openbao",
                     "certs_renewer:/openbao/certs/renewer",
                 ),
+                // Renews them all, in the same layout as openbao-init.
+                "cert-renewer" to listOf(
+                    "certs_web:/openbao/certs/web",
+                    "certs_caddy:/openbao/certs/caddy",
+                    "certs_optimizer:/openbao/certs/optimizer",
+                    "certs_postgres:/openbao/certs/postgres",
+                    "certs_openbao:/openbao/certs/openbao",
+                    "certs_renewer:/openbao/certs/renewer",
+                ),
                 "postgres" to listOf("certs_postgres:/openbao/certs:ro"),
                 "openbao-db-init" to listOf("certs_openbao:/openbao/certs:ro"),
                 "optimizer" to listOf("certs_optimizer:/openbao/certs:ro"),
@@ -104,6 +114,42 @@ class ComposeHardeningTest {
                 "caddy" to listOf("certs_caddy:/openbao/certs:ro"),
             )
         )
+    }
+
+    @Test
+    fun `only openbao-tls-init and cert-renewer have the key of OpenBao's TLS CA`() {
+        val withCaKey = allServices.filterValues { service -> service.strings("volumes").any { it.startsWith("openbao_tls_ca:") } }
+        assertThat(withCaKey.mapValues { (_, service) -> service.strings("volumes").filter { it.startsWith("openbao_tls_ca:") } })
+            .isEqualTo(mapOf("openbao-tls-init" to listOf("openbao_tls_ca:/openbao/tls-ca"), "cert-renewer" to listOf("openbao_tls_ca:/openbao/tls-ca")))
+    }
+
+    @Test
+    fun `cert-renewer runs renew_sh after openbao-init, as root like it`() {
+        val renewer = allServices.getValue("cert-renewer")
+        val init = allServices.getValue("openbao-init")
+        assertThat(renewer["entrypoint"]).isEqualTo("/openbao/init/renew.sh")
+        assertThat(renewer["user"]).isEqualTo(init["user"]).isEqualTo("0:0")
+        assertThat(renewer["image"]).isEqualTo(init["image"])
+        assertThat(renewer["depends_on"].toString()).contains("openbao-init", "service_completed_successfully", "postgres")
+        assertThat(Files.isExecutable(repo.resolve("openbao/init/renew.sh"))).isTrue()
+    }
+
+    @Test
+    fun `every server picks up renewed certs by itself`() {
+        // OpenBao's listener.
+        assertThat(Files.readString(repo.resolve("openbao/config/listener.hcl")))
+            .containsPattern("""(?m)^\s*tls_auto_reload\s*=\s*true""")
+        // Tomcat (application-tls.yml).
+        assertThat(Files.readString(repo.resolve("web/src/main/resources/application-tls.yml")))
+            .containsPattern("""(?m)^\s*reload-on-update:\s*true""")
+        // Caddy: run.sh, as the image's command, with nothing in compose overriding it.
+        assertThat(Files.readString(repo.resolve("caddy/Dockerfile"))).contains("CMD [\"/usr/local/bin/kernfolio-caddy-run\"]")
+        assertThat(allServices.getValue("caddy").keys).doesNotContain("entrypoint", "command")
+        assertThat(Files.isExecutable(repo.resolve("caddy/run.sh"))).isTrue()
+        // uvicorn: run_mtls.py's ReloadingConfig (optimizer/app/tls_reload.py).
+        assertThat(Files.readString(repo.resolve("optimizer/run_mtls.py"))).contains("ReloadingConfig(")
+        // Spring Cloud Vault's own SSL settings can't reload, and would be ignored.
+        assertThat(Files.readString(repo.resolve("web/src/main/resources/application.yml"))).doesNotContainPattern("""(?m)^\s+ssl:""")
     }
 
     @Test
@@ -185,7 +231,7 @@ class ComposeHardeningTest {
     }
 
     @Test
-    fun `OpenBao's listener requires client certs from the bootstrap CA`() {
+    fun `OpenBao's listener requires client certs from its TLS CA`() {
         val listener = Files.readString(repo.resolve("openbao/config/listener.hcl"))
         assertThat(listener).containsPattern("""(?m)^\s*tls_require_and_verify_client_cert\s*=\s*true""")
         assertThat(listener).containsPattern("""(?m)^\s*tls_client_ca_file\s*=\s*"/openbao/certs/openbao-ca.pem"""")

@@ -8,12 +8,15 @@
 #   Idempotent. In prod the operator passes the root token once, after
 #   `bao operator init` (README, "OpenBao: first start, restarts, starting
 #   over"); the dev overlay always passes dev-root-token.
-# - Certs only, without BAO_INIT_TOKEN: issues certs with cert-renewer's own
-#   token, which can do nothing else. Fails if OpenBao was never bootstrapped
-#   or that token expired.
+# - Certs only, without BAO_INIT_TOKEN: issues due certs with cert-renewer's
+#   own token, which can do nothing else. Fails if OpenBao was never
+#   bootstrapped or that token expired.
+# Either way, certs are only issued when due (pki-certs.sh), and cert-renewer
+# (renew.sh) keeps renewing them and the tokens while the stack runs.
 set -e
 
 . "$(dirname "$0")/common.sh"
+. "$(dirname "$0")/pki-certs.sh"
 
 # OpenBao's mTLS certs come from openbao-tls-init (setup-tls.sh).
 export BAO_ADDR="${BAO_ADDR:-https://openbao:8200}"
@@ -45,13 +48,7 @@ elif token_works "$RENEWER_TOKEN"; then
   BAO_TOKEN="$(cat "$RENEWER_TOKEN")"
   export BAO_TOKEN
   echo "=== No BAO_INIT_TOKEN: only issuing certificates, with cert-renewer's token ==="
-  bao token renew >/dev/null
-  # web's token too, in case web was down for a while.
-  if token_works "$WEB_TOKEN"; then
-    BAO_TOKEN="$(cat "$WEB_TOKEN")" bao token renew >/dev/null
-  else
-    echo "WARNING: web's OpenBao token no longer works; run once with BAO_INIT_TOKEN" >&2
-  fi
+  renew_tokens
 else
   echo "ERROR: OpenBao isn't bootstrapped yet, or its tokens expired." >&2
   echo "Run once with BAO_INIT_TOKEN set: see README, \"OpenBao: first start, restarts, starting over\"." >&2
@@ -177,46 +174,9 @@ fi
 
 
 # ── Issue service certificates ───────────────────────────────────────
-echo "=== Issuing service certificates ==="
-
-# Helper: issue a cert and extract both cert and key from a single issuance.
-# The cert file is leaf + issuing intermediate so servers present a full
-# chain. ca.pem holds only the root — without the intermediate in the
-# server's cert, clients get PKIX path-building failures at handshake.
-# issue_cert <dir> <cn> <alt_names> <file stem> <key owner uid>: <stem>.pem is
-# public (root, 0644); <stem>-key.pem belongs to <key owner uid>, 0600.
-issue_cert() {
-  local dir="$1" cn="$2" alt="$3" stem="$4" owner="$5"
-  local args="common_name=${cn} ttl=720h"
-  [ -n "$alt" ] && args="${args} alt_names=${alt}"
-  bao write -format=json "pki_int/issue/kernfolio-service" private_key_format=pkcs8 $args > /tmp/cert.json
-  jq -r '.data.certificate, .data.issuing_ca' /tmp/cert.json | place "$dir/$stem.pem" 0 0 0644
-  jq -r '.data.private_key' /tmp/cert.json | place "$dir/$stem-key.pem" "$owner" 0 0600
-  rm -f /tmp/cert.json
-}
-
-# App (Spring Boot) — Ed25519. app.pem is web's server cert for the Caddy -> web
-# mTLS hop (application-tls.yml); Caddy dials the compose service name, hence
-# the `web` SAN. app-client.pem is web's identity towards the optimizer
-# (Netty 4.2+ supports EdDSA auto-detection).
-issue_cert "$WEB_DIR" app "web,localhost" app "$WEB_UID"
-issue_cert "$WEB_DIR" app "" app-client "$WEB_UID"
-
-# Optimizer (Python/uvicorn) — Ed25519
-# optimizer-client is only used by the optimizer's own healthcheck.
-issue_cert "$OPTIMIZER_DIR" optimizer "localhost" optimizer "$OPTIMIZER_UID"
-issue_cert "$OPTIMIZER_DIR" optimizer "" optimizer-client "$OPTIMIZER_UID"
-
-# Caddy (Go) — Ed25519
-issue_cert "$CADDY_DIR" caddy "" caddy-client "$CADDY_UID"
-
-# PostgreSQL (OpenSSL) — Ed25519. Server cert only.
-issue_cert "$POSTGRES_DIR" postgres "localhost" postgres "$POSTGRES_UID"
-
-# Postgres superuser client identity. pg_hba.conf requires
-# clientcert=verify-full for user `kernfolio`, i.e. the cert CN must equal the
-# user name. Used by the OpenBao database engine and by openbao-db-init.
-issue_cert "$OPENBAO_DIR" kernfolio "" postgres-admin-client "$OPENBAO_UID"
+# Only the due ones (pki-certs.sh); cert-renewer renews them while the stack runs.
+echo "=== Checking service certificates ==="
+issue_service_certs
 
 # ── Scoped tokens (bootstrap only) ───────────────────────────────────
 # Everything after bootstrap runs on two tokens that can do only their job
@@ -225,9 +185,10 @@ issue_cert "$OPENBAO_DIR" kernfolio "" postgres-admin-client "$OPENBAO_UID"
 #   kernfolio-cert-renewer (cert-renewer, and this script without
 #   BAO_INIT_TOKEN): issue service certs.
 # Both are periodic orphans: they never expire while they're renewed within
-# 30 days (web's session manager renews its own; every run of this script
-# renews both), and revoking the init token doesn't take them along. A token role lets a periodic
-# orphan be made without sudo, and pins its policy.
+# 30 days (web's session manager renews its own; cert-renewer and every run
+# of this script renew both), and revoking the init token doesn't take them
+# along. A token role lets a periodic orphan be made without sudo, and pins
+# its policy.
 if [ "$BOOTSTRAP" = 1 ]; then
   echo "=== Writing policies and token roles ==="
   for role in kernfolio-app kernfolio-cert-renewer; do

@@ -30,14 +30,21 @@ import java.nio.file.Files
 import java.nio.file.Path
 import org.springframework.vault.VaultException
 import javax.net.ssl.SSLHandshakeException
+import javax.net.ssl.SSLSocket
+import org.springframework.boot.ssl.pem.PemContent
+import org.springframework.http.client.JdkClientHttpRequestFactory
+import org.springframework.vault.config.AbstractVaultConfiguration.ClientFactoryWrapper
+import java.math.BigInteger
+import java.security.cert.X509Certificate
+import java.time.Duration
 import javax.sql.DataSource
 
 private const val BAO_TOKEN = "test-root-token"
 
 /**
  * The real OpenBao integration, end to end over mutual TLS. Spring Cloud Vault
- * reaches OpenBao's listener with application.yml's `spring.cloud.vault.ssl.*`:
- * it trusts only `openbao-ca.pem` and presents `openbao-client.p12`. It logs in
+ * reaches OpenBao's listener through VaultBootstrap's HTTP client: it trusts
+ * only `openbao-ca.pem` and presents `openbao-client.pem`. It logs in
  * with a `kernfolio-app` token from a file, as openbao-init mints it for web
  * (VaultBootstrap / FileTokenAuthentication), not with the root token. OpenBao's database engine
  * connects to [KernfolioPostgresContainer] with the superuser client cert (as
@@ -95,8 +102,8 @@ class OpenBaoIntegrationTest {
             openBao.writePolicyAndRole("kernfolio-app")
             Files.writeString(appTokenFile, openBao.bao("token", "create", "-role=kernfolio-app", "-field=token"))
             System.setProperty("openbao.certs.token", appTokenFile.toString())
-            // Where application.yml's spring.cloud.vault.ssl.trust-store (and
-            // application-db-tls.yml) find certs. Needed this early too.
+            // Where application.yml's openbao.certs.* (and application-db-tls.yml)
+            // find certs. Needed this early too.
             System.setProperty("openbao.certs.dir", TestPki.dir.toString())
 
             // Generate dynamic DB credentials from OpenBao's database engine, then
@@ -247,14 +254,43 @@ class OpenBaoIntegrationTest {
     }
 
     @Test
-    fun `Spring Cloud Vault talks to OpenBao over mutual TLS`() {
-        // The KV and database tests here only pass if this setup works.
+    fun `Spring Cloud Vault talks to OpenBao over mutual TLS, with VaultBootstrap's client`() {
+        // The KV and database tests here only pass if this setup works: the
+        // listener refuses clients without a cert, and nothing else sets one.
         assertThat(environment.getProperty("spring.cloud.vault.uri")).startsWith("https://")
-        assertThat(environment.getProperty("spring.cloud.vault.ssl.trust-store"))
-            .isEqualTo("file:${TestPki.dir}/openbao-ca.pem")
-        assertThat(environment.getProperty("spring.cloud.vault.ssl.key-store"))
-            .isEqualTo("file:${TestPki.dir}/openbao-client.p12")
+        assertThat(environment.getProperty("spring.cloud.vault.ssl.key-store")).isNull()
+        assertThat(environment.getProperty("openbao.certs.openbao-ca")).isEqualTo("${TestPki.dir}/openbao-ca.pem")
+        assertThat(environment.getProperty("openbao.certs.openbao-client-cert")).isEqualTo("${TestPki.dir}/openbao-client.pem")
+        assertThat(applicationContext.getBean(ClientFactoryWrapper::class.java).clientHttpRequestFactory)
+            .isInstanceOf(JdkClientHttpRequestFactory::class.java)
     }
+
+    @Test
+    fun `OpenBao serves a renewed listener cert without a restart`() {
+        val renewed = OpenBaoTls.dir.resolve("${OpenBaoTls.RENEWED}openbao.pem")
+        assertThat(servedSerial()).isNotEqualTo(serialOf(renewed))
+
+        // As cert-renewer's place(): key first, then cert.
+        for (file in listOf("openbao-key.pem", "openbao.pem")) {
+            openBao.copyFileToContainer(
+                MountableFile.forHostPath(OpenBaoTls.dir.resolve("${OpenBaoTls.RENEWED}$file"), 0b110_100_100),
+                "/openbao/certs/$file",
+            )
+        }
+
+        // tls_auto_reload polls every 30 s.
+        eventually(Duration.ofSeconds(60), Duration.ofSeconds(2)) { assertThat(servedSerial()).isEqualTo(serialOf(renewed)) }
+        assertThat(vaultOperations.opsForSys().health().isInitialized).isTrue()
+    }
+
+    private fun serialOf(cert: Path): BigInteger = PemContent.load(cert).getCertificates().first().serialNumber
+
+    /** The serial of the listener cert a new handshake gets, with a new context: no session resumption. */
+    private fun servedSerial(): BigInteger =
+        (OpenBaoTls.sslContext().socketFactory.createSocket(openBao.host, openBao.getMappedPort(OpenBaoContainer.PORT)) as SSLSocket).use {
+            it.startHandshake()
+            (it.session.peerCertificates.first() as X509Certificate).serialNumber
+        }
 
     private fun health(client: HttpClient) = client.send(
         HttpRequest.newBuilder().uri(URI.create("${openBao.address}/v1/sys/health")).build(),
@@ -274,7 +310,7 @@ class OpenBaoIntegrationTest {
     @Test
     fun `OpenBao refuses a client cert from the service PKI`() {
         // The app's real identity towards the optimizer and postgres: valid,
-        // but from the PKI root, not the bootstrap CA.
+        // but from the PKI root, not OpenBao's TLS CA.
         val pkiClient = OpenBaoTls.pemKeyStore(TestPki.cert("app-client"), TestPki.key("app-client"))
         assertThatThrownBy { health(OpenBaoTls.httpClient(clientKeys = pkiClient)) }.isInstanceOf(IOException::class.java)
     }

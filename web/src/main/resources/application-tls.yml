@@ -20,6 +20,9 @@ spring:
     bundle:
       pem:
         web-server:
+          # Tomcat swaps in a renewed app.pem (cert-renewer) by itself,
+          # about 10 s after the files change.
+          reload-on-update: true
           keystore:
             certificate: ${openbao.certs.dir}/app.pem
             private-key: ${openbao.certs.dir}/app-key.pem

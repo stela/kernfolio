@@ -8,15 +8,17 @@ x-hardened: &hardened
 
 # Secrets: one volume per consumer (certs_<service>), mounted read-only into
 # that service at /openbao/certs and nowhere else except openbao-init, which
-# writes them. Even root inside one container can't read another's key.
+# writes them, and cert-renewer, which renews them. Even root inside one
+# container can't read another's key.
 # ComposeHardeningTest checks this layout and the hardening.
 
 services:
   openbao-tls-init:
     # Makes the certs for OpenBao's mutual-TLS listener before OpenBao starts
     # (its PKI can't): the server cert, client certs for OpenBao's clients,
-    # and the trust anchor openbao-ca.pem. In certs_openbao (openbao,
-    # openbao-init, openbao-db-init) and certs_web.
+    # and the trust anchor openbao-ca.pem, whose key stays in openbao_tls_ca
+    # for cert-renewer. In certs_openbao (openbao, openbao-init,
+    # openbao-db-init) and certs_web.
     # Root with the same two capabilities as openbao-init, for the same reason.
     # See openbao/init/setup-tls.sh.
     <<: *hardened
@@ -31,6 +33,7 @@ services:
       - ./openbao/init:/openbao/init:ro
       - certs_openbao:/openbao/certs/openbao
       - certs_web:/openbao/certs/web
+      - openbao_tls_ca:/openbao/tls-ca
     entrypoint: /openbao/init/setup-tls.sh
 
   openbao:
@@ -94,6 +97,41 @@ services:
       BAO_ADDR: "https://openbao:8200"
       BAO_CACERT: /openbao/certs/openbao/openbao-ca.pem
       # openbao-cli's cert; root reads its uid-100 key through DAC_READ_SEARCH.
+      BAO_CLIENT_CERT: /openbao/certs/openbao/openbao-client.pem
+      BAO_CLIENT_KEY: /openbao/certs/openbao/openbao-client-key.pem
+
+  cert-renewer:
+    # Renews every cert, and the scoped OpenBao tokens, while the stack runs;
+    # each service reloads its own (README, "Certificate renewal"). Same
+    # image, user and capabilities as openbao-init, plus the key of OpenBao's
+    # TLS CA. See openbao/init/renew.sh.
+    <<: *hardened
+    build: ./openbao
+    image: kernfolio-openbao-init
+    user: "0:0"
+    cap_add:
+      - CHOWN
+      - DAC_READ_SEARCH
+    mem_limit: 64m
+    depends_on:
+      openbao-init:
+        condition: service_completed_successfully
+      # It makes postgres reload a renewed cert.
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./openbao/init:/openbao/init:ro
+      - certs_web:/openbao/certs/web
+      - certs_caddy:/openbao/certs/caddy
+      - certs_optimizer:/openbao/certs/optimizer
+      - certs_postgres:/openbao/certs/postgres
+      - certs_openbao:/openbao/certs/openbao
+      - certs_renewer:/openbao/certs/renewer
+      - openbao_tls_ca:/openbao/tls-ca
+    entrypoint: /openbao/init/renew.sh
+    environment:
+      BAO_ADDR: "https://openbao:8200"
+      BAO_CACERT: /openbao/certs/openbao/openbao-ca.pem
       BAO_CLIENT_CERT: /openbao/certs/openbao/openbao-client.pem
       BAO_CLIENT_KEY: /openbao/certs/openbao/openbao-client-key.pem
 
@@ -198,8 +236,8 @@ services:
     user: "1002:1001"
     mem_limit: 512m
     environment:
-      # mTLS via spring.cloud.vault.ssl.* (application.yml). The token is
-      # certs_web/openbao-token, minted by openbao-init (FileTokenAuthentication).
+      # mTLS with certs_web/openbao-client.pem, and the token in
+      # certs_web/openbao-token, minted by openbao-init (VaultBootstrap).
       BAO_ADDR: "https://openbao:8200"
       SPRING_PROFILES_ACTIVE: prod
       DB_HOST: postgres
@@ -230,6 +268,7 @@ services:
     # on unprivileged 8080/8443; docker owns the privileged host ports.
     build: ./caddy
     image: kernfolio-caddy
+    # caddy/run.sh: `caddy run`, plus a reload when caddy-client.pem is renewed.
     # Owner of caddy-client-key.pem.
     user: "1000:1000"
     <<: *hardened
@@ -260,3 +299,4 @@ volumes:
   certs_postgres:
   certs_openbao:
   certs_renewer:
+  openbao_tls_ca:

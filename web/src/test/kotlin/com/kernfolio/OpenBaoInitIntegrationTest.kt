@@ -35,7 +35,8 @@ class OpenBaoInitIntegrationTest {
         /** volume dir -> file name -> "uid:gid mode" */
         private val expected = mapOf(
             "web" to mapOf(
-                "ca.pem" to CA, "openbao-ca.pem" to CA, "openbao-client.p12" to "1002:0 600",
+                "ca.pem" to CA, "openbao-ca.pem" to CA,
+                "openbao-client.pem" to "0:0 644", "openbao-client-key.pem" to "1002:0 600",
                 "openbao-token" to "1002:0 600",
                 "app.pem" to "0:0 644", "app-key.pem" to "1002:0 600",
                 "app-client.pem" to "0:0 644", "app-client-key.pem" to "1002:0 600",
@@ -58,7 +59,8 @@ class OpenBaoInitIntegrationTest {
                 "postgres-admin-client.pem" to "0:0 644", "postgres-admin-client-key.pem" to "100:0 600",
                 "pg_root_password" to "100:0 600",
             ),
-            "renewer" to mapOf("openbao-token" to "0:0 600"),
+            // lock: pki-certs.sh's, against openbao-init and cert-renewer issuing at once.
+            "renewer" to mapOf("openbao-token" to "0:0 600", "lock" to "0:0 600"),
         )
 
         private const val WEB_TOKEN = "/openbao/certs/web/openbao-token"
@@ -72,15 +74,9 @@ class OpenBaoInitIntegrationTest {
             withEnv("BAO_CLIENT_CERT", "/openbao/certs/openbao/openbao-client.pem")
             withEnv("BAO_CLIENT_KEY", "/openbao/certs/openbao/openbao-client-key.pem")
             withEnv("BAO_INIT_TOKEN", INIT_TOKEN)
-            withCopyFileToContainer(KernfolioPostgresContainer.repoFile("openbao/init/common.sh"), "/openbao/init/common.sh")
-            for (policy in listOf("kernfolio-app", "kernfolio-cert-renewer")) {
-                withCopyFileToContainer(KernfolioPostgresContainer.repoFile("openbao/init/policies/$policy.hcl"), "/openbao/init/policies/$policy.hcl")
-            }
-            for (script in listOf("setup-tls.sh", "setup.sh")) {
-                withCopyFileToContainer(KernfolioPostgresContainer.repoFile("openbao/init/$script", 0b111_101_101), "/openbao/init/$script")
-            }
-            // Like fresh certs_<service> volumes: root-owned, empty mounts.
-            withTmpFs(expected.keys.associate { "/openbao/certs/$it" to "rw,mode=755" })
+            OpenBaoTls.copyInitScripts(this)
+            // Like fresh certs_<service> volumes (and openbao_tls_ca): root-owned, empty mounts.
+            withTmpFs(expected.keys.associate { "/openbao/certs/$it" to "rw,mode=755" } + ("/openbao/tls-ca" to "rw,mode=755"))
             // Stay up so the script can be run (twice) with execInContainer.
             withCommand("tail", "-f", "/dev/null")
             withCreateContainerCmdModifier { cmd ->
@@ -132,6 +128,15 @@ class OpenBaoInitIntegrationTest {
             "sh", "-c",
             "BAO_TOKEN=\"\$(cat $tokenFile)\" bao token lookup -format=json | jq -r '.data.$field | if type == \"array\" then join(\",\") else tostring end'",
         ).trim()
+
+        /** "dir/stem.pem" and "dir/stem-key.pem" for each stem. */
+        private fun withKeys(vararg stems: String) = stems.flatMap { listOf("$it.pem", "$it-key.pem") }.toSet()
+
+        /** "dir/file" -> md5 of every PKI service cert and key. */
+        private fun allCerts(): Map<String, String> =
+            exec("sh", "-c", "cd /openbao/certs && md5sum web/app*.pem caddy/*.pem optimizer/*.pem postgres/*.pem openbao/postgres-admin-client*.pem")
+                .lines().filter { it.isNotBlank() }
+                .associate { it.substringAfter("  ") to it.substringBefore("  ") }
 
         private fun ownership(): Map<String, Map<String, String>> = expected.keys.associateWith { dir ->
             exec("sh", "-c", "cd /openbao/certs/$dir && stat -c '%n %u:%g %a' *").lines()
@@ -197,15 +202,56 @@ class OpenBaoInitIntegrationTest {
         runSetup()
         val webToken = exec("cat", WEB_TOKEN)
         val renewerToken = exec("cat", RENEWER_TOKEN)
-        val caddyCert = exec("cat", "/openbao/certs/caddy/caddy-client.pem")
+        exec("rm", "/openbao/certs/caddy/caddy-client-key.pem")
+        val others = allCerts()
 
-        assertThat(runSetupWithoutInitToken()).contains("only issuing certificates").doesNotContain("Minting")
+        val output = runSetupWithoutInitToken()
+
+        assertThat(output).contains("only issuing certificates", "Issuing caddy-client.pem").doesNotContain("Minting")
+        assertThat(output.lines().filter { "Issuing" in it }).hasSize(1)
         assertThat(ownership()).isEqualTo(expected)
         assertThat(exec("cat", WEB_TOKEN)).isEqualTo(webToken)
         assertThat(exec("cat", RENEWER_TOKEN)).isEqualTo(renewerToken)
-        assertThat(exec("cat", "/openbao/certs/caddy/caddy-client.pem")).isNotEqualTo(caddyCert)
+        val caddy = withKeys("caddy/caddy-client")
+        assertThat(allCerts() - caddy).isEqualTo(others - caddy)
         exec("openssl", "verify", "-CAfile", "/openbao/certs/caddy/ca.pem", "-untrusted", "/openbao/certs/caddy/caddy-client.pem",
             "/openbao/certs/caddy/caddy-client.pem")
+    }
+
+    @Test
+    fun `a rerun issues only the certs that are due, missing, mismatched, misnamed or from another CA`() {
+        runSetup()
+        assertThat(runSetup()).doesNotContain("Issuing")
+
+        // Due: OpenBao backdates certs by 30 s, so a 12-second one has 12 of 42 s
+        // left, less than a third.
+        exec("sh", "-c", "BAO_TOKEN=$INIT_TOKEN LEAF_TTL=12s sh -c '. /openbao/init/common.sh && . /openbao/init/pki-certs.sh && " +
+            "rm /openbao/certs/optimizer/optimizer.pem && issue_if_due /openbao/certs/optimizer optimizer localhost optimizer 65532'")
+        // Mismatched: app-client's key, under app.pem. (Root may replace web's
+        // 0600 key, not write into it.)
+        exec("sh", "-c", "cd /openbao/certs/web && cp app-client-key.pem k.tmp && mv -f k.tmp app-key.pem")
+        // Misnamed: postgres's server cert without its `localhost` SAN.
+        exec("sh", "-c", "BAO_TOKEN=$INIT_TOKEN sh -c '. /openbao/init/common.sh && . /openbao/init/pki-certs.sh && " +
+            "rm /openbao/certs/postgres/postgres.pem && issue_if_due /openbao/certs/postgres postgres \"\" postgres 70'")
+        // Another CA: a self-signed caddy-client.pem.
+        exec("sh", "-c", "cd /openbao/certs/caddy && rm caddy-client*.pem && openssl req -x509 -newkey ed25519 -nodes -subj /CN=caddy -days 30 " +
+            "-keyout caddy-client-key.pem -out caddy-client.pem 2>/dev/null")
+        val before = allCerts()
+
+        val issued = runSetup().lines().filter { "Issuing" in it }
+
+        assertThat(issued).containsExactlyInAnyOrder(
+            "=== Issuing optimizer.pem (CN optimizer) ===",
+            "=== Issuing app.pem (CN app) ===",
+            "=== Issuing postgres.pem (CN postgres) ===",
+            "=== Issuing caddy-client.pem (CN caddy) ===",
+        )
+        val changed = withKeys("optimizer/optimizer", "web/app", "postgres/postgres", "caddy/caddy-client")
+        assertThat(allCerts() - changed).isEqualTo(before - changed)
+        assertThat(exec("openssl", "x509", "-in", "/openbao/certs/postgres/postgres.pem", "-noout", "-ext", "subjectAltName"))
+            .contains("DNS:localhost", "DNS:postgres")
+        assertThat(ownership()).isEqualTo(expected)
+        assertThat(runSetup()).doesNotContain("Issuing")
     }
 
     @Test

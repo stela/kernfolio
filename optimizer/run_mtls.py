@@ -4,6 +4,9 @@ import os
 import ssl
 
 import uvicorn
+from uvicorn.supervisors import Multiprocess
+
+from app.tls_reload import ReloadingConfig
 
 CERT_DIR = os.getenv("OPENBAO_CERT_DIR", "/openbao/certs")
 
@@ -28,11 +31,22 @@ def ssl_kwargs(cert_dir: str) -> dict:
     }
 
 
-if __name__ == "__main__":
-    uvicorn.run(
+def main() -> None:
+    """What `uvicorn.run(...)` does for two workers, with a config that
+    reloads a renewed server cert (app/tls_reload.py)."""
+    config = ReloadingConfig(
         "app.main:app",
         host="0.0.0.0",
         port=8000,
         workers=2,
+        # No websockets here; "auto" would import websockets' deprecated legacy module.
+        ws="none",
+        cert_check_interval=float(os.getenv("CERT_CHECK_INTERVAL", "30")),
         **ssl_kwargs(CERT_DIR),
     )
+    server = uvicorn.Server(config)
+    Multiprocess(config, target=server.run, sockets=[config.bind_socket()]).run()
+
+
+if __name__ == "__main__":
+    main()

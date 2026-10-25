@@ -1,6 +1,9 @@
 package com.kernfolio.config
 
+import com.kernfolio.config.tls.ReloadingPemKeyManager
 import io.netty.handler.ssl.SslContextBuilder
+import io.netty.handler.ssl.SslProvider
+import io.netty.handler.ssl.util.KeyManagerFactoryWrapper
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.context.annotation.Bean
@@ -11,12 +14,7 @@ import org.springframework.http.client.reactive.ReactorClientHttpConnector
 import org.springframework.web.reactive.function.client.WebClient
 import reactor.netty.http.client.HttpClient
 import java.io.File
-import java.security.KeyFactory
-import java.security.PrivateKey
-import java.security.cert.CertificateFactory
-import java.security.cert.X509Certificate
-import java.security.spec.PKCS8EncodedKeySpec
-import java.util.Base64
+import java.nio.file.Path
 
 @Configuration
 class OptimizerClientConfig {
@@ -37,13 +35,14 @@ class OptimizerClientConfig {
 
         if (caPath.isNotBlank() && File(caPath).exists()) {
             log.info("Configuring mTLS for optimizer WebClient")
-            val caFile = File(caPath)
-            val certChain = loadCertificateChain(File(certPath))
-            val key = loadPrivateKey(File(keyPath))
-
+            // The JDK provider (there's no netty-tcnative anyway) consults this
+            // key manager on every handshake, so a renewed app-client.pem is
+            // presented without a restart.
+            val keyManager = ReloadingPemKeyManager(Path.of(certPath), Path.of(keyPath))
             val sslContext = SslContextBuilder.forClient()
-                .trustManager(caFile)
-                .keyManager(key, *certChain)
+                .sslProvider(SslProvider.JDK)
+                .trustManager(File(caPath))
+                .keyManager(KeyManagerFactoryWrapper(keyManager))
                 .build()
 
             val httpClient = HttpClient.create()
@@ -55,34 +54,5 @@ class OptimizerClientConfig {
         }
 
         return builder.build()
-    }
-
-    /**
-     * Leaf plus intermediate, as OpenBao-issued cert files are bundled. The
-     * optimizer only trusts the root CA, so sending just the leaf (what
-     * `generateCertificate` would read) fails its client-cert check.
-     */
-    private fun loadCertificateChain(file: File): Array<X509Certificate> =
-        file.inputStream().use { input ->
-            CertificateFactory.getInstance("X.509").generateCertificates(input)
-                .map { it as X509Certificate }
-                .toTypedArray()
-        }
-
-    private fun loadPrivateKey(file: File): PrivateKey {
-        val pem = file.readText()
-            .replace(Regex("-----BEGIN [A-Z ]+ KEY-----"), "")
-            .replace(Regex("-----END [A-Z ]+ KEY-----"), "")
-            .replace(Regex("\\s"), "")
-        val der = Base64.getDecoder().decode(pem)
-        val spec = PKCS8EncodedKeySpec(der)
-
-        // Try Ed25519 first, then EC, then RSA
-        for (algorithm in listOf("Ed25519", "EC", "RSA")) {
-            try {
-                return KeyFactory.getInstance(algorithm).generatePrivate(spec)
-            } catch (_: Exception) { }
-        }
-        throw IllegalArgumentException("Unable to load private key: unsupported algorithm")
     }
 }

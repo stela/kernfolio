@@ -59,10 +59,11 @@ Services, ports, and resource footprint:
 | yfinance-twin | 8081 | 256 MiB | ~140 MiB | `kernfolio-yfinance-twin:latest` (buildpack) | ~353 MB |
 | frankfurter-twin | 8082 | 256 MiB | ~125 MiB | `kernfolio-frankfurter-twin:latest` (buildpack) | ~352 MB |
 | caddy | 443 (dev); 80 + 443 (prod) | 64 MiB | ~17 MiB | `kernfolio-caddy:latest` (caddy:2-alpine, non-root) | ~104 MB |
+| cert-renewer | — | 64 MiB | ~1 MiB | `kernfolio-openbao-init` (OpenBao CLI + openssl, jq, psql) | ~200 MB |
 
 Full dev stack budget: ~2.4 GiB of container memory, observed steady-state ~1.1 GiB. JVM services size their heap + metaspace + code cache explicitly through `JAVA_TOOL_OPTIONS` (see `docker-compose.yml` / `docker-compose.dev.yml`) so Paketo's memory calculator defers to the explicit values.
 
-Traffic between services — Caddy → web, web → optimizer, and every connection to PostgreSQL — is mutual TLS with certificates issued by OpenBao's PKI engine, and each hop has an integration test. PostgreSQL refuses any TCP login without TLS, a client certificate from that CA and a password. Connections to OpenBao itself are mutual TLS too, with certificates from a separate bootstrap CA made before OpenBao starts, since its PKI can't issue them for itself. Each service gets its own secrets volume holding only its certificate and key, so even root inside one container can't read another service's key. Every container runs with all Linux capabilities dropped and `no-new-privileges`; only the one-shot init containers and Postgres's startup add back the few they need. Caddy runs as uid 1000; it listens on 8080/8443 inside its container and Docker publishes those as 80/443.
+Traffic between services — Caddy → web, web → optimizer, and every connection to PostgreSQL — is mutual TLS with certificates issued by OpenBao's PKI engine, and each hop has an integration test. PostgreSQL refuses any TCP login without TLS, a client certificate from that CA and a password. Connections to OpenBao itself are mutual TLS too, with certificates from a separate CA of its own, made before OpenBao starts, since its PKI can't issue them for itself. Every certificate is renewed while the stack runs, and each service picks up its new one without a restart (see [Certificate renewal](#certificate-renewal)). Each service gets its own secrets volume holding only its certificate and key, so even root inside one container can't read another service's key. Every container runs with all Linux capabilities dropped and `no-new-privileges`; only the init containers, cert-renewer and Postgres's startup add back the few they need. Caddy runs as uid 1000; it listens on 8080/8443 inside its container and Docker publishes those as 80/443.
 
 > **Upgrading an existing checkout:** Caddy used to run as root, so `caddy_data` / `caddy_config` volumes created before this change are root-owned and the new container can't write to them. Remove them once: `docker volume rm kernfolio_caddy_data kernfolio_caddy_config`. (In production, do this before first obtaining a certificate, or `chown -R 1000:1000` the volume contents instead.)
 
@@ -99,7 +100,7 @@ After that first start, nothing in the stack holds a privileged token. The one-s
 - **web's** token (`certs_web`) can read the app's secrets and get database credentials;
 - **cert-renewer's** token (`certs_renewer`) can only issue service certificates.
 
-Both are periodic: they stay valid as long as they're renewed at least every 30 days. Web renews its own, and every run of `openbao-init` renews both.
+Both are periodic: they stay valid as long as they're renewed at least every 30 days. Web renews its own; cert-renewer renews both every hour, and so does every run of `openbao-init`.
 
 | | Dev (`docker-compose.dev.yml`) | Prod (`docker-compose.yml`) |
 | --- | --- | --- |
@@ -160,7 +161,7 @@ docker compose exec openbao bao operator unseal     # repeat until Sealed is fal
 docker compose up -d
 ```
 
-No token is needed: openbao-init now issues certificates with cert-renewer's token, and web has its own. Restarting any other service doesn't seal OpenBao.
+No token is needed: openbao-init now issues certificates with cert-renewer's token, and web has its own. cert-renewer then renews any certificate that became due while the stack was down. Restarting any other service doesn't seal OpenBao.
 
 ### Prod: recovery
 
@@ -178,6 +179,41 @@ docker compose exec openbao bao operator generate-root -decode=<encoded token> -
 ```
 
 Never remove `openbao_data` in prod unless you mean to start over: it holds the PKI, the KV secrets and the database engine. Its data can only be unsealed with the keys from step 2.
+
+## Certificate renewal
+
+Service certificates last 30 days, OpenBao's listener and client certificates 90. The `cert-renewer` service (`openbao/init/renew.sh`) checks them every hour and renews each one once a third of its lifetime is left, so a few failed rounds (OpenBao sealed, say) don't matter. Its own token can do nothing but issue service certificates. It also renews web's and its own OpenBao token. To run a round now instead of waiting: `docker compose exec cert-renewer /openbao/init/renew.sh --once`.
+
+Nothing has to be restarted for a renewed certificate:
+
+| Certificate | Used by | Picked up |
+| --- | --- | --- |
+| `openbao.pem` | OpenBao's listener | `tls_auto_reload`, within 30 s |
+| `openbao-client.pem` (web) | web → OpenBao | `ReloadingPemKeyManager`, on the next connection (checked every 10 s) |
+| `openbao-client.pem` (`openbao-cli`) | the `bao` CLI in OpenBao, openbao-init, openbao-db-init, cert-renewer | read on every run |
+| `app.pem` | web's server cert, Caddy → web | Tomcat (`reload-on-update`), ~10 s after the change |
+| `app-client.pem` | web → optimizer | `ReloadingPemKeyManager`, on the next connection |
+| `app-client.pem` | web → postgres | pgjdbc reads it on every new connection |
+| `optimizer.pem` | the optimizer's server cert | each uvicorn worker checks every 30 s (`optimizer/app/tls_reload.py`) |
+| `caddy-client.pem` | Caddy → web | `caddy/run.sh` checks every 60 s and runs `caddy reload` |
+| `postgres.pem` | postgres's server cert | cert-renewer runs `SELECT pg_reload_conf()` |
+| `postgres-admin-client.pem` | OpenBao's database engine | read on every new connection |
+
+Certificates and keys are replaced one after the other. A service that catches a new certificate with the old key keeps its current pair and tries again.
+
+The trust anchors are **not** renewed while running, because every service would have to switch to a new one at the same moment. They last long: the PKI root 10 years, its intermediate 5, OpenBao's TLS CA 10. cert-renewer logs a warning every round once one has less than a year left. To replace OpenBao's TLS CA, remove the `openbao_tls_ca` volume, then `docker compose down && docker compose up -d` (and unseal, in prod). To replace the PKI, start OpenBao over (see the table above).
+
+> **Upgrading a stack from before cert-renewer:** the first `up` makes OpenBao's TLS CA again, because the old one's key wasn't kept, and a running OpenBao only reads its CA when it starts. So upgrade with `docker compose down && docker compose up -d` (in prod, unseal OpenBao in between, as after any restart).
+
+**OpenBao's web UI in dev** (https://localhost:8200) needs a client certificate in the browser. Export web's as a PKCS#12 file and import it:
+
+```
+docker compose -f docker-compose.yml -f docker-compose.dev.yml run --rm -T --no-deps -e P12_PASSWORD=<choose one> \
+  --entrypoint openssl openbao-tls-init pkcs12 -export -passout env:P12_PASSWORD \
+  -in /openbao/certs/web/openbao-client.pem -inkey /openbao/certs/web/openbao-client-key.pem > openbao-client.p12
+```
+
+It's renewed every 60 days or so, so export it again when the browser stops accepting it.
 
 ## Build & test
 

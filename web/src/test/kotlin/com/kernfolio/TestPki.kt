@@ -15,11 +15,14 @@ import java.nio.file.attribute.PosixFilePermissions
  * its intermediate. File names match the certs_* volumes; they're all in one
  * dir here, so [dir] can stand in for any service's /openbao/certs.
  *
+ * `<stem>-renewed` is a second cert for app, app-client and optimizer, as
+ * cert-renewer would issue it, for the reload tests.
+ *
  * `foreign-client` comes from an unrelated root CA (CN `app`, like the real
  * app cert) for "wrong CA" negative tests.
  *
- * Also holds [OpenBaoTls]'s `openbao-ca.pem` and `openbao-client.p12`, as
- * certs_web does, for Spring Cloud Vault's mTLS to OpenBao.
+ * Also holds [OpenBaoTls]'s `openbao-ca.pem`, `openbao-client.pem` and
+ * `openbao-client-key.pem`, as certs_web does, for web's mTLS to OpenBao.
  *
  * Started once per test JVM and shared by all test classes.
  */
@@ -31,8 +34,8 @@ object TestPki {
     private val openBao = OpenBaoContainer(TOKEN)
 
     init {
-        for (file in listOf(OpenBaoTls.CA, OpenBaoTls.WEB_P12)) {
-            Files.copy(OpenBaoTls.dir.resolve(file), dir.resolve(file))
+        for ((file, name) in OpenBaoTls.WEB_FILES + (OpenBaoTls.CA to OpenBaoTls.CA)) {
+            Files.copy(OpenBaoTls.dir.resolve(file), dir.resolve(name))
         }
         openBao.start()
         openBao.bao("secrets", "enable", "pki")
@@ -61,6 +64,10 @@ object TestPki {
         issue("pki_int", "caddy", null, "caddy-client")
         issue("pki_int", "postgres", "localhost", "postgres")
         issue("pki_int", "kernfolio", null, "postgres-admin-client")
+        // What cert-renewer would put in their place, for the reload tests.
+        issue("pki_int", "app", "web,localhost", "app-renewed")
+        issue("pki_int", "app", null, "app-client-renewed")
+        issue("pki_int", "optimizer", "localhost", "optimizer-renewed")
 
         write("pki_foreign/root/generate/internal", mapOf(
             "common_name" to "Unrelated CA", "key_type" to "ed25519", "ttl" to "24h",

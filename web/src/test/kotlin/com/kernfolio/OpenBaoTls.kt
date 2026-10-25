@@ -18,13 +18,20 @@ import javax.net.ssl.TrustManagerFactory
  * Mutual-TLS material for OpenBao's listener in the test containers, made by
  * the real openbao/init/setup-tls.sh in the real openbao-init image, as
  * openbao-tls-init does in compose. [dir] holds certs_openbao's files
- * ([OPENBAO_FILES]) plus web's [WEB_P12].
+ * ([OPENBAO_FILES]) plus web's client cert and key, as [WEB_CERT] and
+ * [WEB_KEY] (in certs_web they're openbao-client.pem and -key.pem, the same
+ * names as the CLI's).
  *
  * Made once per test JVM and shared by every [OpenBaoContainer].
  */
 object OpenBaoTls {
     const val CA = "openbao-ca.pem"
-    const val WEB_P12 = "openbao-client.p12"
+    /** Prefix of the renewed copies in [dir]: same CA, new server and web client leaves. */
+    const val RENEWED = "renewed-"
+    const val WEB_CERT = "web-openbao-client.pem"
+    const val WEB_KEY = "web-openbao-client-key.pem"
+    /** [WEB_CERT] and [WEB_KEY] by their names in certs_web. */
+    val WEB_FILES = mapOf(WEB_CERT to "openbao-client.pem", WEB_KEY to "openbao-client-key.pem")
     val OPENBAO_FILES = listOf("openbao.pem", "openbao-key.pem", "openbao-client.pem", "openbao-client-key.pem", CA)
 
     /** The openbao-init image (openbao/Dockerfile), shared with the init script tests. */
@@ -40,31 +47,46 @@ object OpenBaoTls {
             init.withCommand("tail", "-f", "/dev/null")
             init.withCreateContainerCmdModifier { it.withUser("0:0") }
             init.start()
-            val result = init.execInContainer("sh", "-c", "mkdir -p /openbao/certs/openbao /openbao/certs/web && /openbao/init/setup-tls.sh")
+            val result = init.execInContainer("sh", "-c", "mkdir -p /openbao/certs/openbao /openbao/certs/web /openbao/tls-ca && /openbao/init/setup-tls.sh")
             check(result.exitCode == 0) { "setup-tls.sh failed: ${result.stdout}\n${result.stderr}" }
-            copyOut(dir) { path -> init.execInContainer("base64", path).also { check(it.exitCode == 0) { it.stderr } }.stdout }
+            val base64Of = { path: String -> init.execInContainer("base64", path).also { check(it.exitCode == 0) { it.stderr } }.stdout }
+            copyOut(dir, base64Of = base64Of)
+            // Renewed leaves from the same CA, as cert-renewer makes them, for the reload tests.
+            val renewal = init.execInContainer("sh", "-c", "rm /openbao/certs/openbao/openbao.pem /openbao/certs/web/openbao-client.pem && /openbao/init/setup-tls.sh --leaves-only")
+            check(renewal.exitCode == 0) { "setup-tls.sh --leaves-only failed: ${renewal.stdout}\n${renewal.stderr}" }
+            copyOut(dir, RENEWED, base64Of)
+        }
+    }
+
+    /** Copies openbao/init (scripts and policies) into [container], as compose mounts it. */
+    fun copyInitScripts(container: GenericContainer<*>) {
+        for (script in listOf("common.sh", "pki-certs.sh")) {
+            container.withCopyFileToContainer(KernfolioPostgresContainer.repoFile("openbao/init/$script"), "/openbao/init/$script")
+        }
+        for (script in listOf("setup-tls.sh", "setup.sh", "renew.sh")) {
+            container.withCopyFileToContainer(KernfolioPostgresContainer.repoFile("openbao/init/$script", 0b111_101_101), "/openbao/init/$script")
+        }
+        for (policy in listOf("kernfolio-app", "kernfolio-cert-renewer")) {
+            container.withCopyFileToContainer(KernfolioPostgresContainer.repoFile("openbao/init/policies/$policy.hcl"), "/openbao/init/policies/$policy.hcl")
         }
     }
 
     /**
-     * Copies certs_openbao's files and web's PKCS#12 from a container where
-     * setup-tls.sh ran into [target], reading each through [base64Of] (path ->
-     * base64 of its bytes): `docker cp` doesn't see tmpfs mounts.
+     * Copies certs_openbao's files and web's client cert and key from a
+     * container where setup-tls.sh ran into [target], reading each through
+     * [base64Of] (path -> base64 of its bytes): `docker cp` doesn't see tmpfs
+     * mounts.
      */
-    fun copyOut(target: Path, base64Of: (String) -> String) {
-        val sources = OPENBAO_FILES.associateWith { "/openbao/certs/openbao/$it" } + (WEB_P12 to "/openbao/certs/web/$WEB_P12")
+    fun copyOut(target: Path, prefix: String = "", base64Of: (String) -> String) {
+        val sources = OPENBAO_FILES.associateWith { "/openbao/certs/openbao/$it" } +
+            WEB_FILES.mapValues { "/openbao/certs/web/${it.value}" }
         for ((file, source) in sources) {
-            Files.write(target.resolve(file), Base64.getMimeDecoder().decode(base64Of(source).trim()))
+            Files.write(target.resolve(prefix + file), Base64.getMimeDecoder().decode(base64Of(source).trim()))
         }
     }
 
-    /**
-     * Web's client key store, loaded like Spring Vault does with no
-     * key-store-password: a null store password, then an empty key password.
-     */
-    fun webKeyStore(tlsDir: Path = dir): KeyStore = KeyStore.getInstance("PKCS12").apply {
-        Files.newInputStream(tlsDir.resolve(WEB_P12)).use { load(it, null) }
-    }
+    /** Web's client cert and key, as a key store. */
+    fun webKeyStore(tlsDir: Path = dir): KeyStore = pemKeyStore(tlsDir.resolve(WEB_CERT), tlsDir.resolve(WEB_KEY))
 
     /** A key store holding a PEM cert chain + key, e.g. one of [TestPki]'s. */
     fun pemKeyStore(cert: Path, key: Path): KeyStore = KeyStore.getInstance("PKCS12").apply {
@@ -84,7 +106,8 @@ object OpenBaoTls {
     fun httpClient(tlsDir: Path = dir, clientKeys: KeyStore? = webKeyStore(tlsDir)): HttpClient =
         HttpClient.newBuilder().sslContext(sslContext(tlsDir, clientKeys)).build()
 
-    private fun sslContext(tlsDir: Path, clientKeys: KeyStore?): SSLContext {
+    /** A new context each time, so no TLS session is resumed across calls. */
+    fun sslContext(tlsDir: Path = dir, clientKeys: KeyStore? = webKeyStore(tlsDir)): SSLContext {
         val trustStore = KeyStore.getInstance(KeyStore.getDefaultType()).apply { load(null, null) }
         CertificateFactory.getInstance("X.509")
             .generateCertificates(ByteArrayInputStream(Files.readAllBytes(tlsDir.resolve(CA))))

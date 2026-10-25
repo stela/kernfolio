@@ -14,7 +14,12 @@ import org.testcontainers.containers.wait.strategy.Wait
 import org.testcontainers.images.builder.ImageFromDockerfile
 import org.testcontainers.utility.MountableFile
 import org.yaml.snakeyaml.Yaml
+import org.springframework.boot.ssl.pem.PemContent
 import java.io.IOException
+import java.math.BigInteger
+import java.security.cert.X509Certificate
+import java.time.Duration
+import javax.net.ssl.SSLSocket
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -44,6 +49,8 @@ class OptimizerMtlsIntegrationTest {
 
         private val optimizer = GenericContainer(image).apply {
             withExposedPorts(8000)
+            // app/tls_reload.py: look for a renewed server cert every second, not 30.
+            withEnv("CERT_CHECK_INTERVAL", "1")
             for (file in listOf("ca.pem", "optimizer.pem", "optimizer-key.pem", "optimizer-client.pem", "optimizer-client-key.pem")) {
                 // On the volume the keys belong to the optimizer's uid at 0600; here
                 // they're root-owned copies, so readable (uvicorn doesn't check).
@@ -112,6 +119,33 @@ class OptimizerMtlsIntegrationTest {
             .isInstanceOf(WebClientRequestException::class.java)
             .rootCause().hasMessageContaining("127.0.0.1")
     }
+
+    @Test
+    fun `every worker serves a renewed optimizer_pem without a restart`() {
+        assertThat(servedSerials()).containsOnly(serial("optimizer"))
+
+        // As cert-renewer's place(): key first, then cert.
+        optimizer.copyFileToContainer(MountableFile.forHostPath(TestPki.key("optimizer-renewed"), 0b110_100_100), "/openbao/certs/optimizer-key.pem")
+        optimizer.copyFileToContainer(MountableFile.forHostPath(TestPki.cert("optimizer-renewed"), 0b110_100_100), "/openbao/certs/optimizer.pem")
+
+        eventually(Duration.ofSeconds(30)) {
+            // One line per worker process: each has its own SSLContext.
+            assertThat(Regex("Reloaded the TLS certificate").findAll(optimizer.logs).count()).isEqualTo(2)
+        }
+        assertThat(servedSerials()).containsOnly(serial("optimizer-renewed"))
+        assertThat(webClient().get().uri("/health").retrieve().toBodilessEntity().block()!!.statusCode.value()).isEqualTo(200)
+    }
+
+    private fun serial(stem: String): BigInteger = PemContent.load(TestPki.cert(stem)).getCertificates().first().serialNumber
+
+    /** Server cert serials of 10 new connections, each with a new context: no session resumption. */
+    private fun servedSerials(): Set<BigInteger> = (1..10).map {
+        val context = ForcedClientCert.sslContext(TestPki.cert("app-client"), TestPki.key("app-client"), TestPki.cert("ca"))
+        (context.socketFactory.createSocket("localhost", optimizer.getMappedPort(8000)) as SSLSocket).use { socket ->
+            socket.startHandshake()
+            (socket.session.peerCertificates.first() as X509Certificate).serialNumber
+        }
+    }.toSet()
 
     @Test
     fun `compose healthcheck passes against the mTLS server`() {
