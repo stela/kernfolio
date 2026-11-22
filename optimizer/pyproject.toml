@@ -5,7 +5,7 @@ license = "AGPL-3.0-only"
 requires-python = ">=3.14"
 dependencies = [
     "fastapi>=0.141",
-    "uvicorn[standard]>=0.41",
+    "uvicorn[standard]>=0.54",   # run_mtls.py: Multiprocess(config, sockets)
     "pydantic>=2.12",
     "numpy>=2.4,<3",
     "scipy>=1.17",
