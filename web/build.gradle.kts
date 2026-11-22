@@ -1,3 +1,4 @@
+import org.springframework.boot.buildpack.platform.build.PullPolicy
 import org.springframework.boot.gradle.tasks.bundling.BootBuildImage
 
 plugins {
@@ -70,6 +71,9 @@ tasks.named<BootBuildImage>("bootBuildImage") {
     // JRE and app. No shell, wget, curl, or nc, which is why the compose
     // service for this image has no HEALTHCHECK. See docker-compose.yml.
     environment.put("BP_JVM_VERSION", "25")
+    // Always fetch the current builder and run image: the JRE (and its security
+    // patches) comes from the builder's Liberica buildpack. Also the default.
+    pullPolicy.set(PullPolicy.ALWAYS)
     // The Spring Boot buildpack would add Spring Cloud Bindings, which doesn't
     // work with Boot 4.2 (startup fails on a missing EnvironmentPostProcessor)
     // and which we don't use.

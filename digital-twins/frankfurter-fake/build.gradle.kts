@@ -1,3 +1,4 @@
+import org.springframework.boot.buildpack.platform.build.PullPolicy
 import org.springframework.boot.gradle.tasks.bundling.BootBuildImage
 
 plugins {
@@ -19,6 +20,9 @@ dependencies {
 tasks.named<BootBuildImage>("bootBuildImage") {
     imageName.set("kernfolio-frankfurter-twin:latest")
     environment.put("BP_JVM_VERSION", "25")
+    // Always fetch the current builder and run image: the JRE (and its security
+    // patches) comes from the builder's Liberica buildpack. Also the default.
+    pullPolicy.set(PullPolicy.ALWAYS)
     // Spring Cloud Bindings (added by the Spring Boot buildpack) breaks Boot 4.2 apps.
     environment.put("BP_SPRING_CLOUD_BINDINGS_DISABLED", "true")
 }

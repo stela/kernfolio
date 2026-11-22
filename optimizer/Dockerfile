@@ -10,8 +10,10 @@
 # stage is the same Debian release, so the glibc matches.
 FROM debian:trixie-slim AS build
 
-# Pin uv to a specific release for reproducibility.
-COPY --from=ghcr.io/astral-sh/uv:0.11.7 /uv /uvx /usr/local/bin/
+# Pin uv to a specific release for reproducibility. The pin also decides the
+# CPython patch release: `uv python install` takes the newest 3.14.x this uv
+# release knows about (0.11.7 still installed 3.14.4), so bump it regularly.
+COPY --from=ghcr.io/astral-sh/uv:0.13.9 /uv /uvx /usr/local/bin/
 
 # Python lands at the same path in both stages; the venv's interpreter links
 # to it. (No UV_COMPILE_BYTECODE: it adds ~120 MB; as before, modules compile

@@ -74,9 +74,14 @@ val dockerExecutable: String = listOf(
     "/usr/bin/docker",
 ).firstOrNull { java.io.File(it).canExecute() } ?: "docker"
 
+// Every image build starts from the newest upstream base: `--pull` re-fetches
+// FROM images (debian, distroless, caddy, openbao) even when a local copy exists,
+// and bootBuildImage pulls the Paketo builder and run image (PullPolicy.ALWAYS in
+// each JVM module). Security fixes such as a new JRE or CPython patch then land
+// with the next `./gradlew dockerBuild(Dev)`, not only after `docker system prune`.
 val dockerComposeBuildProd = tasks.register<Exec>("dockerComposeBuildProd") {
     description = "Build Dockerfile-based compose services for production"
-    commandLine(dockerExecutable, "compose", "build", "optimizer", "openbao-init", "caddy")
+    commandLine(dockerExecutable, "compose", "build", "--pull", "optimizer", "openbao-init", "caddy")
 }
 
 val dockerComposeBuildDev = tasks.register<Exec>("dockerComposeBuildDev") {
@@ -84,14 +89,22 @@ val dockerComposeBuildDev = tasks.register<Exec>("dockerComposeBuildDev") {
     commandLine(
         dockerExecutable, "compose",
         "-f", "docker-compose.yml", "-f", "docker-compose.dev.yml",
-        "build", "optimizer", "openbao-init", "caddy",
+        "build", "--pull", "optimizer", "openbao-init", "caddy",
     )
+}
+
+// The services that run an upstream image as is: refresh them too, so `up`
+// doesn't keep starting a stale local copy of the same tag.
+val dockerPullUpstream = tasks.register<Exec>("dockerPullUpstream") {
+    description = "Pull the upstream images compose runs unmodified (postgres, openbao)"
+    group = "docker"
+    commandLine(dockerExecutable, "compose", "pull", "postgres", "openbao")
 }
 
 val dockerBuild = tasks.register("dockerBuild") {
     description = "Build production Docker images (web JVM image + optimizer + openbao-init + caddy)"
     group = "docker"
-    dependsOn(":web:bootBuildImage", dockerComposeBuildProd)
+    dependsOn(":web:bootBuildImage", dockerComposeBuildProd, dockerPullUpstream)
 }
 
 val dockerBuildDev = tasks.register("dockerBuildDev") {
@@ -102,6 +115,7 @@ val dockerBuildDev = tasks.register("dockerBuildDev") {
         ":digital-twins:yfinance-fake:bootBuildImage",
         ":digital-twins:frankfurter-fake:bootBuildImage",
         dockerComposeBuildDev,
+        dockerPullUpstream,
     )
 }
 

@@ -55,7 +55,7 @@ Services, ports, and resource footprint:
 | web | 8443 (internal only, mTLS) | 512 MiB | ~345 MiB | `kernfolio-web:latest` (buildpack) | ~472 MB |
 | optimizer | 8000 | 512 MiB | ~370 MiB | `kernfolio-optimizer:latest` (distroless cc + uv-managed CPython 3.14) | ~482 MB |
 | postgres | 5432 | 256 MiB | ~48 MiB | `postgres:18-alpine` | ~281 MB |
-| openbao | 8200 (TLS) | 512 MiB | ~70 MiB | `openbao/openbao:2.7.1` | ~181 MB |
+| openbao | 8200 (TLS) | 512 MiB | ~70 MiB | `openbao/openbao:2.7.3` | ~181 MB |
 | yfinance-twin | 8081 | 256 MiB | ~140 MiB | `kernfolio-yfinance-twin:latest` (buildpack) | ~353 MB |
 | frankfurter-twin | 8082 | 256 MiB | ~125 MiB | `kernfolio-frankfurter-twin:latest` (buildpack) | ~352 MB |
 | caddy | 443 (dev); 80 + 443 (prod) | 64 MiB | ~17 MiB | `kernfolio-caddy:latest` (caddy:2-alpine, non-root) | ~104 MB |

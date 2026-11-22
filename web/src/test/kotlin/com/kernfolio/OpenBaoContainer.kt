@@ -22,7 +22,7 @@ import java.security.SecureRandom
  * fails the test on a non-zero exit instead of only logging it.
  */
 class OpenBaoContainer(val token: String, private val tlsDir: Path = OpenBaoTls.dir) :
-    GenericContainer<OpenBaoContainer>(DockerImageName.parse("openbao/openbao:2.7.1")) {
+    GenericContainer<OpenBaoContainer>(DockerImageName.parse("openbao/openbao:2.7.3")) {
 
     init {
         withExposedPorts(PORT)

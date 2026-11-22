@@ -1,7 +1,7 @@
 # Image for the one-shot openbao-tls-init, openbao-init and openbao-db-init
 # containers: the OpenBao CLI plus openssl (setup-tls.sh), jq and psql. The
 # server runs the stock image.
-FROM openbao/openbao:2.7.1
+FROM openbao/openbao:2.7.3
 
 USER root
 RUN apk add --no-cache jq openssl postgresql18-client

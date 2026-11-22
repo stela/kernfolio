@@ -38,7 +38,7 @@ services:
 
   openbao:
     <<: *hardened
-    image: openbao/openbao:2.7.1
+    image: openbao/openbao:2.7.3
     user: "100:1000"
     mem_limit: 512m
     environment:
