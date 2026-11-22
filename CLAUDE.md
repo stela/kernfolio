@@ -175,7 +175,7 @@ Gotchas, all verified:
 
 ### Certificate renewal
 
-`cert-renewer` (`openbao/init/renew.sh`, openbao-init's image, user and caps, after openbao-init and a healthy postgres) runs a round every `RENEW_INTERVAL` (3600 s; a failed round, e.g. OpenBao sealed, retries after `RETRY_INTERVAL`, 60 s): `setup-tls.sh --leaves-only` (first: it needs no OpenBao, and everything after needs the CLI's client cert), renew both tokens, `issue_service_certs` (pki-certs.sh), `pg_reload_conf()` if `postgres.pem` is newer than `certs_renewer/postgres-reloaded`, and a warning for any trust anchor with less than a year left (never renewed while running). `renew.sh --once` runs one round. `CertRenewerIntegrationTest` runs it against real OpenBao and postgres on docker volumes.
+`cert-renewer` (`openbao/init/renew.sh`, openbao-init's image, user and caps, after openbao-init and a healthy postgres) runs a round every `RENEW_INTERVAL` (3600 s; a failed round, e.g. OpenBao sealed, retries after `RETRY_INTERVAL`, 60 s): `setup-tls.sh --leaves-only` (first: it needs no OpenBao, and everything after needs the CLI's client cert), renew both tokens, `issue_service_certs` (pki-certs.sh), `pg_reload_conf()` if `postgres.pem`'s fingerprint differs from the one in `certs_renewer/postgres-reloaded` (not an mtime: `-nt` has 1 s resolution), and a warning for any trust anchor with less than a year left (never renewed while running). `renew.sh --once` runs one round. `CertRenewerIntegrationTest` runs it against real OpenBao and postgres on docker volumes.
 
 How each consumer picks up a renewed cert, with no restart (README has the table):
 - OpenBao listener: `tls_auto_reload`, a 30 s hash poll.

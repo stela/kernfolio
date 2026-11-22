@@ -31,15 +31,19 @@ PG_HOST="${PG_HOST:-postgres}"
 
 require_dirs "$WEB_DIR" "$CADDY_DIR" "$OPTIMIZER_DIR" "$POSTGRES_DIR" "$OPENBAO_DIR" "$RENEWER_DIR" "$TLS_CA_DIR"
 
-# Postgres reads its cert only at start and on reload. Touched after each
-# successful reload, so a reload that failed (postgres down) is retried.
+# Postgres reads its cert only at start and on reload. Holds the fingerprint
+# of the postgres.pem the last successful reload loaded, so a reload that
+# failed (postgres down) is retried. A fingerprint, not an mtime: -nt has
+# 1 s resolution, so a cert replaced within the second of the last reload
+# would otherwise never be loaded.
 PG_RELOADED=$RENEWER_DIR/postgres-reloaded
 
-# reload_postgres: pg_reload_conf() if postgres.pem is newer than the last
-# reload. As the superuser, over mTLS with its cert (like openbao-db-init).
+# reload_postgres: pg_reload_conf() if postgres.pem isn't the cert postgres
+# last loaded. As the superuser, over mTLS with its cert (like openbao-db-init).
 reload_postgres() {
-  [ -e "$PG_RELOADED" ] && [ ! "$POSTGRES_DIR/postgres.pem" -nt "$PG_RELOADED" ] && return 0
-  local key
+  local current key
+  current="$(openssl x509 -in "$POSTGRES_DIR/postgres.pem" -noout -fingerprint -sha256)" || return 1
+  [ -e "$PG_RELOADED" ] && [ "$(cat "$PG_RELOADED")" = "$current" ] && return 0
   # libpq wants a key owned by the current user (root here), at 0600: mktemp's mode.
   key="$(mktemp)" || return 1
   cat "$OPENBAO_DIR/postgres-admin-client-key.pem" > "$key"
@@ -48,7 +52,7 @@ reload_postgres() {
     PGCHANNELBINDING=disable PGPASSWORD="$(cat "$OPENBAO_DIR/pg_root_password")" PGCONNECT_TIMEOUT=10 \
     psql -h "$PG_HOST" -U kernfolio -d kernfolio -qAtc 'SELECT pg_reload_conf()' >/dev/null; then
     echo "=== postgres reloaded its certificate ==="
-    touch "$PG_RELOADED"
+    printf '%s\n' "$current" > "$PG_RELOADED"
   else
     echo "WARNING: couldn't make postgres reload its certificate; retrying next round" >&2
   fi
