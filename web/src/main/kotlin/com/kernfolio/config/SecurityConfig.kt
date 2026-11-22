@@ -44,7 +44,7 @@ class SecurityConfig {
         }
         .headers { headers ->
             headers.referrerPolicy { it.policy(org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter.ReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN) }
-            headers.permissionsPolicy { it.policy("camera=(), microphone=(), geolocation=()") }
+            headers.permissionsPolicyHeader { it.policy("camera=(), microphone=(), geolocation=()") }
         }
         .addFilterAfter(CspNonceFilter(), HeaderWriterFilter::class.java)
         .addFilterAfter(TenantFilter(), UsernamePasswordAuthenticationFilter::class.java)

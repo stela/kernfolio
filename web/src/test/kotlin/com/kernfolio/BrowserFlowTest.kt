@@ -35,7 +35,7 @@ import org.springframework.http.MediaType
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import org.testcontainers.Testcontainers
-import org.testcontainers.containers.BrowserWebDriverContainer
+import org.testcontainers.selenium.BrowserWebDriverContainer
 import org.testcontainers.utility.DockerImageName
 import java.math.BigDecimal
 import java.time.Duration
@@ -76,7 +76,7 @@ class BrowserFlowTest {
     @Autowired lateinit var instrumentRepository: InstrumentRepository
     @Autowired lateinit var jdbcTemplate: org.springframework.jdbc.core.JdbcTemplate
 
-    private lateinit var chrome: BrowserWebDriverContainer<*>
+    private lateinit var chrome: BrowserWebDriverContainer
     private lateinit var driver: RemoteWebDriver
     private lateinit var wait: WebDriverWait
 
@@ -105,11 +105,10 @@ class BrowserFlowTest {
         // Chromium rather than the default standalone-chrome image: Chrome is
         // only built for amd64, so on arm64 hosts it ran under emulation and
         // was slow enough to time out waits. Same version as selenium-java.
-        chrome = BrowserWebDriverContainer<Nothing>(
+        chrome = BrowserWebDriverContainer(
             DockerImageName.parse("selenium/standalone-chromium:4.51.0")
                 .asCompatibleSubstituteFor("selenium/standalone-chrome")
         ).apply {
-            withCapabilities(chromeOptions)
             withRecordingMode(BrowserWebDriverContainer.VncRecordingMode.SKIP, null)
             withEnv("LANG", "sv_SE.UTF-8")
             withEnv("LANGUAGE", "sv_SE:sv")
@@ -154,7 +153,7 @@ class BrowserFlowTest {
     }
 
     private fun waitForPortfolioDetail() {
-        wait.until { driver.currentUrl?.matches(Regex(".*/portfolios/[0-9a-f-]{36}$")) == true }
+        wait.until { driver.currentUrl.matches(Regex(".*/portfolios/[0-9a-f-]{36}$")) }
     }
 
     // sv-SE uses no-break spaces for digit grouping and before "%". Fold
@@ -165,7 +164,7 @@ class BrowserFlowTest {
             "SELECT expected_return, return_stddev FROM positions WHERE ticker = ?",
             { rs, _ -> rs.getBigDecimal(1) to rs.getBigDecimal(2) },
             ticker,
-        )!!
+        )
 
     private fun visibleText(by: By): String =
         driver.findElement(by).text.replace('\u00a0', ' ').replace('\u202f', ' ')
@@ -265,7 +264,7 @@ class BrowserFlowTest {
         driver.findElement(By.cssSelector("button[type='submit']")).click()
 
         waitForPortfolioDetail()
-        portfolioPath = driver.currentUrl!!.replace(baseUrl(), "")
+        portfolioPath = driver.currentUrl.replace(baseUrl(), "")
         assertPageContains("Browser Portfolio")
     }
 
@@ -450,7 +449,7 @@ class BrowserFlowTest {
         // test could see it.
         driver.findElement(By.cssSelector("#optimize-form button[type='submit']")).click()
         waitForUrl("/results/")
-        resultsPath = driver.currentUrl!!.replace(baseUrl(), "")
+        resultsPath = driver.currentUrl.replace(baseUrl(), "")
     }
 
     @Test
@@ -592,7 +591,7 @@ class BrowserFlowTest {
         driver.findElement(By.cssSelector("button[type='submit']")).click()
         waitForPortfolioDetail()
 
-        val xssPortfolioPath = driver.currentUrl!!.replace(baseUrl(), "")
+        val xssPortfolioPath = driver.currentUrl.replace(baseUrl(), "")
 
         // Script should NOT have executed
         val xssFlag = driver.executeScript("return window.__xss")
@@ -644,7 +643,7 @@ class BrowserFlowTest {
         fillField("baseCurrency", "EUR")
         driver.findElement(By.cssSelector("button[type='submit']")).click()
         waitForPortfolioDetail()
-        val xssPfPath = driver.currentUrl!!.replace(baseUrl(), "")
+        val xssPfPath = driver.currentUrl.replace(baseUrl(), "")
 
         // Save is blocked without a total portfolio value set.
         driver.findElement(By.id("total-value-input")).sendKeys("100000")
@@ -728,7 +727,7 @@ class BrowserFlowTest {
         driver.findElement(By.cssSelector("button[type='submit']")).click()
 
         // Should show error page (invalid invite code) — wait for re-render since URL stays /register
-        wait.until { driver.pageSource?.contains("Invalid or expired") == true }
+        wait.until { driver.pageSource.contains("Invalid or expired") }
         assertPageContains("Invalid or expired")
         assertThat(driver.pageSource).doesNotContain("<script>alert('xss')</script>")
     }
@@ -769,7 +768,7 @@ class BrowserFlowTest {
         fillField("baseCurrency", "EUR")
         driver.findElement(By.cssSelector("button[type='submit']")).click()
         waitForPortfolioDetail()
-        val pfPath = driver.currentUrl!!.replace(baseUrl(), "")
+        val pfPath = driver.currentUrl.replace(baseUrl(), "")
 
         driver.findElement(By.id("total-value-input")).sendKeys("100000")
 
@@ -849,7 +848,7 @@ class BrowserFlowTest {
         fillField("baseCurrency", "EUR")
         driver.findElement(By.cssSelector("button[type='submit']")).click()
         waitForPortfolioDetail()
-        val pfPath = driver.currentUrl!!.replace(baseUrl(), "")
+        val pfPath = driver.currentUrl.replace(baseUrl(), "")
 
         val totalInput = driver.findElement(By.id("total-value-input"))
 
