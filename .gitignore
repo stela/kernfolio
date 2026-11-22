@@ -34,8 +34,10 @@ venv/
 # Docker
 .env
 
-# Claude Code
-.claude/
+# Claude Code: local state and settings stay private, project skills are shared.
+# (".claude/*", not ".claude/": git can't re-include anything under an ignored directory.)
+.claude/*
+!.claude/skills/
 
 # Generated CSS
 web/src/main/resources/static/css/tailwind.css
