@@ -19,6 +19,8 @@ dependencies {
 tasks.named<BootBuildImage>("bootBuildImage") {
     imageName.set("kernfolio-yfinance-twin:latest")
     environment.put("BP_JVM_VERSION", "25")
+    // Spring Cloud Bindings (added by the Spring Boot buildpack) breaks Boot 4.2 apps.
+    environment.put("BP_SPRING_CLOUD_BINDINGS_DISABLED", "true")
 }
 
 tasks.withType<Test> {

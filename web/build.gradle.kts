@@ -9,7 +9,7 @@ plugins {
 }
 
 dependencies {
-    implementation("org.springframework.cloud:spring-cloud-starter-vault-config:5.0.3")
+    implementation("org.springframework.cloud:spring-cloud-starter-vault-config:5.1.0")
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.boot:spring-boot-starter-data-jdbc")
     implementation("org.springframework.boot:spring-boot-starter-security")
@@ -26,12 +26,6 @@ dependencies {
     implementation("org.webjars.npm:chart.js:4.5.1")
     implementation("org.postgresql:postgresql")
     implementation("org.springframework.boot:spring-boot-starter-mail")
-
-    constraints {
-        implementation("org.bouncycastle:bcprov-jdk18on:1.86") {
-            because("spring-cloud-starter 5.0.4 still pulls 1.85.2, which has known CVEs; drop once Spring Cloud catches up")
-        }
-    }
 
     developmentOnly("org.springframework.boot:spring-boot-devtools")
 
@@ -71,11 +65,15 @@ jte {
 
 tasks.named<BootBuildImage>("bootBuildImage") {
     imageName.set("kernfolio-web:latest")
-    // Default Paketo builder (noble-java-tiny) — a distroless-style runtime
-    // with only the JRE and app. No shell, wget, curl, or nc, which is why
-    // the compose service for this image has no HEALTHCHECK. See docker-
-    // compose.yml for the explanation.
+    // Default Paketo builder (ubuntu-resolute-builder since Boot 4.2), whose
+    // default run image ubuntu-resolute-run-tiny is distroless-style: only the
+    // JRE and app. No shell, wget, curl, or nc, which is why the compose
+    // service for this image has no HEALTHCHECK. See docker-compose.yml.
     environment.put("BP_JVM_VERSION", "25")
+    // The Spring Boot buildpack would add Spring Cloud Bindings, which doesn't
+    // work with Boot 4.2 (startup fails on a missing EnvironmentPostProcessor)
+    // and which we don't use.
+    environment.put("BP_SPRING_CLOUD_BINDINGS_DISABLED", "true")
 }
 
 tasks.withType<Test> {

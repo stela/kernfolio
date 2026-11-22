@@ -3,10 +3,16 @@ package com.kernfolio
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import jakarta.servlet.Filter
+import jakarta.servlet.http.HttpServletRequest
+import org.springframework.boot.security.autoconfigure.web.servlet.SecurityFilterProperties
 import org.springframework.boot.ssl.SslBundle
 import org.springframework.boot.ssl.pem.PemSslStoreBundle
 import org.springframework.boot.ssl.pem.PemSslStoreDetails
 import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.boot.test.context.TestConfiguration
+import org.springframework.boot.web.servlet.FilterRegistrationBean
+import org.springframework.context.annotation.Bean
 import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.context.annotation.Import
 import org.springframework.test.context.ActiveProfiles
@@ -37,11 +43,29 @@ import java.net.http.HttpResponse
  * the renewal test can replace app.pem without touching other tests' files.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Import(TestcontainersConfiguration::class)
+@Import(TestcontainersConfiguration::class, WebMtlsIntegrationTest.RequestUrlProbe::class)
 @ActiveProfiles("tls")
 class WebMtlsIntegrationTest {
 
+    /**
+     * Answers [PROBE] with `request.requestURL`, which is what the invite email's
+     * link is built from (AdminController). Runs after ClientCertCnFilter and just
+     * before Spring Security, so it sees the request exactly as the app does.
+     */
+    @TestConfiguration(proxyBeanMethods = false)
+    class RequestUrlProbe {
+        @Bean
+        fun requestUrlProbe() = FilterRegistrationBean(Filter { request, response, _ ->
+            response.writer.write((request as HttpServletRequest).requestURL.toString())
+        }).apply {
+            addUrlPatterns(PROBE)
+            order = SecurityFilterProperties.DEFAULT_FILTER_ORDER - 1
+        }
+    }
+
     companion object {
+        private const val PROBE = "/test-probe/request-url"
+
         private val certDir: Path = Files.createTempDirectory("kernfolio-web-mtls").also { dir ->
             Files.list(TestPki.dir).use { files -> files.forEach { Files.copy(it, dir.resolve(it.fileName)) } }
         }
@@ -79,13 +103,23 @@ class WebMtlsIntegrationTest {
     }
 
     @Test
-    fun `redirects honour the proxy's forwarded host and scheme`() {
+    fun `the app sees the proxy's forwarded host and scheme`() {
+        val response = get(
+            PROBE, client("caddy-client"),
+            "X-Forwarded-Proto" to "https", "X-Forwarded-Host" to "kernfolio.example",
+        )
+        assertThat(response.body()).isEqualTo("https://kernfolio.example$PROBE")
+    }
+
+    @Test
+    fun `redirects are relative, so they resolve against the browser's own URL`() {
+        // Tomcat's (and since Boot 4.2 the default) server.tomcat.servlet.use-relative-redirects.
         val response = get(
             "/admin/users", client("caddy-client"),
             "X-Forwarded-Proto" to "https", "X-Forwarded-Host" to "kernfolio.example",
         )
         assertThat(response.statusCode()).isEqualTo(302)
-        assertThat(response.headers().firstValue("Location")).hasValue("https://kernfolio.example/login")
+        assertThat(response.headers().firstValue("Location")).hasValue("/login")
     }
 
     @Test

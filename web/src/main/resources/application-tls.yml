@@ -12,8 +12,13 @@ server:
     client-auth: need
   # Caddy is the only peer that can connect, so its X-Forwarded-* headers are
   # trustworthy. Without this, redirects and the invite-email link would point
-  # at web:8443 instead of the external https host.
-  forward-headers-strategy: native
+  # at web:8443 instead of the external https host. `web-server` is Tomcat's
+  # RemoteIpValve (formerly `native`); X-Forwarded-Prefix stays ignored, which
+  # is Boot 4.2's default and what we want (Caddy sends none).
+  request:
+    header:
+      forwarded:
+        strategy: web-server
 
 spring:
   ssl:
