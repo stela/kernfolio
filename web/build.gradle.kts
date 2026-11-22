@@ -6,7 +6,7 @@ plugins {
     kotlin("plugin.spring")
     id("org.springframework.boot")
     id("io.spring.dependency-management")
-    id("gg.jte.gradle") version "3.2.4"
+    id("gg.jte.gradle") version "3.2.5"
 }
 
 dependencies {
@@ -21,10 +21,10 @@ dependencies {
     implementation("org.jetbrains.kotlin:kotlin-reflect")
     implementation("org.springframework.boot:spring-boot-liquibase")
     implementation("org.liquibase:liquibase-core")
-    implementation("gg.jte:jte:3.2.4")
-    implementation("gg.jte:jte-kotlin:3.2.4")
-    implementation("gg.jte:jte-spring-boot-starter-4:3.2.4")
-    implementation("org.webjars.npm:chart.js:4.5.1")
+    implementation("gg.jte:jte:3.2.5")
+    implementation("gg.jte:jte-kotlin:3.2.5")
+    implementation("gg.jte:jte-spring-boot-starter-4:3.2.5")
+    implementation("org.webjars.npm:chart.js:4.6.1")
     implementation("org.postgresql:postgresql")
     implementation("org.springframework.boot:spring-boot-starter-mail")
 
@@ -32,14 +32,14 @@ dependencies {
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.security:spring-security-test")
-    testImplementation("io.mockk:mockk:1.14.11")
+    testImplementation("io.mockk:mockk:1.14.12")
     testImplementation("org.wiremock:wiremock-standalone:3.13.2")
     testImplementation("org.testcontainers:testcontainers-junit-jupiter")
     testImplementation("org.testcontainers:testcontainers-postgresql")
     testImplementation("org.springframework.boot:spring-boot-testcontainers")
     testImplementation("org.seleniumhq.selenium:selenium-java:4.51.0")
     testImplementation("org.testcontainers:testcontainers-selenium")
-    testImplementation("com.icegreen:greenmail-junit5:2.1.14")
+    testImplementation("com.icegreen:greenmail-junit5:2.1.15")
     testRuntimeOnly("com.h2database:h2")
 }
 

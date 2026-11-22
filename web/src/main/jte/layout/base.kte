@@ -62,7 +62,7 @@
     <script src="/js/flash.js" nonce="${nonce}"></script>
     <script src="/js/format.js" nonce="${nonce}"></script>
     @if(includeChartJs)
-        <script src="/webjars/chart.js/4.5.1/dist/chart.umd.min.js" nonce="${nonce}"></script>
+        <script src="/webjars/chart.js/4.6.1/dist/chart.umd.min.js" nonce="${nonce}"></script>
     @endif
     ${scripts}
 </body>
