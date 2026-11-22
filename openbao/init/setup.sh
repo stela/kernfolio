@@ -146,18 +146,20 @@ if [ "$BOOTSTRAP" = 1 ]; then
   # Generate intermediate only if pki_int has no signed CA cert yet.
   if ! bao read pki_int/cert/ca 2>/dev/null | grep -q "BEGIN CERTIFICATE"; then
       echo "=== Generating intermediate CA ==="
-      bao write -format=json pki_int/intermediate/generate/internal \
+      # CSR and certificate are public: passed as values, no temp files. A pipeline's
+      # status is jq's, so an empty result is checked explicitly.
+      csr="$(bao write -format=json pki_int/intermediate/generate/internal \
         common_name="Kernfolio Dev Intermediate CA" \
-        key_type=ed25519 | \
-        jq -r '.data.csr' > /tmp/pki_int.csr
+        key_type=ed25519 | jq -r '.data.csr // empty')"
+      [ -n "$csr" ] || { echo "ERROR: no CSR for the intermediate CA" >&2; exit 1; }
 
-      bao write -format=json pki/root/sign-intermediate \
-        csr=@/tmp/pki_int.csr \
+      intermediate="$(bao write -format=json pki/root/sign-intermediate \
+        csr="$csr" \
         format=pem_bundle \
-        ttl=43800h | \
-        jq -r '.data.certificate' > /tmp/intermediate.pem
+        ttl=43800h | jq -r '.data.certificate // empty')"
+      [ -n "$intermediate" ] || { echo "ERROR: the root didn't sign the intermediate CA" >&2; exit 1; }
 
-      bao write pki_int/intermediate/set-signed certificate=@/tmp/intermediate.pem
+      bao write pki_int/intermediate/set-signed certificate="$intermediate"
   else
       echo "=== Reusing existing intermediate CA ==="
   fi

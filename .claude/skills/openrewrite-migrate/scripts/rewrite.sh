@@ -84,7 +84,9 @@ bom_args=()
 [[ -n "${REWRITE_BOM_VERSION:-}" ]] && bom_args=(--bom "$REWRITE_BOM_VERSION")
 
 tmp="$(mktemp -d)"   # honours $TMPDIR, like the repo's other scripts
-[[ -n "${REWRITE_KEEP_INIT:-}" ]] || trap 'rm -rf "$tmp"' EXIT
+# Remove exactly what plan writes, then the directory: no rm -rf on a computed path.
+cleanup() { rm -f -- "$tmp/rewrite.yml" "$tmp/rewrite.init.gradle"; rmdir -- "$tmp"; }
+[[ -n "${REWRITE_KEEP_INIT:-}" ]] || trap cleanup EXIT
 
 # Validates recipe names and options, writes $tmp/rewrite.yml and $tmp/rewrite.init.gradle.
 python3 -I "$catalog" plan --out "$tmp" ${bom_args[@]+"${bom_args[@]}"} "${args[@]}" >&2

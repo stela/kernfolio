@@ -60,8 +60,16 @@ CA_DAYS=3650
 CA_REDO_DAYS=90
 LEAF_SECONDS="${OPENBAO_TLS_LEAF_SECONDS:-$((90 * 86400))}"
 
+# Scratch files for openssl. Cleanup deletes these names only and then rmdirs,
+# never rm -rf: a wrong $work can't take anything else with it, and a file
+# added here but not to the list makes rmdir fail loudly instead.
+WORK_FILES="ca.ext ca-key.pem ca.csr ca.pem server.ext client.ext leaf-key.pem leaf.csr leaf.pem"
 work="$(mktemp -d)"
-trap 'rm -rf "$work"' EXIT
+remove_work() {
+  for f in $WORK_FILES; do rm -f -- "$work/$f"; done
+  rmdir -- "$work"
+}
+trap remove_work EXIT
 
 # One writer at a time: openbao-tls-init re-runs on every `up`, while
 # cert-renewer may be in a round.

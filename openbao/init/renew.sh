@@ -39,12 +39,12 @@ PG_RELOADED=$RENEWER_DIR/postgres-reloaded
 # reload. As the superuser, over mTLS with its cert (like openbao-db-init).
 reload_postgres() {
   [ -e "$PG_RELOADED" ] && [ ! "$POSTGRES_DIR/postgres.pem" -nt "$PG_RELOADED" ] && return 0
-  local tmp
-  tmp="$(mktemp -d)" || return 1
-  # libpq wants a key owned by the current user (root here), at 0600.
-  cat "$OPENBAO_DIR/postgres-admin-client-key.pem" > "$tmp/key.pem"
+  local key
+  # libpq wants a key owned by the current user (root here), at 0600: mktemp's mode.
+  key="$(mktemp)" || return 1
+  cat "$OPENBAO_DIR/postgres-admin-client-key.pem" > "$key"
   if PGSSLMODE=verify-full PGSSLROOTCERT="$OPENBAO_DIR/ca.pem" \
-    PGSSLCERT="$OPENBAO_DIR/postgres-admin-client.pem" PGSSLKEY="$tmp/key.pem" \
+    PGSSLCERT="$OPENBAO_DIR/postgres-admin-client.pem" PGSSLKEY="$key" \
     PGCHANNELBINDING=disable PGPASSWORD="$(cat "$OPENBAO_DIR/pg_root_password")" PGCONNECT_TIMEOUT=10 \
     psql -h "$PG_HOST" -U kernfolio -d kernfolio -qAtc 'SELECT pg_reload_conf()' >/dev/null; then
     echo "=== postgres reloaded its certificate ==="
@@ -52,13 +52,16 @@ reload_postgres() {
   else
     echo "WARNING: couldn't make postgres reload its certificate; retrying next round" >&2
   fi
-  rm -rf "$tmp"
+  rm -f -- "$key"
 }
 
-# warn_if_expiring <cert> <name>: less than a year left.
+# warn_if_expiring <name> < cert.pem: less than a year left. Reads the PEM
+# from stdin, so a cert fetched from OpenBao needs no temp file.
 warn_if_expiring() {
-  if ! openssl x509 -in "$1" -noout -checkend $((365 * 86400)) >/dev/null 2>&1; then
-    echo "WARNING: $2 expires $(openssl x509 -in "$1" -noout -enddate | cut -d= -f2); see README, \"Certificate renewal\"" >&2
+  local pem
+  pem="$(cat)"
+  if ! printf '%s\n' "$pem" | openssl x509 -noout -checkend $((365 * 86400)) >/dev/null 2>&1; then
+    echo "WARNING: $1 expires $(printf '%s\n' "$pem" | openssl x509 -noout -enddate | cut -d= -f2); see README, \"Certificate renewal\"" >&2
   fi
 }
 
@@ -74,10 +77,11 @@ round() {
   renew_tokens || return 1
   issue_service_certs || return 1
   reload_postgres
-  warn_if_expiring "$WEB_DIR/ca.pem" "The PKI root CA"
-  bao read -field=certificate pki_int/cert/ca > /tmp/intermediate.pem 2>/dev/null &&
-    warn_if_expiring /tmp/intermediate.pem "The PKI intermediate CA"
-  warn_if_expiring "$OPENBAO_CA" "OpenBao's TLS CA"
+  warn_if_expiring "The PKI root CA" < "$WEB_DIR/ca.pem"
+  local intermediate
+  intermediate="$(bao read -field=certificate pki_int/cert/ca 2>/dev/null)" &&
+    printf '%s\n' "$intermediate" | warn_if_expiring "The PKI intermediate CA"
+  warn_if_expiring "OpenBao's TLS CA" < "$OPENBAO_CA"
 }
 
 if [ "${1:-}" = --once ]; then
