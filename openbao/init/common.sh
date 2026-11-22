@@ -22,7 +22,7 @@ TLS_CA_DIR=/openbao/tls-ca
 WEB_UID=1002        # Paketo buildpack image (web)
 CADDY_UID=1000      # caddy/Dockerfile
 OPTIMIZER_UID=65532 # optimizer/Dockerfile (distroless `nonroot`)
-POSTGRES_UID=70     # postgres:18-alpine
+POSTGRES_UID=70     # postgres:19-alpine
 OPENBAO_UID=100     # openbao/openbao image: openbao server + openbao-db-init
 
 # Trust anchor for OpenBao's own listener (setup-tls.sh), separate from the

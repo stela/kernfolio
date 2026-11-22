@@ -62,13 +62,13 @@ class CertRenewerIntegrationTest {
 
         private lateinit var openBao: OpenBaoContainer
 
-        private val postgres = GenericContainer(DockerImageName.parse("postgres:18-alpine")).apply {
+        private val postgres = GenericContainer(DockerImageName.parse("postgres:19-alpine")).apply {
             withNetwork(sharedNetwork)
             withNetworkAliases("postgres")
             withEnv("POSTGRES_DB", "kernfolio")
             withEnv("POSTGRES_USER", "kernfolio")
             withEnv("POSTGRES_PASSWORD_FILE", "/openbao/certs/pg_root_password")
-            withEnv("PGDATA", "/var/lib/postgresql/data")
+            withEnv("PGDATA", "/var/lib/postgresql/data/19")   // as in docker-compose.yml
             withCopyFileToContainer(KernfolioPostgresContainer.repoFile("postgres/docker-entrypoint-tls.sh", 0b111_101_101), "/usr/local/bin/docker-entrypoint-tls.sh")
             withCopyFileToContainer(KernfolioPostgresContainer.repoFile("postgres/pg_hba_mtls.conf"), "/etc/postgresql/pg_hba.conf")
             withCreateContainerCmdModifier {

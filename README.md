@@ -54,7 +54,7 @@ Services, ports, and resource footprint:
 | --- | --- | --- | --- | --- | --- |
 | web | 8443 (internal only, mTLS) | 512 MiB | ~345 MiB | `kernfolio-web:latest` (buildpack) | ~472 MB |
 | optimizer | 8000 | 512 MiB | ~370 MiB | `kernfolio-optimizer:latest` (distroless cc + uv-managed CPython 3.14) | ~482 MB |
-| postgres | 5432 | 256 MiB | ~48 MiB | `postgres:18-alpine` | ~281 MB |
+| postgres | 5432 | 256 MiB | ~48 MiB | `postgres:19-alpine` | ~281 MB |
 | openbao | 8200 (TLS) | 512 MiB | ~70 MiB | `openbao/openbao:2.7.3` | ~181 MB |
 | yfinance-twin | 8081 | 256 MiB | ~140 MiB | `kernfolio-yfinance-twin:latest` (buildpack) | ~353 MB |
 | frankfurter-twin | 8082 | 256 MiB | ~125 MiB | `kernfolio-frankfurter-twin:latest` (buildpack) | ~352 MB |
@@ -214,6 +214,18 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml run --rm -T --no-
 ```
 
 It's renewed every 60 days or so, so export it again when the browser stops accepting it.
+
+## Upgrading PostgreSQL
+
+A new PostgreSQL major version can't open the previous one's data directory, so a commit that bumps the `postgres` image (and with it the `PGDATA` directory, one per major: `/var/lib/postgresql/data/19`) needs one dump and restore on every existing stack:
+
+```bash
+docker compose down                          # keeps the volumes
+scripts/postgres-major-upgrade.sh            # dev: COMPOSE_FILE=docker-compose.yml:docker-compose.dev.yml scripts/postgres-major-upgrade.sh
+docker compose up -d                         # prod: unseal OpenBao afterwards, as after any restart
+```
+
+The script starts the old cluster alone in a throwaway container without a network and dumps its roles (no passwords) and databases into `./pg-upgrade-<old>-to-<new>-<time>/`. It then starts only the new postgres, which initialises its directory with the same superuser password from `certs_postgres`, restores, runs `ANALYZE`, and checks that every table has the same number of rows as before. The old cluster stays untouched in the volume: to roll back, put the previous image and `PGDATA` back in `docker-compose.yml`. The dump directory holds all data (mode 0700), so delete it once the new version is in use. A fresh volume needs none of this.
 
 ## Build & test
 

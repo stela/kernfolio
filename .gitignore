@@ -49,3 +49,6 @@ web/jte-classes/
 # OS
 .DS_Store
 Thumbs.db
+
+# Dumps written by scripts/postgres-major-upgrade.sh (all data: never commit)
+pg-upgrade-*/

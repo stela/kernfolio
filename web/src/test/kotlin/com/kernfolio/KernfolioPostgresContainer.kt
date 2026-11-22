@@ -16,14 +16,14 @@ import java.nio.file.Path
  * other containers on the same network.
  */
 class KernfolioPostgresContainer(val superuserPassword: String = "kernfolio") :
-    GenericContainer<KernfolioPostgresContainer>(DockerImageName.parse("postgres:18-alpine")) {
+    GenericContainer<KernfolioPostgresContainer>(DockerImageName.parse("postgres:19-alpine")) {
 
     init {
         withExposedPorts(PORT)
         withEnv("POSTGRES_DB", DATABASE)
         withEnv("POSTGRES_USER", SUPERUSER)
         withEnv("POSTGRES_PASSWORD", superuserPassword)
-        withEnv("PGDATA", "/var/lib/postgresql/data")
+        withEnv("PGDATA", "/var/lib/postgresql/data/19")   // as in docker-compose.yml
         withCopyFileToContainer(repoFile("postgres/docker-entrypoint-tls.sh", 0b111_101_101), "/usr/local/bin/docker-entrypoint-tls.sh")
         withCopyFileToContainer(repoFile("postgres/pg_hba_mtls.conf"), "/etc/postgresql/pg_hba.conf")
         withCopyFileToContainer(repoFile("postgres/init-extensions.sql"), "/docker-entrypoint-initdb.d/init-extensions.sql")

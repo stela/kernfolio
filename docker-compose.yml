@@ -137,7 +137,7 @@ services:
 
   postgres:
     <<: *hardened
-    image: postgres:18-alpine
+    image: postgres:19-alpine
     # The image starts as root to fix data-dir ownership, then drops to
     # postgres (70) via gosu. Measured minimum for first boot + restart:
     # DAC_READ_SEARCH (not DAC_OVERRIDE) to look into the 0700 data dir,
@@ -158,12 +158,14 @@ services:
       # suffix pattern so the plaintext value never appears in env vars or
       # `docker inspect` output.
       POSTGRES_PASSWORD_FILE: /openbao/certs/pg_root_password
-      # Force Postgres 18 to use the path our named volume is mounted at.
-      # The official postgres:18-alpine image defaults PGDATA to
-      # /var/lib/postgresql/18/docker — outside our `pgdata` mount — so the
-      # cluster ends up in Docker's VOLUME-declared anonymous volume and is
-      # silently discarded on every `docker compose down && up` cycle.
-      PGDATA: /var/lib/postgresql/data
+      # Inside our `pgdata` mount, one directory per major version. The
+      # official image defaults PGDATA to /var/lib/postgresql/<major>/docker,
+      # outside the mount, so the cluster would end up in Docker's
+      # VOLUME-declared anonymous volume and be silently discarded on every
+      # `docker compose down && up`. Per-major directories let a major upgrade
+      # (scripts/postgres-major-upgrade.sh) build the new cluster next to the
+      # old one, which stays as it was; the pre-19 cluster is at the volume root.
+      PGDATA: /var/lib/postgresql/data/19
     volumes:
       - pgdata:/var/lib/postgresql/data
       - certs_postgres:/openbao/certs:ro
